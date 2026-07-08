@@ -1,0 +1,175 @@
+
+Collecting usage statistics. To deactivate, set browser.gatherUsageStats to false.
+
+2026-07-07 16:21:14.306 Uvicorn server started on :::8501
+
+  You can now view your Streamlit app in your browser.
+
+  Local URL: http://localhost:8501
+  Network URL: http://10.17.59.27:8501
+  External URL: http://118.70.205.180:8501
+
+Exception in callback _ProactorBasePipeTransport._call_connection_lost()
+handle: <Handle _ProactorBasePipeTransport._call_connection_lost()>
+Traceback (most recent call last):
+  File "C:\Users\kiennt9\AppData\Local\miniconda3\Lib\asyncio\events.py", line 89, in _run
+    self._context.run(self._callback, *self._args)
+    ~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\kiennt9\AppData\Local\miniconda3\Lib\asyncio\proactor_events.py", line 165, in _call_connection_lost
+    self._sock.shutdown(socket.SHUT_RDWR)
+    ~~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^
+ConnectionResetError: [WinError 10054] An existing connection was forcibly closed by the remote host
+2026-07-07 16:22:05.893 Please replace `use_container_width` with `width`.
+
+`use_container_width` will be removed after 2025-12-31.
+
+For `use_container_width=True`, use `width='stretch'`. For `use_container_width=False`, use `width='content'`.
+2026-07-07 16:22:08.293 Please replace `use_container_width` with `width`.
+
+`use_container_width` will be removed after 2025-12-31.
+
+For `use_container_width=True`, use `width='stretch'`. For `use_container_width=False`, use `width='content'`.
+2026-07-07 16:22:10.329 Please replace `use_container_width` with `width`.
+
+`use_container_width` will be removed after 2025-12-31.
+
+For `use_container_width=True`, use `width='stretch'`. For `use_container_width=False`, use `width='content'`.
+2026-07-07 16:22:10.938 Please replace `use_container_width` with `width`.
+
+`use_container_width` will be removed after 2025-12-31.
+
+For `use_container_width=True`, use `width='stretch'`. For `use_container_width=False`, use `width='content'`.
+2026-07-07 16:22:11.363 Please replace `use_container_width` with `width`.
+
+`use_container_width` will be removed after 2025-12-31.
+
+For `use_container_width=True`, use `width='stretch'`. For `use_container_width=False`, use `width='content'`.
+2026-07-07 16:22:13.485 Please replace `use_container_width` with `width`.
+
+`use_container_width` will be removed after 2025-12-31.
+
+For `use_container_width=True`, use `width='stretch'`. For `use_container_width=False`, use `width='content'`.
+2026-07-07 16:22:18.276 Please replace `use_container_width` with `width`.
+
+`use_container_width` will be removed after 2025-12-31.
+
+For `use_container_width=True`, use `width='stretch'`. For `use_container_width=False`, use `width='content'`.
+2026-07-07 17:08:28.713 Please replace `use_container_width` with `width`.
+
+`use_container_width` will be removed after 2025-12-31.
+
+For `use_container_width=True`, use `width='stretch'`. For `use_container_width=False`, use `width='content'`.
+2026-07-07 17:08:43.182 Please replace `use_container_width` with `width`.
+
+`use_container_width` will be removed after 2025-12-31.
+
+For `use_container_width=True`, use `width='stretch'`. For `use_container_width=False`, use `width='content'`.
+2026-07-07 17:08:43.288 Please replace `use_container_width` with `width`.
+
+`use_container_width` will be removed after 2025-12-31.
+
+For `use_container_width=True`, use `width='stretch'`. For `use_container_width=False`, use `width='content'`.
+2026-07-07 17:08:45.549 Please replace `use_container_width` with `width`.
+
+`use_container_width` will be removed after 2025-12-31.
+
+For `use_container_width=True`, use `width='stretch'`. For `use_container_width=False`, use `width='content'`.
+2026-07-07 17:08:45.641 Please replace `use_container_width` with `width`.
+
+`use_container_width` will be removed after 2025-12-31.
+
+For `use_container_width=True`, use `width='stretch'`. For `use_container_width=False`, use `width='content'`.
+2026-07-07 17:09:07.929 Please replace `use_container_width` with `width`.
+
+`use_container_width` will be removed after 2025-12-31.
+
+For `use_container_width=True`, use `width='stretch'`. For `use_container_width=False`, use `width='content'`.
+2026-07-07 17:09:29.657 Please replace `use_container_width` with `width`.
+
+`use_container_width` will be removed after 2025-12-31.
+
+For `use_container_width=True`, use `width='stretch'`. For `use_container_width=False`, use `width='content'`.
+2026-07-07 17:09:30.419 Please replace `use_container_width` with `width`.
+
+`use_container_width` will be removed after 2025-12-31.
+
+For `use_container_width=True`, use `width='stretch'`. For `use_container_width=False`, use `width='content'`.
+Exception in callback _ProactorBasePipeTransport._call_connection_lost()
+handle: <Handle _ProactorBasePipeTransport._call_connection_lost()>
+Traceback (most recent call last):
+  File "C:\Users\kiennt9\AppData\Local\miniconda3\Lib\asyncio\events.py", line 89, in _run
+    self._context.run(self._callback, *self._args)
+    ~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\kiennt9\AppData\Local\miniconda3\Lib\asyncio\proactor_events.py", line 165, in _call_connection_lost
+    self._sock.shutdown(socket.SHUT_RDWR)
+    ~~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^
+ConnectionResetError: [WinError 10054] An existing connection was forcibly closed by the remote host
++------------------------- Traceback (most recent call last) --------------------------+
+| C:\Users\kiennt9\AppData\Local\miniconda3\Lib\site-packages\streamlit\runtime\script |
+| runner\exec_code.py:129 in exec_func_with_error_handling                             |
+|                                                                                      |
+| C:\Users\kiennt9\AppData\Local\miniconda3\Lib\site-packages\streamlit\runtime\script |
+| runner\script_runner.py:795 in code_to_exec                                          |
+|                                                                                      |
+| C:\Users\kiennt9\Downloads\files (1)\tkb_app\app.py:30 in <module>                   |
+|                                                                                      |
+|   27         "2026-07-07 17:17:41.022 Uncaught app execution
+Traceback (most recent call last):
+  File "C:\Users\kiennt9\AppData\Local\miniconda3\Lib\site-packages\streamlit\runtime\scriptrunner\exec_code.py", line 129, in exec_func_with_error_handling
+    result = func()
+  File "C:\Users\kiennt9\AppData\Local\miniconda3\Lib\site-packages\streamlit\runtime\scriptrunner\script_runner.py", line 795, in code_to_exec
+    exec(code, module.__dict__)  # noqa: S102
+    ~~~~^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\kiennt9\Downloads\files (1)\tkb_app\app.py", line 30, in <module>
+    st.navigation(pages).run()
+    ~~~~~~~~~~~~~~~~~~~~~~~~^^
+  File "C:\Users\kiennt9\AppData\Local\miniconda3\Lib\site-packages\streamlit\navigation\page.py", line 490, in run
+    exec(code, module.__dict__)  # noqa: S102
+    ~~~~^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\kiennt9\Downloads\files (1)\tkb_app\pages\00_Trang_chu.py", line 44, in <module>
+    under = [q for q in quota_view if q["under"] > 0]
+                                      ~^^^^^^^^^
+KeyError: 'under'
++------------------------- Traceback (most recent call last) --------------------------+
+| C:\Users\kiennt9\AppData\Local\miniconda3\Lib\site-packages\streamlit\runtime\script |
+| runner\exec_code.py:129 in exec_func_with_error_handling                             |
+|                                                                                      |
+| C:\Users\kiennt9\AppData\Local\miniconda3\Lib\site-packages\streamlit\runtime\script |
+| runner\script_runner.py:795 in code_to_exec                                          |
+|                                                                                      |
+| C:\Users\kiennt9\Downloads\files (1)\tkb_app\app.py:30 in <module>                   |
+|                                                                                      |
+|   27     ],                                                                          |
+|   28 }                                                                               |
+|   29                                                                                 |
+| > 30 st.navigation(pages).run()                                                      |
+|   31                                                                                 |
+|                                                                                      |
+| C:\Users\kiennt9\AppData\Local\miniconda3\Lib\site-packages\streamlit\navigation\pag |
+| e.py:490 in run                                                                      |
+|                                                                                      |
+| C:\Users\kiennt9\Downloads\files (1)\tkb_app\pages\00_Trang_chu.py:44 in <module>    |
+|                                                                                      |
+|   41 if teachers:                                                                    |
+|   42     quota_view = repo.get_teacher_quota_view(conn, parity)                      |
+|   43     over = [q for q in quota_view if q["cap"] > 0 and q["over"] > 0]            |
+| > 44     under = [q for q in quota_view if q["under"] > 0]                           |
+|   45     if over:                                                                    |
+|   46         st.warning(                                                             |
+|   47             "2026-07-07 17:19:00.769 Uncaught app execution
+Traceback (most recent call last):
+  File "C:\Users\kiennt9\AppData\Local\miniconda3\Lib\site-packages\streamlit\runtime\scriptrunner\exec_code.py", line 129, in exec_func_with_error_handling
+    result = func()
+  File "C:\Users\kiennt9\AppData\Local\miniconda3\Lib\site-packages\streamlit\runtime\scriptrunner\script_runner.py", line 795, in code_to_exec
+    exec(code, module.__dict__)  # noqa: S102
+    ~~~~^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\kiennt9\Downloads\files (1)\tkb_app\app.py", line 30, in <module>
+    st.navigation(pages).run()
+    ~~~~~~~~~~~~~~~~~~~~~~~~^^
+  File "C:\Users\kiennt9\AppData\Local\miniconda3\Lib\site-packages\streamlit\navigation\page.py", line 490, in run
+    exec(code, module.__dict__)  # noqa: S102
+    ~~~~^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\kiennt9\Downloads\files (1)\tkb_app\pages\00_Trang_chu.py", line 44, in <module>
+    under = [q for q in quota_view if q["under"] > 0]
+                                      ~^^^^^^^^^
+KeyError: 'under'
