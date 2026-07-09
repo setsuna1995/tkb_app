@@ -258,34 +258,49 @@ def delete_unavailability(conn: sqlite3.Connection, row_id: int) -> None:
 
 def get_frame_template(conn: sqlite3.Connection, class_id: int) -> tuple:
     row = conn.execute(
-        "SELECT morning_periods, afternoon_periods, study_sunday, allow_saturday FROM frame_template WHERE class_id=?",
+        "SELECT morning_periods, afternoon_periods, study_sunday, allow_saturday, "
+        "short_weekday, short_morning_periods, short_afternoon_periods "
+        "FROM frame_template WHERE class_id=?",
         (class_id,),
     ).fetchone()
     if row is None:
-        return (5, 3, 0, 0)
-    return (row["morning_periods"], row["afternoon_periods"], row["study_sunday"], row["allow_saturday"])
+        return (5, 3, 0, 0, None, None, None)
+    return (
+        row["morning_periods"], row["afternoon_periods"], row["study_sunday"], row["allow_saturday"],
+        row["short_weekday"], row["short_morning_periods"], row["short_afternoon_periods"],
+    )
 
 
 def get_all_frame_templates(conn: sqlite3.Connection) -> dict:
     rows = conn.execute(
-        "SELECT class_id, morning_periods, afternoon_periods, study_sunday, allow_saturday FROM frame_template"
+        "SELECT class_id, morning_periods, afternoon_periods, study_sunday, allow_saturday, "
+        "short_weekday, short_morning_periods, short_afternoon_periods FROM frame_template"
     ).fetchall()
     return {
-        r["class_id"]: (r["morning_periods"], r["afternoon_periods"], r["study_sunday"], r["allow_saturday"])
+        r["class_id"]: (
+            r["morning_periods"], r["afternoon_periods"], r["study_sunday"], r["allow_saturday"],
+            r["short_weekday"], r["short_morning_periods"], r["short_afternoon_periods"],
+        )
         for r in rows
     }
 
 
 def set_frame_template(conn: sqlite3.Connection, class_id: int, morning_periods: int,
                         afternoon_periods: int, study_sunday: bool = False,
-                        allow_saturday: bool = False) -> None:
-    frame_mod.validate_periods(morning_periods, afternoon_periods)
+                        allow_saturday: bool = False, short_weekday: int | None = None,
+                        short_morning_periods: int | None = None,
+                        short_afternoon_periods: int | None = None) -> None:
+    frame_mod.validate_periods(morning_periods, afternoon_periods, short_morning_periods, short_afternoon_periods)
     conn.execute(
-        "INSERT INTO frame_template (class_id, morning_periods, afternoon_periods, study_sunday, allow_saturday) "
-        "VALUES (?, ?, ?, ?, ?) ON CONFLICT(class_id) DO UPDATE SET "
+        "INSERT INTO frame_template (class_id, morning_periods, afternoon_periods, study_sunday, allow_saturday, "
+        "short_weekday, short_morning_periods, short_afternoon_periods) "
+        "VALUES (?, ?, ?, ?, ?, ?, ?, ?) ON CONFLICT(class_id) DO UPDATE SET "
         "morning_periods=excluded.morning_periods, afternoon_periods=excluded.afternoon_periods, "
-        "study_sunday=excluded.study_sunday, allow_saturday=excluded.allow_saturday",
-        (class_id, morning_periods, afternoon_periods, int(study_sunday), int(allow_saturday)),
+        "study_sunday=excluded.study_sunday, allow_saturday=excluded.allow_saturday, "
+        "short_weekday=excluded.short_weekday, short_morning_periods=excluded.short_morning_periods, "
+        "short_afternoon_periods=excluded.short_afternoon_periods",
+        (class_id, morning_periods, afternoon_periods, int(study_sunday), int(allow_saturday),
+         short_weekday, short_morning_periods, short_afternoon_periods),
     )
     conn.commit()
 
@@ -376,6 +391,14 @@ def get_latest_run(conn: sqlite3.Connection):
     return dict(row) if row else None
 
 
+def get_latest_run_by_parity(conn: sqlite3.Connection, parity: str):
+    row = conn.execute(
+        "SELECT * FROM run_log WHERE parity=? AND succeeded=1 ORDER BY run_id DESC LIMIT 1",
+        (parity,),
+    ).fetchone()
+    return dict(row) if row else None
+
+
 def get_tkb_result(conn: sqlite3.Connection, run_id: int) -> dict:
     rows = conn.execute(
         "SELECT class_id, weekday, session, period, subject_id FROM tkb_result WHERE run_id=?", (run_id,)
@@ -441,9 +464,11 @@ def build_scheduling_input(conn: sqlite3.Connection, parity: str, seed: int = 0)
     used_ts_ids = set()
     slot_id = 0
     for cls in classes:
-        morning, afternoon, study_sunday, allow_saturday = frame_templates.get(cls.class_id, (5, 3, 0, 0))
+        morning, afternoon, study_sunday, allow_saturday, short_weekday, short_morning, short_afternoon = \
+            frame_templates.get(cls.class_id, (5, 3, 0, 0, None, None, None))
         for (wd, session, period) in frame_mod.active_cells(
-            morning, afternoon, bool(study_sunday), bool(allow_saturday)
+            morning, afternoon, bool(study_sunday), bool(allow_saturday),
+            short_weekday, short_morning, short_afternoon,
         ):
             ts = ts_by_key[(wd, session, period)]
             used_ts_ids.add(ts.ts_id)

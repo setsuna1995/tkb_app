@@ -142,6 +142,9 @@ def _ensure_column(conn: sqlite3.Connection, table: str, column: str, ddl: str) 
 def init_db(conn: sqlite3.Connection) -> None:
     conn.executescript(SCHEMA)
     _ensure_column(conn, "frame_template", "allow_saturday", "allow_saturday INTEGER NOT NULL DEFAULT 0")
+    _ensure_column(conn, "frame_template", "short_weekday", "short_weekday INTEGER")
+    _ensure_column(conn, "frame_template", "short_morning_periods", "short_morning_periods INTEGER")
+    _ensure_column(conn, "frame_template", "short_afternoon_periods", "short_afternoon_periods INTEGER")
     conn.execute("INSERT OR IGNORE INTO tuan_config (id, seed, parity) VALUES (1, 0, 'C')")
     for role_name, reduction in DEFAULT_ROLE_REDUCTION.items():
         conn.execute(

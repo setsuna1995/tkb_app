@@ -5,7 +5,7 @@ from datetime import datetime
 import streamlit as st
 
 from data import repository as repo
-from io_excel.exporter import export_xlsx
+from io_excel.exporter import export_xlsx, export_xlsx_both_parities
 from io_excel.importer import import_xlsm
 from ui_common import get_conn, require_auth, require_school, sidebar_backup_export, sidebar_school_switcher
 
@@ -59,6 +59,24 @@ try:
         st.success("Đã xuất file.")
 except Exception as e:
     st.error(f"Không thể xuất: {e}")
+
+st.divider()
+st.subheader("Xuất cả 2 tuần (Chẵn + Lẻ)")
+st.caption("Gộp lần chấp nhận gần nhất của mỗi tuần vào 1 file .xlsx (8 sheet, hậu tố _Chan/_Le).")
+try:
+    data_both, both_warnings = export_xlsx_both_parities(conn)
+except ValueError as e:
+    st.info(str(e))
+else:
+    for w in both_warnings:
+        st.warning(w)
+    if st.download_button(
+        "📤 Xuất cả 2 tuần (.xlsx)", data=data_both, file_name="TKB_ca_2_tuan.xlsx",
+        mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        key="export_both",
+    ):
+        repo.set_meta(conn, "last_exported_at", datetime.now().strftime("%d/%m/%Y %H:%M"))
+        st.success("Đã xuất file.")
 
 sidebar_backup_export(conn)
 sidebar_school_switcher()

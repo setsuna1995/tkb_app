@@ -3,4 +3,8 @@ __pycache__/
 .streamlit/secrets.toml
 *.db
 *.db-journal
+*.db.backup*
 .pytest_cache/
+*.log
+/TKB_*.xlsm
+.playwright-mcp/

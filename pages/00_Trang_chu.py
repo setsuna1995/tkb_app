@@ -59,8 +59,10 @@ st.markdown(
 Dùng thanh điều hướng bên trái để:
 1. **Thiết lập dữ liệu** — khai báo lớp / môn / giáo viên, phân công, định mức, GV bận, khung tiết
 2. **Xếp & sửa thời khóa biểu** — chạy xếp tự động, sửa tay, cân bằng tải, xem lịch sử tuần
-3. **Dạy thay & tra cứu** — phân công dạy thay khi GV nghỉ, xem TKB theo từng giáo viên
-4. **Dữ liệu** — nhập / xuất Excel
+3. **Dữ liệu** — nhập / xuất Excel
+
+**Sắp có**: tra cứu TKB theo từng giáo viên, phân công dạy thay khi GV nghỉ đột xuất
+(xem `reports/tkb-app-review-2026-07-09.md` — mục #12, #13).
 """
 )
 

@@ -50,9 +50,15 @@ Có file mẫu `.streamlit/secrets.toml.example` để tham khảo cấu trúc.
 
 ## Dữ liệu lưu ở đâu
 
-Toàn bộ dữ liệu (lớp, môn, GV, phân công, định mức, GV bận, khung tiết, thời
-khóa biểu, lịch sử tuần) lưu trong file SQLite `tkb_app_data.db` (tự tạo cạnh
-`app.py` khi chạy lần đầu, cũng không commit lên git). Sao lưu dữ liệu bằng
+App hỗ trợ nhiều trường (multi-tenant): mỗi trường có 1 file SQLite riêng
+trong thư mục `schools/<mã-trường>.db` (tự tạo khi chọn/tạo trường lần đầu,
+không commit lên git). Trường được chọn ở đầu phiên làm việc và có thể đổi
+qua nút chuyển trường ở thanh bên. Nếu máy bạn từng dùng bản cũ (1 file
+`tkb_app_data.db` duy nhất ở gốc project), app tự động di chuyển dữ liệu đó
+thành trường đầu tiên khi khởi động lần đầu sau khi cập nhật.
+
+Mỗi file DB chứa toàn bộ dữ liệu của 1 trường (lớp, môn, GV, phân công, định
+mức, GV bận, khung tiết, thời khóa biểu, lịch sử tuần). Sao lưu dữ liệu bằng
 nút "Xuất Excel (sao lưu)" ở thanh bên — nên bấm thường xuyên, đặc biệt khi
 host trên nền tảng free (xem phần Triển khai bên dưới).
 

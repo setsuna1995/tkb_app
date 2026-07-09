@@ -62,10 +62,15 @@ def test_reimport_same_workbook_does_not_duplicate_classes_or_subjects(conn):
 def test_import_infers_frame_template_from_real_khung_pattern(conn):
     import_xlsm(conn, FIXTURE)
     classes = {c.name: c.class_id for c in repo.list_classes(conn)}
-    morning, afternoon, study_sunday, _allow_saturday = repo.get_frame_template(conn, classes["6A"])
-    # the real workbook's Khung sheet currently marks only the 5 morning rows active
+    morning, afternoon, study_sunday, _allow_saturday, short_wd, short_m, short_a = \
+        repo.get_frame_template(conn, classes["6A"])
+    # the real workbook's Khung sheet currently marks only the 5 morning rows active,
+    # uniformly across all weekdays (no ngày lệch tiết in this fixture)
     assert morning == 5
     assert afternoon == 0
+    assert short_wd is None
+    assert short_m is None
+    assert short_a is None
 
 
 def teachers_by_id(conn):

@@ -29,6 +29,43 @@ def _extract_parity(text: str) -> str:
     return "L" if "[L]" in text.upper() else "C"
 
 
+def _infer_session_frame(per_weekday: dict) -> tuple:
+    """per_weekday: {weekday: max_active_period} cho 1 (lớp, buổi), đọc từ lưới "x" của
+    sheet Khung. Trả về (standard_periods, short_weekday, short_periods) -- 2 mục sau là
+    None nếu mọi ngày đồng nhất, hoặc nếu có nhiều hơn 1 ngày lệch chuẩn (vượt quá mô hình
+    1-ngày-lệch, gọi nơi dùng nên fallback về max() như hành vi cũ).
+    """
+    values = list(per_weekday.values())
+    if not values or max(values) == 0:
+        return 0, None, None
+    standard = max(set(values), key=values.count)
+    outliers = {wd: v for wd, v in per_weekday.items() if v != standard}
+    if not outliers:
+        return standard, None, None
+    if len(outliers) == 1:
+        (wd, v), = outliers.items()
+        return standard, wd, v
+    return max(values), None, None
+
+
+def _resolve_frame(per_weekday_s: dict, per_weekday_c: dict) -> tuple:
+    """Gộp kết quả suy luận của 2 buổi thành 1 frame_template.
+    Trả về (morning_periods, afternoon_periods, short_weekday, short_morning, short_afternoon).
+    """
+    std_s, out_wd_s, out_val_s = _infer_session_frame(per_weekday_s)
+    std_c, out_wd_c, out_val_c = _infer_session_frame(per_weekday_c)
+    if out_wd_s is not None and out_wd_c is not None and out_wd_s != out_wd_c:
+        # Ngày lệch của buổi sáng và buổi chiều khác nhau -- vượt quá mô hình 1 ngày lệch
+        # chung cho cả lớp, fallback về khung đồng nhất (dùng periods tối đa từng buổi).
+        fallback_s = max(per_weekday_s.values()) if per_weekday_s else 0
+        fallback_c = max(per_weekday_c.values()) if per_weekday_c else 0
+        return fallback_s, fallback_c, None, None, None
+    short_wd = out_wd_s if out_wd_s is not None else out_wd_c
+    short_m = out_val_s if out_wd_s is not None else None
+    short_a = out_val_c if out_wd_c is not None else None
+    return std_s, std_c, short_wd, short_m, short_a
+
+
 def import_xlsm(conn, path: str) -> ImportReport:
     wb = openpyxl.load_workbook(path, data_only=True)
     report = ImportReport()
@@ -163,7 +200,13 @@ def import_xlsm(conn, path: str) -> ImportReport:
     # ---- TKB_Nhap (baseline grid) + infer frame_template from the real Khung "x" pattern ----
     ws_nh = wb["TKB_Nhap"]
     ws_khung = wb["Khung"] if "Khung" in wb.sheetnames else None
-    frame_counts = {cid: {"S": 0, "C": 0} for cid in class_ids.values()}
+    # Theo dõi period active lớn nhất TỪNG NGÀY (không gộp chung) để phát hiện đúng ngày lệch
+    # tiết (vd Thứ 7 chỉ 4 tiết trong khi các ngày khác 5 tiết) thay vì lấy max() rồi áp đồng
+    # nhất cho mọi ngày như trước, làm mất thông tin ngày lệch tiết của trường thực tế.
+    frame_per_weekday = {
+        cid: {"S": {wd: 0 for wd in range(2, 8)}, "C": {wd: 0 for wd in range(2, 8)}}
+        for cid in class_ids.values()
+    }
     cells = {}
     row = 2
     while _norm(ws_nh.cell(row, 1).value):
@@ -176,9 +219,10 @@ def import_xlsm(conn, path: str) -> ImportReport:
         period = int(ws_nh.cell(row, 3).value or 0)
 
         if ws_khung is not None and session in ("S", "C"):
-            is_active = any(_norm(ws_khung.cell(row, c).value) for c in range(4, 10))
-            if is_active:
-                frame_counts[cls_id][session] = max(frame_counts[cls_id][session], period)
+            for wd in range(2, 8):
+                if _norm(ws_khung.cell(row, wd + 2).value):
+                    per_wd = frame_per_weekday[cls_id][session]
+                    per_wd[wd] = max(per_wd[wd], period)
 
         for wd in range(2, 8):
             val = _norm(ws_nh.cell(row, wd + 2).value)
@@ -187,8 +231,22 @@ def import_xlsm(conn, path: str) -> ImportReport:
         row += 1
 
     repo.bulk_replace_tkb_nhap(conn, cells)
-    for cls_id, counts in frame_counts.items():
-        repo.set_frame_template(conn, cls_id, counts["S"], counts["C"], study_sunday=False)
+    class_names_by_id = {cid: name for name, cid in class_ids.items()}
+    for cls_id, per_session in frame_per_weekday.items():
+        morning, afternoon, short_wd, short_m, short_a = _resolve_frame(per_session["S"], per_session["C"])
+        try:
+            repo.set_frame_template(
+                conn, cls_id, morning, afternoon, study_sunday=False,
+                short_weekday=short_wd, short_morning_periods=short_m, short_afternoon_periods=short_a,
+            )
+        except ValueError:
+            # Ngày lệch suy ra từ Khung sheet vi phạm luật "không lỗ 1 tiết" -- fallback về
+            # khung đồng nhất thay vì làm hỏng cả lượt import vì 1 lớp.
+            report.warnings.append(
+                f"Lớp '{class_names_by_id.get(cls_id, cls_id)}': ngày lệch tiết suy ra từ sheet Khung "
+                f"không hợp lệ (đúng 1 tiết lẻ) -- đã bỏ qua, dùng khung đồng nhất."
+            )
+            repo.set_frame_template(conn, cls_id, morning, afternoon, study_sunday=False)
 
     # ---- TuanConfig: current seed/parity + history ----
     n_seed_history = 0
