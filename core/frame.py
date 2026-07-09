@@ -59,7 +59,16 @@ def active_cells(morning_periods: int, afternoon_periods: int, study_sunday: boo
     không chia hết cho khung đồng nhất, dồn phần chênh lệch vào đúng 1 ngày (thường
     là Thứ 7) thay vì để trống rải rác. None ở 1 trong 2 override nghĩa là buổi đó
     không đổi so với chuẩn. Xem thêm suggest_short_day().
+
+    Nếu short_weekday đã lưu không còn hợp lệ với (morning_periods, afternoon_periods,
+    allow_saturday) hiện tại (vd lớp vừa đổi từ 1 buổi sang 2 buổi làm mất Thứ 7), override
+    bị ÂM THẦM BỎ QUA (coi như short_weekday=None) thay vì áp sai hoặc raise lỗi -- để cấu
+    hình ngày lệch tiết đã lưu "tự phục hồi" khi đổi khung qua lại thay vì bị mất vĩnh viễn.
     """
+    if not is_short_day_config_valid(morning_periods, afternoon_periods, allow_saturday,
+                                      short_weekday, short_morning_periods, short_afternoon_periods):
+        short_weekday = None
+
     weekdays = WEEKDAYS + (8,) if study_sunday else WEEKDAYS
     skip_saturday = afternoon_periods > 0 and not allow_saturday
 
@@ -137,6 +146,34 @@ def suggest_short_day(morning_periods: int, afternoon_periods: int, quota_total:
             return (wd, short_morning, short_afternoon)
 
     return None
+
+
+def is_short_day_config_valid(morning_periods: int, afternoon_periods: int, allow_saturday: bool,
+                               short_weekday: int | None, short_morning_periods: int | None,
+                               short_afternoon_periods: int | None) -> bool:
+    """Kiểm tra 1 cấu hình ngày lệch tiết đã lưu còn hợp lý với khung (morning_periods,
+    afternoon_periods, allow_saturday) MỚI hay không -- dùng khi áp lại preset/tùy chỉnh
+    cho 1 lớp đã có ngày lệch tiết, để quyết định giữ nguyên hay phải reset về đồng nhất
+    (áp khung mới không nên tự động xoá mất cấu hình ngày lệch vẫn còn hợp lệ).
+    """
+    if short_weekday is None:
+        return True  # không có override -- luôn hợp lệ (no-op)
+    if short_morning_periods is None and short_afternoon_periods is None:
+        return False  # có ngày nhưng không override gì thì không còn ý nghĩa "ngày lệch"
+
+    skip_saturday = afternoon_periods > 0 and not allow_saturday
+    if skip_saturday and short_weekday == 7:
+        return False  # Thứ 7 không còn là ngày học dưới khung mới (2 buổi, không học bù T7)
+
+    if short_morning_periods is not None:
+        if short_morning_periods == 1 or not (0 <= short_morning_periods < morning_periods):
+            return False
+    if short_afternoon_periods is not None:
+        if short_weekday in RESERVED_OFF_WEEKDAYS_CHIEU:
+            return False  # buổi chiều ngày này luôn bị khoá (ôn bồi dưỡng), override vô nghĩa
+        if short_afternoon_periods == 1 or not (0 <= short_afternoon_periods < afternoon_periods):
+            return False
+    return True
 
 
 def check_capacity(morning_periods: int, afternoon_periods: int, class_quota_totals: dict,

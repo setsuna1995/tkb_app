@@ -37,10 +37,28 @@ def _accept_run(conn, parity: str, seed: int, week_no: int) -> int:
 def test_export_current_baseline_has_expected_sheets(conn):
     data = export_xlsx(conn)
     wb = openpyxl.load_workbook(io.BytesIO(data))
-    assert set(wb.sheetnames) == {"TKB_Nhap", "TKB", "TKB_GV", "KiemTra"}
+    assert set(wb.sheetnames) == {"TKB_Mon", "TKB", "TKB_GV"}
 
 
-def test_export_accepted_run_kiemtra_all_zero(conn):
+def test_export_removes_broken_phancong_link(conn):
+    # sheet môn-only (TKB_Mon, đổi tên từ TKB_Nhap của template) vốn có dropdown chọn môn trỏ tới
+    # defined-name DS_Mon = PhanCong!$A$3:$A$18 -- PhanCong bị xoá khỏi file xuất nên link hỏng,
+    # phải được gỡ bỏ hẳn khỏi output.
+    data = export_xlsx(conn)
+    wb = openpyxl.load_workbook(io.BytesIO(data))
+    assert list(wb["TKB_Mon"].data_validations.dataValidation) == []
+    assert "DS_Mon" not in wb.defined_names
+
+
+def test_export_autofits_columns_and_rows(conn):
+    data = export_xlsx(conn)
+    wb = openpyxl.load_workbook(io.BytesIO(data))
+    ws = wb["TKB"]  # sheet chắc chắn có cell 2 dòng "môn\nGV: tên"
+    assert any(dim.width is not None and dim.width > 8 for dim in ws.column_dimensions.values())
+    assert any(dim.height is not None and dim.height > 15 for dim in ws.row_dimensions.values())
+
+
+def test_export_accepted_run_no_teacher_conflict_highlight(conn):
     parity = repo.get_tuan_config(conn)[1]
     inp = repo.build_scheduling_input(conn, parity=parity, seed=123)
     result = sched.run(inp)
@@ -55,14 +73,6 @@ def test_export_accepted_run_kiemtra_all_zero(conn):
 
     data = export_xlsx(conn, run_id=run_id)
     wb = openpyxl.load_workbook(io.BytesIO(data))
-    ws = wb["KiemTra"]
-    # row 1 = title, row 2 = blank spacer, row 3 = header ("Môn \ Lớp", 6A..9B);
-    # actual diff values fill rows 4..4+len(subjects)-1 (see exporter.export_xlsx)
-    n_subjects = len(repo.list_subjects(conn))
-    for row in ws.iter_rows(min_row=4, max_row=3 + n_subjects, min_col=2):
-        for cell in row:
-            assert cell.value == 0
-
     ws_gv = wb["TKB_GV"]
     for row in ws_gv.iter_rows(min_row=2, min_col=4, max_col=9):
         for cell in row:
@@ -81,30 +91,22 @@ def test_export_both_parities_warns_when_only_one_accepted(conn):
 
     data, warnings = export_xlsx_both_parities(conn)
     wb = openpyxl.load_workbook(io.BytesIO(data))
-    assert set(wb.sheetnames) == {"TKB_Nhap_Chan", "TKB_Chan", "TKB_GV_Chan", "KiemTra_Chan"}
+    assert set(wb.sheetnames) == {"TKB_Mon_Chan", "TKB_Chan", "TKB_GV_Chan"}
     assert len(warnings) == 1
     assert "Lẻ" in warnings[0]
 
 
-def test_export_both_parities_has_all_8_sheets_when_both_accepted(conn):
+def test_export_both_parities_has_all_6_sheets_when_both_accepted(conn):
     _accept_run(conn, "C", seed=111, week_no=1)
     _accept_run(conn, "L", seed=222, week_no=2)
 
     data, warnings = export_xlsx_both_parities(conn)
     wb = openpyxl.load_workbook(io.BytesIO(data))
     assert set(wb.sheetnames) == {
-        "TKB_Nhap_Chan", "TKB_Chan", "TKB_GV_Chan", "KiemTra_Chan",
-        "TKB_Nhap_Le", "TKB_Le", "TKB_GV_Le", "KiemTra_Le",
+        "TKB_Mon_Chan", "TKB_Chan", "TKB_GV_Chan",
+        "TKB_Mon_Le", "TKB_Le", "TKB_GV_Le",
     }
     assert warnings == []
-
-    # KiemTra của cả 2 tuần đều phải khớp định mức (00) vì cả 2 lần chạy đều thành công
-    n_subjects = len(repo.list_subjects(conn))
-    for sheet_name in ("KiemTra_Chan", "KiemTra_Le"):
-        ws = wb[sheet_name]
-        for row in ws.iter_rows(min_row=4, max_row=3 + n_subjects, min_col=2):
-            for cell in row:
-                assert cell.value == 0
 
 
 def test_export_both_parities_preserves_freeze_panes(conn):
@@ -114,7 +116,6 @@ def test_export_both_parities_preserves_freeze_panes(conn):
     wb = openpyxl.load_workbook(io.BytesIO(data))
     # copy_worksheet() của openpyxl không tự giữ freeze_panes -- regression guard
     # cho việc gán lại thủ công trong export_xlsx_both_parities.
-    assert wb["TKB_Nhap_Chan"].freeze_panes == "D62"
+    assert wb["TKB_Mon_Chan"].freeze_panes == "D62"
     assert wb["TKB_Chan"].freeze_panes == "D2"
     assert wb["TKB_GV_Chan"].freeze_panes == "D2"
-    assert wb["KiemTra_Chan"].freeze_panes == "B4"

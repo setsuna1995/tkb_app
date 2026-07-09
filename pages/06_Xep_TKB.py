@@ -3,7 +3,7 @@ import streamlit as st
 
 from core import scheduler as sched
 from core.models import WEEKDAY_NAMES, WEEKDAYS
-from core.validation import find_teacher_conflicts
+from core.validation import compute_quota_diff, find_teacher_conflicts
 from data import repository as repo
 from ui_common import get_conn, require_auth, require_school, sidebar_backup_export, sidebar_school_switcher, \
     week_selector
@@ -19,6 +19,12 @@ if not classes or not subjects:
     st.info("Chưa có lớp/môn. Vào trang Khai báo hoặc Nhập/Xuất Excel trước.")
     st.stop()
 
+seed, parity = repo.get_tuan_config(conn)
+chosen_label = st.radio("Tuần", ["Chẵn", "Lẻ"], index=0 if parity == "C" else 1, horizontal=True)
+chosen_parity = "C" if chosen_label == "Chẵn" else "L"
+if chosen_parity != parity:
+    repo.set_tuan_config(conn, seed, chosen_parity)  # giữ nguyên seed, chỉ đổi tuần
+    st.rerun()
 seed, parity = repo.get_tuan_config(conn)
 st.write(f"Tuần hiện tại: **{'Chẵn' if parity == 'C' else 'Lẻ'}**, seed = {seed or '(ngẫu nhiên mỗi lần chạy)'}")
 
@@ -77,6 +83,23 @@ if result is not None:
         conflicts = find_teacher_conflicts(inp.slots, result.assignment, inp.assigned_teacher)
         if conflicts:
             st.error(f"Phát hiện {len(conflicts)} trường hợp GV trùng lịch (không nên xảy ra, báo lỗi này).")
+
+        st.subheader("Kiểm tra định mức (thực tế − định mức, kỳ vọng 0)")
+        diff = compute_quota_diff(inp.slots, result.assignment, repo.get_periods_per_week(conn), parity)
+        check_rows = []
+        for subj in sorted(inp.subjects, key=lambda s: s.sort_order):
+            row = {"Môn": subj.name}
+            for cls in classes_sorted:
+                row[cls.name] = diff.get((subj.subject_id, cls.class_id), 0)
+            check_rows.append(row)
+
+        def _highlight_nonzero(row):
+            return ["background-color: #ffc7ce" if col != "Môn" and row[col] != 0 else "" for col in row.index]
+
+        st.dataframe(
+            pd.DataFrame(check_rows).style.apply(_highlight_nonzero, axis=1),
+            hide_index=True, use_container_width=True,
+        )
 
         if st.button("✅ Chấp nhận và lưu làm lịch chính thức"):
             cells = {

@@ -86,6 +86,75 @@ def test_validate_periods_rejects_lone_period_on_short_day_fields():
 
 
 # ---------------------------------------------------------------------------
+# is_short_day_config_valid() -- áp lại preset/tùy chỉnh không được vô tình xoá
+# mất ngày lệch tiết đã cấu hình trước đó nếu nó vẫn hợp lý với khung mới.
+# ---------------------------------------------------------------------------
+
+def test_short_day_config_with_no_override_is_always_valid():
+    assert frame.is_short_day_config_valid(5, 0, False, None, None, None) is True
+
+
+def test_short_day_config_stays_valid_when_reapplying_same_frame():
+    # áp lại đúng preset "Sáng 5" cho 1 lớp đã có ngày lệch Thứ 7 chỉ 4 tiết -- vẫn hợp lệ
+    assert frame.is_short_day_config_valid(5, 0, False, 7, 4, None) is True
+
+
+def test_short_day_config_invalid_when_saturday_no_longer_a_school_day():
+    # đổi từ 1 buổi (S5) sang 2 buổi (S4_C3) làm Thứ 7 không còn là ngày học -- ngày lệch cũ hỏng
+    assert frame.is_short_day_config_valid(4, 3, False, 7, 4, None) is False
+
+
+def test_short_day_config_invalid_when_short_periods_no_longer_less_than_base():
+    # đổi khung sang Sáng 4 -- short_morning_periods=4 cũ không còn nhỏ hơn base nữa
+    assert frame.is_short_day_config_valid(4, 0, False, 7, 4, None) is False
+
+
+def test_short_day_config_invalid_when_chieu_reserved_weekday():
+    # short_weekday=6 (Thứ 6) không thể override buổi chiều vì luôn bị khoá
+    assert frame.is_short_day_config_valid(4, 3, False, 6, None, 2) is False
+
+
+# ---------------------------------------------------------------------------
+# active_cells() tự bỏ qua ngày lệch không hợp lệ (self-healing) thay vì áp sai
+# ---------------------------------------------------------------------------
+
+def test_active_cells_ignores_invalid_short_weekday_instead_of_applying_it():
+    # Thứ 7 không active khi 2 buổi/ngày (mặc định nghỉ Thứ 7) -- short_weekday=7 vô nghĩa ở đây,
+    # active_cells() phải tự bỏ qua override thay vì cố áp nó (không có gì để "rút bớt" cả).
+    cells_with_invalid_override = frame.active_cells(4, 3, short_weekday=7, short_morning_periods=2)
+    cells_uniform = frame.active_cells(4, 3)
+    assert cells_with_invalid_override == cells_uniform
+
+
+def test_short_day_survives_switching_through_incompatible_frame_and_back(conn):
+    class_id = repo.upsert_class(conn, "6A")
+
+    # (a) Khung "Sáng 5" + ngày lệch Thứ 7 chỉ 4 tiết.
+    repo.set_frame_template(conn, class_id, 5, 0, short_weekday=7, short_morning_periods=4)
+
+    # (b) "Chuyển khung" sang Sáng 4 + Chiều 3 -- truyền NGUYÊN VẸN short_weekday cũ (đúng hành vi
+    # mới ở pages/05_Khung_tiet.py: không tự xoá khi ghi, chỉ bỏ qua khi dùng).
+    m, a, ss, allow_sat, short_wd, short_m, short_a = repo.get_frame_template(conn, class_id)
+    repo.set_frame_template(conn, class_id, 4, 3, allow_saturday=bool(allow_sat),
+                             short_weekday=short_wd, short_morning_periods=short_m,
+                             short_afternoon_periods=short_a)
+    m, a, ss, allow_sat, short_wd, short_m, short_a = repo.get_frame_template(conn, class_id)
+    assert (short_wd, short_m, short_a) == (7, 4, None)  # vẫn còn lưu trong DB, chưa bị xoá
+    cells_incompatible = frame.active_cells(m, a, bool(ss), bool(allow_sat), short_wd, short_m, short_a)
+    assert cells_incompatible == frame.active_cells(m, a, bool(ss), bool(allow_sat))  # bị bỏ qua khi dùng
+
+    # (c) "Chuyển lại" khung Sáng 5 -- vẫn truyền nguyên short_weekday cũ.
+    repo.set_frame_template(conn, class_id, 5, 0, allow_saturday=bool(allow_sat),
+                             short_weekday=short_wd, short_morning_periods=short_m,
+                             short_afternoon_periods=short_a)
+    m, a, ss, allow_sat, short_wd, short_m, short_a = repo.get_frame_template(conn, class_id)
+    assert (short_wd, short_m, short_a) == (7, 4, None)
+    cells_restored = frame.active_cells(m, a, bool(ss), bool(allow_sat), short_wd, short_m, short_a)
+    periods_on_saturday = sorted(p for wd, session, p in cells_restored if wd == 7 and session == "S")
+    assert periods_on_saturday == [1, 2, 3, 4]  # ngày lệch tiết tự động hoạt động lại
+
+
+# ---------------------------------------------------------------------------
 # Round-trip qua repository (DB)
 # ---------------------------------------------------------------------------
 

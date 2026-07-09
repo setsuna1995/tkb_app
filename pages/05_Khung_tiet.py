@@ -50,9 +50,15 @@ if chosen:
     morning, afternoon = chosen
     try:
         for name in selected:
-            # Áp preset/tùy chỉnh mới luôn reset ngày lệch tiết cũ (nếu có) về đồng nhất --
-            # đề xuất ngày lệch mới (nếu cần) sẽ hiện lại ở mục bên dưới sau khi rerun.
-            repo.set_frame_template(conn, class_by_name[name], morning, afternoon, allow_saturday=allow_saturday)
+            cid = class_by_name[name]
+            # Luôn giữ nguyên ngày lệch tiết đã lưu, kể cả khi khung mới tạm thời không
+            # tương thích -- active_cells() tự bỏ qua override không hợp lệ khi dùng, nên
+            # không cần (và không nên) xoá dữ liệu ở bước ghi này. Nhờ vậy, đổi qua khung
+            # khác rồi đổi lại khung cũ sẽ tự động khôi phục đúng ngày lệch tiết ban đầu.
+            _, _, _, _, cur_short_wd, cur_short_m, cur_short_a = repo.get_frame_template(conn, cid)
+            repo.set_frame_template(conn, cid, morning, afternoon, allow_saturday=allow_saturday,
+                                     short_weekday=cur_short_wd, short_morning_periods=cur_short_m,
+                                     short_afternoon_periods=cur_short_a)
     except ValueError as e:
         st.error(str(e))
     else:
@@ -77,6 +83,8 @@ for c in classes:
         if short_a is not None:
             parts.append(f"Chiều {short_a}")
         short_desc = f"{WEEKDAY_NAMES.get(short_wd, short_wd)}: {', '.join(parts)}"
+        if not frame_mod.is_short_day_config_valid(m, a, bool(allow_sat), short_wd, short_m, short_a):
+            short_desc += " (⚠ tạm ẩn — không hợp lệ với khung hiện tại)"
     rows.append({
         "Lớp": c.name, "Sáng": m, "Chiều": a,
         "Học bù Thứ 7": "Có" if allow_sat else "Không",
@@ -97,8 +105,9 @@ ppw = repo.get_periods_per_week(conn)
 suggestions = []
 for c in classes:
     m, a, ss, allow_sat, short_wd, short_m, short_a = repo.get_frame_template(conn, c.class_id)
-    if short_wd is not None:
-        continue  # đã có ngày lệch (tự đề xuất hoặc tự cấu hình trước đó) -- không đề xuất chồng lên.
+    if frame_mod.is_short_day_config_valid(m, a, bool(allow_sat), short_wd, short_m, short_a):
+        continue  # đã có ngày lệch hợp lệ và đang hoạt động -- không đề xuất chồng lên. Nếu ngày
+        # lệch đã lưu đang "tạm ẩn" (không hợp lệ với khung hiện tại), vẫn đề xuất mới bên dưới.
     quota = _class_quota_total(ppw, c.class_id, parity)
     suggestion = frame_mod.suggest_short_day(m, a, quota, allow_saturday=bool(allow_sat))
     if suggestion is not None:

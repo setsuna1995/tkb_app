@@ -1,11 +1,13 @@
 """Export the current DB state (or a specific accepted run) to a downloadable
 .xlsx, using export_template.xlsm (a copy of the school's own TKB_9lop_moi.xlsm)
-as the base -- so the output keeps the exact same fonts, header colors,
-borders, alternating row banding, column widths and freeze panes. Only the
-TKB_Nhap / TKB / TKB_GV / KiemTra data cells are rewritten; the bundled
-template file itself is loaded fresh every call and never mutated. VBA macros
-are dropped on load (superseded by this app), keeping the output a plain
-.xlsx with the template's exact visual style.
+as the base -- so the output keeps the same fonts, header colors, borders and
+alternating row banding as the original workbook. Only the TKB_Mon (subject
+only, renamed from the template's TKB_Nhap) / TKB (subject + teacher) /
+TKB_GV (per-teacher, conflict-highlighted) sheets are rewritten; column
+widths/row heights are auto-fit to content instead of kept from the
+template. The bundled template file itself is loaded fresh every call and
+never mutated. VBA macros are dropped on load (superseded by this app),
+keeping the output a plain .xlsx.
 """
 from __future__ import annotations
 
@@ -62,10 +64,32 @@ def _clear_values(ws, first_data_row: int) -> None:
             cell.value = None
 
 
-def _fill_result_sheets(ws_raw, ws_tkb, ws_gv, ws_check, cells, parity, classes, subjects,
-                         frame_templates, assignments, teacher_names, subject_names,
-                         periods_per_week) -> None:
-    """Điền dữ liệu 1 tuần (1 parity) vào bộ 4 sheet TKB_Nhap/TKB/TKB_GV/KiemTra đã cho."""
+def _autofit_sheet(ws, min_width: int = 8, max_width: int = 40, col_padding: int = 2,
+                    row_height_per_line: float = 15, min_row_height: float = 15) -> None:
+    """Xấp xỉ auto-fit độ rộng cột + chiều cao hàng theo nội dung thực tế (openpyxl không có
+    autofit thật vì không render text). Cell nhiều dòng ("môn\\nGV: tên") tính theo dòng dài
+    nhất cho độ rộng cột, và theo số dòng cho chiều cao hàng.
+    """
+    col_widths: dict = {}
+    row_lines: dict = {}
+    for row in ws.iter_rows():
+        for cell in row:
+            if cell.value is None:
+                continue
+            lines = str(cell.value).split("\n")
+            longest_line = max(len(line) for line in lines)
+            col_widths[cell.column_letter] = max(col_widths.get(cell.column_letter, 0), longest_line)
+            row_lines[cell.row] = max(row_lines.get(cell.row, 1), len(lines))
+    for col_letter, width in col_widths.items():
+        ws.column_dimensions[col_letter].width = max(min_width, min(width + col_padding, max_width))
+    for row_idx, n_lines in row_lines.items():
+        ws.row_dimensions[row_idx].height = max(min_row_height, n_lines * row_height_per_line)
+
+
+def _fill_result_sheets(ws_raw, ws_tkb, ws_gv, cells, classes, frame_templates, assignments,
+                         teacher_names, subject_names) -> None:
+    """Điền dữ liệu 1 tuần (1 parity) vào bộ 3 sheet TKB_Mon (chỉ tên môn)/TKB (môn+GV)/TKB_GV
+    (theo GV, tô đỏ trùng lịch) đã cho."""
     # find teacher double-bookings (same teacher, same weekday+session+period, across classes)
     slot_teacher_classes = defaultdict(list)
     for (cid, wd, sess, per), subj_id in cells.items():
@@ -111,28 +135,6 @@ def _fill_result_sheets(ws_raw, ws_tkb, ws_gv, ws_check, cells, parity, classes,
                         ws.cell(row_idx, col).value = subj_name
                 row_idx += 1
 
-    # KiemTra: title(row1) + blank(row2) + header(row3, already correct) + data(row4+)
-    white_style, _gray_style = _detect_banding(ws_check, first_data_row=4, n_cols=1 + len(classes))
-    _clear_values(ws_check, first_data_row=4)
-
-    actual_counts = defaultdict(int)
-    for (cid, _wd, _sess, _per), subj_id in cells.items():
-        if subj_id is not None:
-            actual_counts[(subj_id, cid)] += 1
-
-    row_idx = 4
-    for subj in subjects:
-        _apply_row_style(ws_check, row_idx, white_style)
-        ws_check.cell(row_idx, 1).value = subj.name
-        for i, cls in enumerate(classes):
-            quota = periods_per_week.get((subj.subject_id, cls.class_id, parity), 0)
-            diff = actual_counts.get((subj.subject_id, cls.class_id), 0) - quota
-            cell = ws_check.cell(row_idx, 2 + i)
-            cell.value = diff
-            if diff != 0:
-                cell.fill = RED_FILL
-        row_idx += 1
-
 
 def export_xlsx(conn, run_id=None) -> bytes:
     classes = repo.list_classes(conn)
@@ -141,32 +143,35 @@ def export_xlsx(conn, run_id=None) -> bytes:
     subject_names = {s.subject_id: s.name for s in subjects}
     assignments = repo.get_assignments(conn)
     frame_templates = repo.get_all_frame_templates(conn)
-    periods_per_week = repo.get_periods_per_week(conn)
 
     if run_id is not None:
         cells = repo.get_tkb_result(conn, run_id)
-        run_row = conn.execute("SELECT parity FROM run_log WHERE run_id=?", (run_id,)).fetchone()
-        parity = run_row["parity"] if run_row else repo.get_tuan_config(conn)[1]
     else:
         cells = repo.get_tkb_nhap(conn)
-        parity = repo.get_tuan_config(conn)[1]
 
     wb = openpyxl.load_workbook(TEMPLATE_PATH)  # drop VBA -- superseded by this app
     ws_raw = wb["TKB_Nhap"]
+    ws_raw.title = "TKB_Mon"
+    # sheet môn-only vốn có dropdown chọn môn (cột D:J) trỏ tới defined-name DS_Mon =
+    # PhanCong!$A$3:$A$18 -- PhanCong đã bị xoá khỏi file xuất (stale, không refresh từ DB)
+    # nên link này hỏng (#REF!/cảnh báo "broken link" khi mở Excel thật). Gỡ bỏ hẳn.
+    ws_raw.data_validations.dataValidation.clear()
+    if "DS_Mon" in wb.defined_names:
+        del wb.defined_names["DS_Mon"]
     ws_tkb = wb["TKB"]
     ws_gv = wb["TKB_GV"]
-    ws_check = wb["KiemTra"]
 
-    # the template also carries PhanCong/SoTiet/DinhMuc_GV/... -- those would be
-    # stale (not refreshed from the current DB), so drop everything except the
-    # 4 result sheets whose data we actually rewrite below.
-    keep = {"TKB_Nhap", "TKB", "TKB_GV", "KiemTra"}
+    # the template also carries PhanCong/SoTiet/DinhMuc_GV/KiemTra/... -- những sheet đó sẽ
+    # stale (không refresh từ DB) hoặc không còn dùng, nên xoá hết, chỉ giữ 3 sheet kết quả.
+    keep = {"TKB_Mon", "TKB", "TKB_GV"}
     for name in list(wb.sheetnames):
         if name not in keep:
             del wb[name]
 
-    _fill_result_sheets(ws_raw, ws_tkb, ws_gv, ws_check, cells, parity, classes, subjects,
-                         frame_templates, assignments, teacher_names, subject_names, periods_per_week)
+    _fill_result_sheets(ws_raw, ws_tkb, ws_gv, cells, classes, frame_templates, assignments,
+                         teacher_names, subject_names)
+    for ws in (ws_raw, ws_tkb, ws_gv):
+        _autofit_sheet(ws)
 
     buffer = io.BytesIO()
     wb.save(buffer)
@@ -178,8 +183,8 @@ PARITY_LABEL = {"C": "Chẵn", "L": "Lẻ"}
 
 
 def export_xlsx_both_parities(conn) -> tuple:
-    """Gộp lần chấp nhận gần nhất của MỖI tuần (Chẵn + Lẻ) vào 1 workbook 8 sheet
-    (4 sheet hiện có, hậu tố _Chan/_Le). tkb_nhap không dùng được ở đây vì nó chỉ lưu
+    """Gộp lần chấp nhận gần nhất của MỖI tuần (Chẵn + Lẻ) vào 1 workbook 6 sheet
+    (3 sheet hiện có, hậu tố _Chan/_Le). tkb_nhap không dùng được ở đây vì nó chỉ lưu
     1 bản duy nhất, bị ghi đè mỗi lần chấp nhận bất kể tuần nào -- nguồn dữ liệu đúng
     cho từng tuần là run_log/tkb_result (không bao giờ bị xoá, có cột parity).
 
@@ -192,7 +197,6 @@ def export_xlsx_both_parities(conn) -> tuple:
     subject_names = {s.subject_id: s.name for s in subjects}
     assignments = repo.get_assignments(conn)
     frame_templates = repo.get_all_frame_templates(conn)
-    periods_per_week = repo.get_periods_per_week(conn)
 
     warnings = []
     parity_cells = {}
@@ -209,25 +213,34 @@ def export_xlsx_both_parities(conn) -> tuple:
         )
 
     wb = openpyxl.load_workbook(TEMPLATE_PATH)
-    base_sheets = {name: wb[name] for name in ("TKB_Nhap", "TKB", "TKB_GV", "KiemTra")}
+    base_sheet_map = {"TKB_Mon": "TKB_Nhap", "TKB": "TKB", "TKB_GV": "TKB_GV"}
+    base_sheets = {out_name: wb[tmpl_name] for out_name, tmpl_name in base_sheet_map.items()}
     for name in list(wb.sheetnames):
-        if name not in base_sheets:
+        if name not in base_sheet_map.values():
             del wb[name]
+
+    # Gỡ link hỏng trên sheet gốc TRƯỚC khi copy, để cả 2 bản copy (Chẵn + Lẻ) đều sạch --
+    # xem chú thích tương tự trong export_xlsx().
+    base_sheets["TKB_Mon"].data_validations.dataValidation.clear()
+    if "DS_Mon" in wb.defined_names:
+        del wb.defined_names["DS_Mon"]
 
     for parity, cells in parity_cells.items():
         suffix = PARITY_SUFFIX[parity]
         copies = {}
-        for name, base_ws in base_sheets.items():
+        for out_name, base_ws in base_sheets.items():
             new_ws = wb.copy_worksheet(base_ws)
-            new_ws.title = f"{name}_{suffix}"
+            new_ws.title = f"{out_name}_{suffix}"
             new_ws.freeze_panes = base_ws.freeze_panes  # copy_worksheet không giữ freeze_panes
-            copies[name] = new_ws
-        _fill_result_sheets(copies["TKB_Nhap"], copies["TKB"], copies["TKB_GV"], copies["KiemTra"],
-                             cells, parity, classes, subjects, frame_templates, assignments,
-                             teacher_names, subject_names, periods_per_week)
+            copies[out_name] = new_ws
+        _fill_result_sheets(copies["TKB_Mon"], copies["TKB"], copies["TKB_GV"], cells, classes,
+                             frame_templates, assignments, teacher_names, subject_names)
+        for ws in copies.values():
+            _autofit_sheet(ws)
 
-    for name in base_sheets:
-        del wb[name]  # chỉ dùng làm khuôn để copy_worksheet, không cần trong output
+    for base_ws in base_sheets.values():
+        wb.remove(base_ws)  # chỉ dùng làm khuôn để copy_worksheet, không cần trong output; xoá
+        # theo object (không theo tên) vì tên output ("TKB_Mon") đã lệch tên sheet gốc ("TKB_Nhap")
 
     buffer = io.BytesIO()
     wb.save(buffer)
