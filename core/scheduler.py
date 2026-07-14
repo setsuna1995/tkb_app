@@ -337,7 +337,7 @@ def _assign_off_slots(teacher_ids: set, teachers_by_id: dict, rng: random.Random
 
 def run(inp: SchedulingInput, *, max_attempts: int = SO_LAN_THU,
         target_successes: int = SO_PA_TOT, lock_threshold: int = NGUONG_KHOA) -> ScheduleResult:
-    role_index = resolve_roles(inp.subjects)
+    role_index = resolve_roles(inp.subjects, inp.extra_kep_ids)
     assigned_teacher = _build_effective_assigned_teacher(inp)
     teachers_by_id = {t.teacher_id: t for t in inp.teachers}
     all_teacher_ids = set(assigned_teacher.values())

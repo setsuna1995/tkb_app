@@ -120,6 +120,30 @@ def test_kep_second_period_must_be_adjacent():
     assert _feasible(1, ts4, 1, 100, state, role_index) is False
 
 
+def test_extra_kep_ids_makes_normal_subject_require_adjacency_this_run_only():
+    # Toan (ROLE_THUONG, không phải KEP cố định) nhưng được đánh dấu extra_kep_ids={1} cho lần
+    # chạy này -- phải xử sự y hệt 1 môn KEP thật (cap_d=2, tiết thứ 2 phải liền kề cùng buổi).
+    subjects = [Subject(1, "Toan", ROLE_THUONG), Subject(2, "HDTN", ROLE_HDTN)]
+    role_index = resolve_roles(subjects, extra_kep_ids=frozenset({1}))
+    assert 1 in role_index.kep_ids
+    state = _State(remaining_need={(1, 1): 10}, busy=set())
+
+    ts1 = TimeSlot(1, 2, "S", 1)
+    _put_at(state, Slot(1, 1, ts1), 1, 100, role_index)
+    state.occupied[(1, 2, "S", 2)] = True
+    state.occupied[(1, 2, "S", 3)] = True
+    ts4 = TimeSlot(2, 2, "S", 4)  # not adjacent to period 1 -- phải bị chặn như môn KEP thật
+    assert _feasible(1, ts4, 1, 100, state, role_index) is False
+
+    ts2 = TimeSlot(3, 2, "S", 2)  # liền kề period 1, cùng buổi -- hợp lệ
+    assert _feasible(1, ts2, 1, 100, state, role_index) is True
+
+
+def test_resolve_roles_without_extra_kep_ids_is_unchanged():
+    subjects = [Subject(1, "Toan", ROLE_THUONG), Subject(2, "HDTN", ROLE_HDTN)]
+    assert resolve_roles(subjects).kep_ids == resolve_roles(subjects, extra_kep_ids=frozenset()).kep_ids == set()
+
+
 def test_heavy_subject_run_of_3_cap():
     subjects = [
         Subject(1, "Toan", ROLE_NANG), Subject(2, "Ly", ROLE_NANG),
@@ -245,7 +269,7 @@ def _make_timeslots(morning=5, afternoon=0, weekdays=(2, 3, 4, 5, 6, 7)):
 
 
 def _build_input(classes, subjects, teachers, need, assigned_teacher, timeslots,
-                  seed=12345, ban_busy=None, old_subject=None):
+                  seed=12345, ban_busy=None, old_subject=None, extra_kep_ids=frozenset()):
     slots = []
     slot_id = 0
     for c in classes:
@@ -259,6 +283,7 @@ def _build_input(classes, subjects, teachers, need, assigned_teacher, timeslots,
         classes=classes, subjects=subjects, teachers=teachers, need=need,
         assigned_teacher=assigned_teacher, ban_busy=ban_busy or set(),
         slots=slots, timeslots=timeslots, seed=seed,
+        extra_kep_ids=extra_kep_ids,
     )
 
 
@@ -313,6 +338,45 @@ def test_small_synthetic_schedule_succeeds_and_meets_quotas():
         if result.assignment.get(slot.slot_id) is not None:
             filled_count[(slot.class_id, slot.ts.weekday, slot.ts.session)] += 1
     assert all(v != 1 for v in filled_count.values()), filled_count
+
+
+def test_extra_kep_ids_forces_adjacency_in_full_run():
+    # Toán học (subject 1, ROLE_THUONG) không phải KEP cố định, nhưng được đánh dấu
+    # extra_kep_ids={1} cho lần chạy này -- mọi lần môn 1 xuất hiện 2 tiết cùng ngày ở 1 lớp
+    # phải liền kề cùng buổi, giống hệt Ngữ văn (KEP cố định).
+    classes = [ClassRoom(1, "6A"), ClassRoom(2, "6B")]
+    subjects = [
+        Subject(1, "Toan hoc", ROLE_THUONG, 1),
+        Subject(2, "Ngu van", ROLE_KEP, 2),
+        Subject(3, "GDTC", ROLE_GDTC, 3),
+        Subject(4, "HDTN", ROLE_HDTN, 4),
+        Subject(5, "Tieng Anh", ROLE_THUONG, 5),
+    ]
+    teachers = [Teacher(i, f"GV{i}") for i in range(1, 11)]
+    need = {
+        (1, 1): 6, (2, 1): 12, (3, 1): 3, (4, 1): 3, (5, 1): 6,
+        (1, 2): 6, (2, 2): 12, (3, 2): 3, (4, 2): 3, (5, 2): 6,
+    }
+    assigned_teacher = {
+        (1, 1): 1, (2, 1): 2, (3, 1): 3, (4, 1): 4, (5, 1): 5,
+        (1, 2): 6, (2, 2): 7, (3, 2): 8, (4, 2): 9, (5, 2): 10,
+    }
+    timeslots = _make_timeslots(morning=5, afternoon=0)
+    inp = _build_input(classes, subjects, teachers, need, assigned_teacher, timeslots, seed=42,
+                        extra_kep_ids=frozenset({1}))
+
+    result = sched.run(inp, max_attempts=6000, target_successes=5)
+    assert result.success is True
+
+    placed = defaultdict(list)
+    for slot in inp.slots:
+        subj_id = result.assignment.get(slot.slot_id)
+        if subj_id == 1:
+            placed[(slot.class_id, slot.ts.weekday)].append((slot.ts.session, slot.ts.period))
+    for (_class_id, _wd), positions in placed.items():
+        if len(positions) == 2:
+            (s1, p1), (s2, p2) = sorted(positions)
+            assert s1 == s2 and abs(p1 - p2) == 1, positions
 
 
 def _subject_at(inp, result, class_id, wd, session, period):

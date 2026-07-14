@@ -144,14 +144,14 @@ def sidebar_backup_export(conn) -> None:
     from datetime import datetime
 
     from data import repository as repo
-    from io_excel.exporter import export_xlsx
+    from io_excel.exporter import export_full_backup_xlsx
 
     with st.sidebar:
         st.divider()
         last = repo.get_meta(conn, "last_exported_at")
         st.caption(f"Lần xuất gần nhất: {last or 'chưa xuất lần nào'}")
         try:
-            data = export_xlsx(conn)
+            data = export_full_backup_xlsx(conn)
         except Exception:
             data = None
         if data is not None:

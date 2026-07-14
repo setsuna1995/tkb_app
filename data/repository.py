@@ -446,7 +446,8 @@ def _weekday_matches(row_weekday: str, ts_weekday: int) -> bool:
     return str(ts_weekday) == str(row_weekday)
 
 
-def build_scheduling_input(conn: sqlite3.Connection, parity: str, seed: int = 0) -> SchedulingInput:
+def build_scheduling_input(conn: sqlite3.Connection, parity: str, seed: int = 0,
+                            extra_kep_ids: frozenset = frozenset()) -> SchedulingInput:
     classes = list_classes(conn)
     subjects = list_subjects(conn)
     teachers = list_teachers(conn)
@@ -490,4 +491,5 @@ def build_scheduling_input(conn: sqlite3.Connection, parity: str, seed: int = 0)
         classes=classes, subjects=subjects, teachers=teachers, need=need,
         assigned_teacher=assigned_teacher, ban_busy=ban_busy,
         slots=slots, timeslots=timeslots, seed=seed,
+        extra_kep_ids=extra_kep_ids,
     )

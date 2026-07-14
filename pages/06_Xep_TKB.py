@@ -2,7 +2,7 @@ import pandas as pd
 import streamlit as st
 
 from core import scheduler as sched
-from core.models import WEEKDAY_NAMES, WEEKDAYS
+from core.models import ROLE_KEP, ROLE_NANG_KEP, WEEKDAY_NAMES, WEEKDAYS
 from core.validation import compute_quota_diff, find_teacher_conflicts
 from data import repository as repo
 from ui_common import get_conn, require_auth, require_school, sidebar_backup_export, sidebar_school_switcher, \
@@ -39,8 +39,16 @@ if over:
     )
     proceed_anyway = st.checkbox("Vẫn tiếp tục xếp dù vượt định mức")
 
+extra_kep_options = [s.name for s in subjects if s.role_code not in (ROLE_KEP, ROLE_NANG_KEP)]
+extra_kep_names = st.multiselect(
+    "Môn cần xếp 2 tiết liền kề (kép) CHỈ cho tuần này",
+    extra_kep_options,
+    help="Không đổi vĩnh viễn phân loại môn học -- chỉ áp dụng cho lần chạy xếp TKB này.",
+)
+extra_kep_ids = frozenset(s.subject_id for s in subjects if s.name in extra_kep_names)
+
 if st.button("🚀 Chạy xếp TKB", disabled=bool(over) and not proceed_anyway):
-    inp = repo.build_scheduling_input(conn, parity=parity, seed=seed)
+    inp = repo.build_scheduling_input(conn, parity=parity, seed=seed, extra_kep_ids=extra_kep_ids)
     with st.spinner("Đang xếp thời khóa biểu..."):
         result = sched.run(inp)
     st.session_state["last_result"] = result

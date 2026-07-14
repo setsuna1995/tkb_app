@@ -179,6 +179,19 @@ def import_xlsm(conn, path: str) -> ImportReport:
                 repo.set_role_reduction(conn, r_name, r_reduction)
                 r += 1
 
+        # base_cap ("Chuẩn:") / min_floor ("Sàn tối thiểu:") -- dò động như "Chức vụ" ở trên vì vị
+        # trí nhãn tùy file cụ thể. Bỏ qua im lặng nếu không có (file Excel gốc/cũ không có 2 ô
+        # này) -- không phải lỗi, chỉ đơn giản là app giữ nguyên giá trị mặc định hiện tại.
+        for c in range(1, 25):
+            label = _norm(ws_dm.cell(1, c).value)
+            value = ws_dm.cell(1, c + 1).value
+            if value in (None, ""):
+                continue
+            if label == "Chuẩn:":
+                repo.set_base_cap(conn, int(value))
+            elif label == "Sàn tối thiểu:":
+                repo.set_min_floor(conn, int(value))
+
     # ---- GV_Ban: skip rows whose name doesn't match a known teacher (also filters instructional rows) ----
     n_unavailability = 0
     if "GV_Ban" in wb.sheetnames:

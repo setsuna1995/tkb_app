@@ -90,6 +90,7 @@ class SchedulingInput:
     slots: list             # list[Slot] -- universe of fillable cells
     timeslots: list         # list[TimeSlot]
     seed: int = 0            # 0 = random each run
+    extra_kep_ids: frozenset = field(default_factory=frozenset)  # subject_id cần xếp kép CHỈ tuần này
 
 
 @dataclass

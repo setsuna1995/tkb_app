@@ -19,7 +19,8 @@ from copy import copy
 import openpyxl
 from openpyxl.styles import PatternFill
 
-from core.models import WEEKDAYS
+from core import frame as frame_mod
+from core.models import WEEKDAY_NAMES, WEEKDAYS
 from data import repository as repo
 
 TEMPLATE_PATH = os.path.join(os.path.dirname(__file__), "export_template.xlsm")
@@ -245,3 +246,169 @@ def export_xlsx_both_parities(conn) -> tuple:
     buffer = io.BytesIO()
     wb.save(buffer)
     return buffer.getvalue(), warnings
+
+
+def export_full_backup_xlsx(conn) -> bytes:
+    """Xuất TOÀN BỘ dữ liệu setup (không chỉ lịch) ra 1 file .xlsm mà import_xlsm() đọc lại
+    được nguyên vẹn. Khác với export_xlsx()/export_xlsx_both_parities() (chỉ xuất lưới thời
+    khóa biểu để in/chia sẻ) -- hàm này dùng cho nút "sao lưu", vì mất DB (vd host free-tier
+    restart) mà chỉ có lưới TKB thì không khôi phục lại được lớp/môn/GV/phân công/định mức/
+    GV bận/khung tiết/lịch sử tuần, phải nhập tay lại từ đầu.
+
+    Ghi đúng 7 sheet, đúng định dạng io_excel/importer.py::import_xlsm() mong đợi: PhanCong,
+    SoTiet, DinhMuc_GV, GV_Ban, Khung, TKB_Nhap, TuanConfig.
+    """
+    classes = sorted(repo.list_classes(conn), key=lambda c: c.sort_order)
+    subjects = sorted(repo.list_subjects(conn), key=lambda s: s.sort_order)
+    teachers = repo.list_teachers(conn)
+    teacher_names = {t.teacher_id: t.name for t in teachers}
+    subject_names = {s.subject_id: s.name for s in subjects}
+
+    assignments = repo.get_assignments(conn)
+    periods_per_week = repo.get_periods_per_week(conn)
+    role_reduction = repo.get_role_reduction(conn)
+    frame_templates = repo.get_all_frame_templates(conn)
+    unavailability = repo.list_unavailability(conn)
+    tkb_nhap = repo.get_tkb_nhap(conn)
+    seed, parity = repo.get_tuan_config(conn)
+    seed_history = repo.list_seed_history(conn)
+    base_cap = repo.get_base_cap(conn)
+    min_floor = repo.get_min_floor(conn)
+
+    n_classes = len(classes)
+    n_subjects = len(subjects)
+
+    wb = openpyxl.load_workbook(TEMPLATE_PATH)
+    keep = {"PhanCong", "SoTiet", "DinhMuc_GV", "GV_Ban", "Khung", "TKB_Nhap", "TuanConfig"}
+    for name in list(wb.sheetnames):
+        if name not in keep:
+            del wb[name]
+
+    # ---- PhanCong ----
+    ws_pc = wb["PhanCong"]
+    _clear_values(ws_pc, first_data_row=2)
+    code_col = 2 + n_classes + 1  # để trống 1 cột đệm ở 2+n_classes, khớp quy ước template
+    for i, cls in enumerate(classes):
+        ws_pc.cell(2, 2 + i).value = cls.name
+    ws_pc.cell(2, code_col).value = "MÃ VAI TRÒ"
+    for r, subj in enumerate(subjects):
+        row = 3 + r
+        ws_pc.cell(row, 1).value = subj.name
+        ws_pc.cell(row, code_col).value = subj.role_code
+        for i, cls in enumerate(classes):
+            teacher_id = assignments.get((subj.subject_id, cls.class_id))
+            ws_pc.cell(row, 2 + i).value = teacher_names.get(teacher_id, "")
+
+    # ---- SoTiet ----
+    ws_st = wb["SoTiet"]
+    _clear_values(ws_st, first_data_row=2)
+    odd_start_col = 2 + n_classes + 1
+    for i, cls in enumerate(classes):
+        ws_st.cell(2, 2 + i).value = f"{cls.name} C"
+        ws_st.cell(2, odd_start_col + i).value = f"{cls.name} L"
+    for r, subj in enumerate(subjects):
+        row = 3 + r
+        ws_st.cell(row, 1).value = subj.name
+        for i, cls in enumerate(classes):
+            ws_st.cell(row, 2 + i).value = periods_per_week.get((subj.subject_id, cls.class_id, "C"), 0)
+            ws_st.cell(row, odd_start_col + i).value = periods_per_week.get((subj.subject_id, cls.class_id, "L"), 0)
+
+    # ---- DinhMuc_GV ----
+    ws_dm = wb["DinhMuc_GV"]
+    _clear_values(ws_dm, first_data_row=2)  # row1 (tiêu đề + Chuẩn/Chức vụ) giữ nguyên, ghi đè bên dưới
+    ws_dm.cell(1, 8).value = "Chuẩn:"
+    ws_dm.cell(1, 9).value = base_cap
+    ws_dm.cell(1, 11).value = "Chức vụ"
+    ws_dm.cell(1, 12).value = "Giảm"
+    # Sàn tối thiểu: quy ước RIÊNG của app (không có trong định dạng VBA gốc) -- đặt ở ô N1/O1,
+    # rõ ràng chưa dùng cho mục đích nào khác trong sheet này.
+    ws_dm.cell(1, 14).value = "Sàn tối thiểu:"
+    ws_dm.cell(1, 15).value = min_floor
+    ws_dm.cell(2, 1).value = "Tên GV"
+    ws_dm.cell(2, 2).value = "Chức vụ"
+    ws_dm.cell(2, 8).value = "Đi T2 (1/0)"
+    ws_dm.cell(2, 9).value = "GVCN (1/0)"
+    for r, t in enumerate(teachers):
+        row = 3 + r
+        ws_dm.cell(row, 1).value = t.name
+        ws_dm.cell(row, 2).value = t.role
+        # cột C-G (Giảm/Trần/Tải Chẵn/Tải Lẻ/Vượt) là công thức Excel, import_xlsm() không đọc
+        # lại -- để trống thay vì cố tính lại, tránh hiện số liệu sai/cũ.
+        ws_dm.cell(row, 8).value = int(t.must_monday)
+        ws_dm.cell(row, 9).value = int(t.is_gvcn)
+    for r, (role_name, reduction) in enumerate(role_reduction.items()):
+        row = 2 + r
+        ws_dm.cell(row, 11).value = role_name
+        ws_dm.cell(row, 12).value = reduction
+
+    # ---- GV_Ban ----
+    ws_gb = wb["GV_Ban"]
+    _clear_values(ws_gb, first_data_row=2)
+    ws_gb.cell(2, 1).value = "Giáo viên"
+    ws_gb.cell(2, 2).value = "Thứ"
+    ws_gb.cell(2, 3).value = "Buổi"
+    ws_gb.cell(2, 4).value = "Tiết"
+    for r, row_data in enumerate(unavailability):
+        row = 3 + r
+        ws_gb.cell(row, 1).value = teacher_names.get(row_data["teacher_id"], "")
+        ws_gb.cell(row, 2).value = row_data["weekday"]
+        ws_gb.cell(row, 3).value = row_data["session"]
+        ws_gb.cell(row, 4).value = row_data["period"]
+
+    # ---- Khung + TKB_Nhap (row-aligned, importer đọc Khung theo đúng row của TKB_Nhap) ----
+    ws_khung = wb["Khung"]
+    ws_nh = wb["TKB_Nhap"]
+    _clear_values(ws_khung, first_data_row=2)
+    _clear_values(ws_nh, first_data_row=2)
+    ws_nh.cell(1, 1).value = "LỚP HỌC"
+    ws_nh.cell(1, 2).value = "BUỔI"
+    ws_nh.cell(1, 3).value = "TIẾT THỨ"
+    for i, wd in enumerate(WEEKDAYS):
+        ws_nh.cell(1, 4 + i).value = WEEKDAY_NAMES[wd]
+    ws_nh.cell(1, 4 + len(WEEKDAYS)).value = WEEKDAY_NAMES[8]
+
+    row_idx = 2
+    for cls in classes:
+        morning, afternoon, study_sunday, allow_saturday, short_wd, short_m, short_a = \
+            frame_templates.get(cls.class_id, (5, 3, 0, 0, None, None, None))
+        # active_cells() đã tự xử lý đúng ngày lệch tiết -- tái dùng thẳng, không tự suy luận lại.
+        active_set = set(frame_mod.active_cells(
+            morning, afternoon, bool(study_sunday), bool(allow_saturday), short_wd, short_m, short_a,
+        ))
+        sessions = [("S", p) for p in range(1, morning + 1)] + [("C", p) for p in range(1, afternoon + 1)]
+        for session, period in sessions:
+            ws_nh.cell(row_idx, 1).value = cls.name
+            ws_nh.cell(row_idx, 2).value = session
+            ws_nh.cell(row_idx, 3).value = period
+            for i, wd in enumerate(WEEKDAYS):
+                col = 4 + i
+                subj_id = tkb_nhap.get((cls.class_id, wd, session, period))
+                ws_nh.cell(row_idx, col).value = subject_names.get(subj_id, "") if subj_id else ""
+                if (wd, session, period) in active_set:
+                    ws_khung.cell(row_idx, col).value = "x"
+            row_idx += 1
+
+    # Sửa lại defined-name DS_Mon (dropdown chọn môn trên TKB_Nhap) theo đúng số môn thực tế --
+    # range cũ trong template (PhanCong!$A$3:$A$18) giả định đúng 16 môn mẫu của trường mẫu.
+    if "DS_Mon" in wb.defined_names:
+        wb.defined_names["DS_Mon"].value = f"PhanCong!$A$3:$A${2 + n_subjects}"
+
+    # ---- TuanConfig ----
+    ws_tc = wb["TuanConfig"]
+    _clear_values(ws_tc, first_data_row=4)
+    ws_tc.cell(1, 2).value = seed
+    ws_tc.cell(2, 2).value = parity
+    for r, h in enumerate(seed_history):
+        row = 4 + r
+        ws_tc.cell(row, 1).value = h["week_no"]
+        ws_tc.cell(row, 2).value = h["seed"]
+        # _extract_parity() bên importer chỉ dò chuỗi con "[C]"/"[L]" trong text này, không có
+        # cột parity riêng -- phải tự chèn tag khi ghi để đọc lại đúng.
+        ws_tc.cell(row, 3).value = f"{h['created_at']} [{h['parity']}]"
+
+    for ws in (ws_pc, ws_st, ws_dm, ws_gb, ws_khung, ws_nh, ws_tc):
+        _autofit_sheet(ws)
+
+    buffer = io.BytesIO()
+    wb.save(buffer)
+    return buffer.getvalue()
