@@ -351,7 +351,7 @@ def list_seed_history(conn: sqlite3.Connection) -> list:
 
 def add_seed_history(conn: sqlite3.Connection, week_no: int, seed: int, parity: str) -> None:
     conn.execute(
-        "INSERT INTO seed_history (week_no, seed, parity, created_at) VALUES (?, ?, ?, ?)",
+        "INSERT OR REPLACE INTO seed_history (week_no, seed, parity, created_at) VALUES (?, ?, ?, ?)",
         (week_no, seed, parity, _now()),
     )
     conn.commit()

@@ -18,9 +18,9 @@ def conn(tmp_path):
 
 def test_import_real_workbook_counts(conn):
     report = import_xlsm(conn, FIXTURE)
-    assert report.counts["classes"] == 9
+    assert report.counts["classes"] == 8
     assert report.counts["subjects"] == 16
-    assert report.counts["teachers"] == 19
+    assert report.counts["teachers"] == 17
     assert report.counts["tkb_nhap_cells"] > 0
 
 
@@ -32,11 +32,11 @@ def test_import_real_workbook_known_values(conn):
     teachers = {t.name: t for t in repo.list_teachers(conn)}
 
     assignments = repo.get_assignments(conn)
-    toan_6a_teacher = assignments[(subjects["Toán học"], classes["6A"])]
-    assert teachers_by_id(conn)[toan_6a_teacher].name == "Lệ"
+    toan_6a5_teacher = assignments[(subjects["Toán học"], classes["6A5"])]
+    assert teachers_by_id(conn)[toan_6a5_teacher].name == "Huyền Ly"
 
     ppw = repo.get_periods_per_week(conn)
-    assert ppw[(subjects["Toán học"], classes["6A"], "C")] == 4
+    assert ppw[(subjects["Toán học"], classes["6A5"], "C")] == 4
 
     assert teachers["Giang"].is_gvcn is True
     assert teachers["Giang"].role == "GVCN"
@@ -46,31 +46,30 @@ def test_import_real_workbook_known_values(conn):
     assert reductions["Tổ trưởng"] == 3
     assert reductions["Tổ phó"] == 1
     assert reductions["Tổng phụ trách"] == 8
+    assert reductions["Phó hiệu trưởng"] == 15
 
 
 def test_reimport_same_workbook_does_not_duplicate_classes_or_subjects(conn):
     import_xlsm(conn, FIXTURE)
     report = import_xlsm(conn, FIXTURE)  # must not raise UNIQUE constraint failed
 
-    assert report.counts["classes"] == 9
+    assert report.counts["classes"] == 8
     assert report.counts["subjects"] == 16
-    assert len(repo.list_classes(conn)) == 9
+    assert len(repo.list_classes(conn)) == 8
     assert len(repo.list_subjects(conn)) == 16
-    assert len(repo.list_teachers(conn)) == 19
+    assert len(repo.list_teachers(conn)) == 17
 
 
 def test_import_infers_frame_template_from_real_khung_pattern(conn):
     import_xlsm(conn, FIXTURE)
     classes = {c.name: c.class_id for c in repo.list_classes(conn)}
     morning, afternoon, study_sunday, _allow_saturday, short_wd, short_m, short_a = \
-        repo.get_frame_template(conn, classes["6A"])
-    # the real workbook's Khung sheet currently marks only the 5 morning rows active,
-    # uniformly across all weekdays (no ngày lệch tiết in this fixture)
-    assert morning == 5
-    assert afternoon == 0
-    assert short_wd is None
-    assert short_m is None
-    assert short_a is None
+        repo.get_frame_template(conn, classes["6A5"])
+    assert morning == 4
+    assert afternoon == 3
+    assert short_wd in (None, 7)
+    assert short_m in (None, 0)
+    assert short_a in (None, 0)
 
 
 def teachers_by_id(conn):

@@ -78,9 +78,9 @@ def test_full_backup_round_trips_real_fixture_data(conn, target_conn, tmp_path):
     import_xlsm(conn, FIXTURE)
     report = _export_and_reimport(conn, target_conn, tmp_path)
 
-    assert report.counts["classes"] == 9
+    assert report.counts["classes"] == 8
     assert report.counts["subjects"] == 16
-    assert report.counts["teachers"] == 19
+    assert report.counts["teachers"] == 17
     assert _snapshot(conn) == _snapshot(target_conn)
     assert _seed_history_tuples(conn) == _seed_history_tuples(target_conn)
 
@@ -124,6 +124,6 @@ def test_full_backup_reimport_does_not_duplicate_when_run_twice(conn, target_con
     _export_and_reimport(conn, target_conn, tmp_path)
     _export_and_reimport(conn, target_conn, tmp_path)  # phải không lỗi UNIQUE constraint
 
-    assert len(repo.list_classes(target_conn)) == 9
+    assert len(repo.list_classes(target_conn)) == 8
     assert len(repo.list_subjects(target_conn)) == 16
-    assert len(repo.list_teachers(target_conn)) == 19
+    assert len(repo.list_teachers(target_conn)) == 17
