@@ -195,6 +195,7 @@ def import_xlsm(conn, path: str) -> ImportReport:
     # ---- GV_Ban: skip rows whose name doesn't match a known teacher (also filters instructional rows) ----
     n_unavailability = 0
     if "GV_Ban" in wb.sheetnames:
+        repo.clear_unavailability(conn)
         ws_gb = wb["GV_Ban"]
         row = 3
         while _norm(ws_gb.cell(row, 1).value):

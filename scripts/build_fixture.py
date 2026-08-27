@@ -57,16 +57,16 @@ def generate():
         ("Nguyễn Ly", "GVCN", True, True),
         ("Sơn", "Tổ phó", True, False),
         ("Hoà", "GVCN", True, True),
-        ("Khu", "", True, False),
+        ("Khu", "Thư ký HĐ", True, False),
         ("Hồng", "", False, False),
         ("Minh Anh", "GVCN", True, True),
         ("Lệ", "GVCN", True, True),
         ("Thành", "Tổ trưởng", True, False),
-        ("Lan", "Tổ trưởng", True, True),
+        ("Lan", "GVCN", True, True),
         ("Trung", "Tổ phó", True, False),
         ("Giang", "GVCN", True, True),
         ("Hoa", "GVCN", True, True),
-        ("Lan Ly", "Tổng phụ trách", True, False),
+        ("Lan Ly", "Hỗ trợ TPT", True, False),
         ("Uyên", "GVCN", True, True),
         ("Nhung", "", True, False),
     ]
@@ -123,8 +123,16 @@ def generate():
 
     repo.add_unavailability(conn, teacher_ids["Hồng"], "*", "S", "4")
     repo.add_unavailability(conn, teacher_ids["Hồng"], "*", "C", "1")
-    for tname in ["Huyền Ly", "Nguyễn Ly", "Sơn", "Khu"]:
-        for wd in ["3", "4", "5", "6"]:
+
+    # Thứ 2 đi hết tiết 1 (Chào cờ). 4 ngày còn lại (T3-T6), mỗi GV ưu tiên tối đa 3 ngày nghỉ tiết 1:
+    ban_p1 = {
+        "Huyền Ly": ["3", "4", "5"],
+        "Nguyễn Ly": ["3", "4", "6"],
+        "Sơn": ["3", "5", "6"],
+        "Khu": ["3", "5"],
+    }
+    for tname, wds in ban_p1.items():
+        for wd in wds:
             repo.add_unavailability(conn, teacher_ids[tname], wd, "S", "1")
 
     # Run scheduler for Parity C
@@ -213,14 +221,18 @@ def generate():
     ws_dm.cell(4, 12).value = 1
     ws_dm.cell(5, 11).value = "Tổng phụ trách"
     ws_dm.cell(5, 12).value = 8
-    ws_dm.cell(6, 11).value = "Phó hiệu trưởng"
-    ws_dm.cell(6, 12).value = 15
+    ws_dm.cell(6, 11).value = "Hỗ trợ TPT"
+    ws_dm.cell(6, 12).value = 5
+    ws_dm.cell(7, 11).value = "Phó hiệu trưởng"
+    ws_dm.cell(7, 12).value = 15
+    ws_dm.cell(8, 11).value = "Thư ký HĐ"
+    ws_dm.cell(8, 12).value = 2
 
     for i, (tname, role, must_monday, is_gvcn) in enumerate(teacher_defs):
         r = 3 + i
         ws_dm.cell(r, 1).value = tname
         ws_dm.cell(r, 2).value = role if role else None
-        ws_dm.cell(r, 3).value = f"=IFERROR(VLOOKUP(B{r},$K$2:$L$6,2,0),0)"
+        ws_dm.cell(r, 3).value = f"=IFERROR(VLOOKUP(B{r},$K$2:$L$8,2,0),0)"
         ws_dm.cell(r, 4).value = f"=$I$1-C{r}"
         ws_dm.cell(r, 5).value = f"=SUMPRODUCT((PhanCong!$B$3:$I$18=A{r})*SoTiet!$B$3:$I$18)"
         ws_dm.cell(r, 6).value = f"=SUMPRODUCT((PhanCong!$B$3:$I$18=A{r})*SoTiet!$K$3:$R$18)"
@@ -238,8 +250,8 @@ def generate():
         ("Hồng", "*", "S", "4"),
         ("Hồng", "*", "C", "1"),
     ]
-    for tname in ["Huyền Ly", "Nguyễn Ly", "Sơn", "Khu"]:
-        for wd in ["3", "4", "5", "6"]:
+    for tname, wds in ban_p1.items():
+        for wd in wds:
             ban_rows.append((tname, wd, "S", "1"))
     for i, (tname, wd, sess, per) in enumerate(ban_rows):
         r = 3 + i

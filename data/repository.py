@@ -247,9 +247,102 @@ def add_unavailability(conn: sqlite3.Connection, teacher_id: int, weekday: str =
     return cur.lastrowid
 
 
-def delete_unavailability(conn: sqlite3.Connection, row_id: int) -> None:
-    conn.execute("DELETE FROM teacher_unavailability WHERE row_id=?", (row_id,))
+def clear_unavailability(conn: sqlite3.Connection, teacher_id: int | None = None) -> None:
+    if teacher_id is None:
+        conn.execute("DELETE FROM teacher_unavailability")
+    else:
+        conn.execute("DELETE FROM teacher_unavailability WHERE teacher_id=?", (teacher_id,))
     conn.commit()
+
+
+def get_teacher_busy_cells(conn: sqlite3.Connection, teacher_id: int) -> set[tuple[int, str, int]]:
+    """Returns set of (weekday, session, period) where teacher is unavailable.
+    weekday: 2..8 (int)
+    session: 'S' or 'C' (str)
+    period: 1..5 (int)
+    """
+    rows = conn.execute(
+        "SELECT weekday, session, period FROM teacher_unavailability WHERE teacher_id=?",
+        (teacher_id,),
+    ).fetchall()
+    busy = set()
+    for r in rows:
+        w_raw = str(r["weekday"]).strip()
+        s_raw = str(r["session"]).strip().upper()
+        p_raw = str(r["period"]).strip()
+
+        if w_raw == "*":
+            wds = list(range(2, 8))
+        elif w_raw == "CN" or w_raw == "8":
+            wds = [8]
+        elif w_raw.isdigit():
+            wds = [int(w_raw)]
+        else:
+            wds = []
+
+        if s_raw == "*":
+            sessions = ["S", "C"]
+        elif s_raw in ("S", "C"):
+            sessions = [s_raw]
+        else:
+            sessions = []
+
+        if p_raw == "*":
+            periods = list(range(1, 6))
+        elif p_raw.isdigit():
+            periods = [int(p_raw)]
+        else:
+            periods = []
+
+        for w in wds:
+            for s in sessions:
+                for p in periods:
+                    busy.add((w, s, p))
+    return busy
+
+
+def compress_busy_cells(cells: set[tuple[int, str, int]]) -> list[tuple[str, str, str]]:
+    """Converts a set of (wd, session, period) into compact (weekday, session, period) rules
+    using '*' wildcards where full days, full sessions, or all-week same periods are checked.
+    """
+    rules = []
+    all_sp = {(s, p) for s in ("S", "C") for p in range(1, 6)}
+    handled_cells = set()
+
+    for wd in range(2, 8):
+        sp_set = {(s, p) for (w, s, p) in cells if w == wd}
+        if sp_set == all_sp:
+            rules.append((str(wd), "*", "*"))
+            handled_cells.update({(wd, s, p) for s, p in all_sp})
+        else:
+            for s in ("S", "C"):
+                s_pers = {p for sess, p in sp_set if sess == s}
+                if s_pers == set(range(1, 6)):
+                    rules.append((str(wd), s, "*"))
+                    handled_cells.update({(wd, s, p) for p in range(1, 6)})
+
+    rem_cells = set(cells) - handled_cells
+
+    for s in ("S", "C"):
+        for p in range(1, 6):
+            if all((wd, s, p) in rem_cells for wd in range(2, 8)):
+                rules.append(("*", s, str(p)))
+                for wd in range(2, 8):
+                    rem_cells.discard((wd, s, p))
+
+    for (wd, s, p) in sorted(rem_cells):
+        rules.append((str(wd), str(s), str(p)))
+    return rules
+
+
+def set_teacher_busy_cells(conn: sqlite3.Connection, teacher_id: int, busy_cells: set[tuple[int, str, int]]) -> None:
+    """Replaces all unavailability rules for a teacher with the given busy_cells,
+    compressed into clean wildcard rules.
+    """
+    clear_unavailability(conn, teacher_id)
+    rules = compress_busy_cells(busy_cells)
+    for (wd, sess, per) in rules:
+        add_unavailability(conn, teacher_id, wd, sess, per)
 
 
 # ---------------------------------------------------------------------------

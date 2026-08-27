@@ -46,6 +46,7 @@ def test_import_real_workbook_known_values(conn):
     assert reductions["Tổ trưởng"] == 3
     assert reductions["Tổ phó"] == 1
     assert reductions["Tổng phụ trách"] == 8
+    assert reductions["Hỗ trợ TPT"] == 5
     assert reductions["Phó hiệu trưởng"] == 15
 
 
