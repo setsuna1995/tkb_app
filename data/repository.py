@@ -603,6 +603,7 @@ def build_scheduling_input(conn: sqlite3.Connection, parity: str, seed: int = 0,
     classes = list_classes(conn)
     subjects = list_subjects(conn)
     teachers = list_teachers(conn)
+    config = get_scheduling_config(conn)
 
     need = {(s, c): p for (s, c, par), p in get_periods_per_week(conn).items() if par == parity and p > 0}
     assigned_teacher = {key: tid for key, tid in get_assignments(conn).items() if tid is not None}
@@ -622,6 +623,7 @@ def build_scheduling_input(conn: sqlite3.Connection, parity: str, seed: int = 0,
         for (wd, session, period) in frame_mod.active_cells(
             morning, afternoon, bool(study_sunday), bool(allow_saturday),
             short_weekday, short_morning, short_afternoon,
+            reserved_off_weekdays_chieu=config.reserved_off_weekdays_chieu,
         ):
             ts = ts_by_key[(wd, session, period)]
             used_ts_ids.add(ts.ts_id)
@@ -643,5 +645,5 @@ def build_scheduling_input(conn: sqlite3.Connection, parity: str, seed: int = 0,
         classes=classes, subjects=subjects, teachers=teachers, need=need,
         assigned_teacher=assigned_teacher, ban_busy=ban_busy,
         slots=slots, timeslots=timeslots, seed=seed,
-        extra_kep_ids=extra_kep_ids,
+        extra_kep_ids=extra_kep_ids, config=config,
     )

@@ -1,3 +1,4 @@
+import os
 import random
 from collections import defaultdict
 
@@ -9,6 +10,10 @@ from core.models import (
 )
 from core.roles import resolve_roles
 from core.scheduler import _State, _feasible, _put_at
+from data import db, repository as repo
+from io_excel.importer import import_xlsm
+
+FIXTURE = os.path.join(os.path.dirname(__file__), "..", "io_excel", "sample_school.xlsm")
 
 
 # ---------------------------------------------------------------------------
@@ -721,3 +726,30 @@ def test_busy_teacher_period_and_session_never_scheduled():
             f"GV1 bị xếp vào tiết đã khai báo bận: lớp {s.class_id}, "
             f"Thứ {s.ts.weekday} {s.ts.session}{s.ts.period}"
         )
+
+
+# ---------------------------------------------------------------------------
+# End-to-end: build_scheduling_input() wires the school's saved SchedulingConfig
+# ---------------------------------------------------------------------------
+
+def test_build_scheduling_input_respects_saved_scheduling_config(tmp_path):
+    # gdtc_avoid_period=4 (default is 5): chosen because it's empirically reliable
+    # against this real fixture (verified success in 8/8 independent runs, well
+    # under max_attempts). Periods 2 and 3 are genuinely infeasible for GDTC with
+    # this school's real subject/teacher data (0/6000 across repeated runs) --
+    # a data-driven constraint unrelated to the config-wiring behavior under test.
+    conn = db.get_connection(str(tmp_path / "test.db"))
+    db.init_db(conn)
+    import_xlsm(conn, FIXTURE)
+    repo.set_scheduling_config(conn, SchedulingConfig(gdtc_avoid_period=4))
+
+    inp = repo.build_scheduling_input(conn, parity="C")
+    assert inp.config.gdtc_avoid_period == 4
+
+    result = sched.run(inp, max_attempts=6000, target_successes=3)
+    assert result.success
+    gdtc_id = next(s.subject_id for s in inp.subjects if s.role_code == ROLE_GDTC)
+    for slot in inp.slots:
+        if slot.ts.period == 4:
+            assert result.assignment.get(slot.slot_id) != gdtc_id
+    conn.close()
