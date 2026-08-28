@@ -5,7 +5,7 @@ from core import frame
 from core import scheduler as sched
 from core.models import (
     ROLE_GDTC, ROLE_HDTN, ROLE_KEP, ROLE_NANG, ROLE_THUONG,
-    ClassRoom, SchedulingInput, Slot, Subject, Teacher, TimeSlot,
+    ClassRoom, SchedulingConfig, SchedulingInput, Slot, Subject, Teacher, TimeSlot,
 )
 from core.roles import resolve_roles
 from core.scheduler import _State, _feasible, _put_at
@@ -48,6 +48,38 @@ def test_gdtc_never_period5():
     assert _feasible(1, ts5, 1, 100, state, role_index) is False
     ts1 = TimeSlot(2, 2, "S", 1)
     assert _feasible(1, ts1, 1, 100, state, role_index) is True
+
+
+def test_gdtc_avoid_period_configurable():
+    subjects = [Subject(1, "GDTC", ROLE_GDTC), Subject(2, "HDTN", ROLE_HDTN)]
+    role_index = resolve_roles(subjects)
+    state = _State(remaining_need={(1, 1): 10}, busy=set())
+    config = SchedulingConfig(gdtc_avoid_period=3)
+    ts3 = TimeSlot(1, 2, "S", 3)
+    assert _feasible(1, ts3, 1, 100, state, role_index, config=config) is False
+    state.occupied[(1, 2, "S", 4)] = True  # satisfy liền mạch so the avoid-period check is what's tested
+    ts5 = TimeSlot(2, 2, "S", 5)  # tiết 5 không còn bị né với config này
+    assert _feasible(1, ts5, 1, 100, state, role_index, config=config) is True
+
+
+def test_max_periods_per_session_configurable():
+    subjects = [Subject(1, "Toan", ROLE_THUONG), Subject(2, "HDTN", ROLE_HDTN)]
+    role_index = resolve_roles(subjects)
+    ts = TimeSlot(1, 2, "S", 1)
+    state = _State(remaining_need={(1, 1): 10}, busy=set())
+    config = SchedulingConfig(max_periods_per_session=3)
+    state.session_count[(100, 2, "S")] = 3
+    assert _feasible(1, ts, 1, 100, state, role_index, config=config) is False
+    state.session_count[(100, 2, "S")] = 2
+    assert _feasible(1, ts, 1, 100, state, role_index, config=config) is True
+
+
+def test_feasible_defaults_to_current_behavior_when_config_omitted():
+    subjects = [Subject(1, "GDTC", ROLE_GDTC), Subject(2, "HDTN", ROLE_HDTN)]
+    role_index = resolve_roles(subjects)
+    state = _State(remaining_need={(1, 1): 10}, busy=set())
+    ts5 = TimeSlot(1, 2, "S", 5)
+    assert _feasible(1, ts5, 1, 100, state, role_index) is False  # vẫn né tiết 5 như cũ
 
 
 def test_day_cap_5_per_day():
@@ -338,6 +370,37 @@ def test_small_synthetic_schedule_succeeds_and_meets_quotas():
         if result.assignment.get(slot.slot_id) is not None:
             filled_count[(slot.class_id, slot.ts.weekday, slot.ts.session)] += 1
     assert all(v != 1 for v in filled_count.values()), filled_count
+
+
+def test_chao_co_position_configurable_in_full_run():
+    classes = [ClassRoom(1, "6A")]
+    subjects = [
+        Subject(1, "Toan hoc", ROLE_THUONG, 1),
+        Subject(2, "Ngu van", ROLE_KEP, 2),
+        Subject(3, "GDTC", ROLE_GDTC, 3),
+        Subject(4, "HDTN", ROLE_HDTN, 4),
+        Subject(5, "Tieng Anh", ROLE_THUONG, 5),
+    ]
+    teachers = [Teacher(i, f"GV{i}") for i in range(1, 6)]
+    need = {(1, 1): 6, (2, 1): 12, (3, 1): 3, (4, 1): 3, (5, 1): 6}
+    assigned_teacher = {(1, 1): 1, (2, 1): 2, (3, 1): 3, (4, 1): 4, (5, 1): 5}
+    timeslots = _make_timeslots(morning=5, afternoon=0)
+    inp = _build_input(classes, subjects, teachers, need, assigned_teacher, timeslots, seed=42)
+    # chao_co_period stays 1: the pin block runs before anything else is placed in the
+    # attempt, so BAT_LIEN_MACH (no gaps in a session) can never be satisfied for
+    # period > 1 at pin time -- same constraint every other period-1-only pin (e.g. the
+    # existing Monday chào cờ pin) relies on. Only chao_co_weekday is varied here.
+    inp.config = SchedulingConfig(chao_co_weekday=3, chao_co_period=1)
+
+    result = sched.run(inp, max_attempts=6000, target_successes=3)
+    assert result.success is True
+
+    hdtn_id = 4
+    for slot in inp.slots:
+        if slot.ts.weekday == 3 and slot.ts.session == "S" and slot.ts.period == 1:
+            assert result.assignment.get(slot.slot_id) == hdtn_id
+        if slot.ts.weekday == 2 and slot.ts.session == "S" and slot.ts.period == 1:
+            assert result.assignment.get(slot.slot_id) != hdtn_id
 
 
 def test_extra_kep_ids_forces_adjacency_in_full_run():
