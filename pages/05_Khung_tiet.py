@@ -4,7 +4,8 @@ import streamlit as st
 from core import frame as frame_mod
 from core.models import WEEKDAY_NAMES
 from data import repository as repo
-from ui_common import get_conn, require_auth, require_school, sidebar_backup_export, sidebar_school_switcher
+from ui_common import get_conn, require_auth, require_school, sidebar_backup_export, sidebar_fixed_rules, \
+    sidebar_school_switcher
 
 
 def _class_quota_total(ppw: dict, class_id: int, parity: str) -> int:
@@ -162,4 +163,5 @@ with st.expander("Tuỳ chỉnh / bỏ ngày lệch tiết thủ công"):
         st.rerun()
 
 sidebar_backup_export(conn)
+sidebar_fixed_rules()
 sidebar_school_switcher()

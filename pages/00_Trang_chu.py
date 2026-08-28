@@ -1,7 +1,11 @@
+import pandas as pd
 import streamlit as st
 
+from core import frame as frame_mod
+from core import setup_status
 from data import repository as repo
-from ui_common import get_conn, require_auth, require_school, sidebar_backup_export, sidebar_school_switcher
+from ui_common import get_conn, require_auth, require_school, sidebar_backup_export, sidebar_fixed_rules, \
+    sidebar_school_switcher
 
 require_auth()
 school_slug = require_school()
@@ -20,6 +24,42 @@ col1.metric("Số lớp", len(classes))
 col2.metric("Số môn", len(subjects))
 col3.metric("Số giáo viên", len(teachers))
 col4.metric("Tuần hiện tại", "Chẵn" if parity == "C" else "Lẻ")
+
+st.subheader("Tiến độ thiết lập")
+
+assignments = repo.get_assignments(conn)
+ppw = repo.get_periods_per_week(conn)
+
+class_totals = {}
+class_quota_by_parity = {}
+for c in classes:
+    m, a, ss, allow_sat, short_wd, short_m, short_a = repo.get_frame_template(conn, c.class_id)
+    class_totals[c.class_id] = frame_mod.total_cells_per_class(
+        m, a, bool(ss), bool(allow_sat), short_wd, short_m, short_a,
+    )
+    class_quota_by_parity[c.class_id] = {
+        par: sum(v for (_s, cid, p), v in ppw.items() if cid == c.class_id and p == par)
+        for par in ("C", "L")
+    }
+
+num_teachers_with_busy = sum(1 for t in teachers if repo.get_teacher_busy_cells(conn, t.teacher_id))
+
+setup_steps = [
+    ("Khai báo", setup_status.check_khai_bao(len(classes), len(subjects), len(teachers)), "01_Khai_bao"),
+    ("Phân công", setup_status.check_phan_cong(ppw, assignments), "02_PhanCong"),
+    ("Định mức", setup_status.check_dinh_muc(repo.get_teacher_quota_view(conn, parity)), "03_DinhMuc"),
+    ("Khung tiết", setup_status.check_khung_tiet(class_totals, class_quota_by_parity), "05_Khung_tiet"),
+    ("GV bận", setup_status.check_gv_ban(len(teachers), num_teachers_with_busy), "04_GV_Ban"),
+]
+status_df = pd.DataFrame([
+    {"Bước": label, "Trạng thái": "✅" if status.ok else "⚠️", "Ghi chú": status.detail}
+    for label, status, _page in setup_steps
+])
+st.dataframe(status_df, hide_index=True, use_container_width=True)
+
+link_cols = st.columns(len(setup_steps))
+for col, (label, _status, page) in zip(link_cols, setup_steps):
+    col.page_link(f"pages/{page}.py", label=f"→ {label}")
 
 if len(classes) == 0:
     st.info(
@@ -67,4 +107,5 @@ Dùng thanh điều hướng bên trái để:
 )
 
 sidebar_backup_export(conn)
+sidebar_fixed_rules()
 sidebar_school_switcher()

@@ -2,7 +2,8 @@ import pandas as pd
 import streamlit as st
 
 from data import repository as repo
-from ui_common import get_conn, require_auth, require_school, sidebar_backup_export, sidebar_school_switcher
+from ui_common import get_conn, require_auth, require_school, sidebar_backup_export, sidebar_fixed_rules, \
+    sidebar_school_switcher
 
 require_auth()
 school_slug = require_school()
@@ -44,4 +45,5 @@ if st.button("Lưu phân công"):
     st.rerun()
 
 sidebar_backup_export(conn)
+sidebar_fixed_rules()
 sidebar_school_switcher()

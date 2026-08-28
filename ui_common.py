@@ -17,6 +17,28 @@ SAMPLE_SCHOOL_XLSM_PATH = Path(__file__).parent / "io_excel" / "sample_school.xl
 ROLE_CODE_LABELS = {0: "Thường", 1: "Nặng", 2: "Kép", 3: "Nặng+Kép", 4: "GDTC", 5: "HDTN"}
 ROLE_LABEL_TO_CODE = {v: k for k, v in ROLE_CODE_LABELS.items()}
 
+# Ràng buộc sư phạm cứng, do thuật toán xếp (core/scheduler.py) tự áp dụng -- không có
+# trang cấu hình riêng nên hiển thị ở đây để người nhập liệu biết hệ thống mặc định làm gì.
+FIXED_SCHEDULING_RULES = [
+    "Không xếp trùng giáo viên trong cùng 1 tiết",
+    "Môn nặng (Toán/Lý/Hoá) tối đa 3 tiết liên tiếp trong 1 buổi",
+    "Tiết kép Ngữ văn xếp liền nhau, cùng buổi",
+    "Thể dục né Tiết 5",
+    "Chào cờ Thứ 2 Tiết 1 và sinh hoạt lớp Thứ 7 (toàn trường)",
+    "Mỗi giáo viên được xếp đúng 1 buổi nghỉ/tuần",
+    "Không xếp buổi nghỉ vào sáng Thứ 2/5/6 (GVCN bắt buộc có mặt Thứ 2 và Thứ 7)",
+    "Chiều Thứ 5 và Thứ 6 luôn để trống toàn trường (dành ôn tập/phụ đạo ngoài TKB)",
+    "Không buổi nào bị xếp đúng 1 tiết lẻ",
+]
+
+
+def sidebar_fixed_rules() -> None:
+    with st.sidebar:
+        with st.expander("📐 Quy tắc xếp lịch cố định"):
+            st.caption("Áp dụng tự động khi xếp TKB, không chỉnh được qua giao diện.")
+            for rule in FIXED_SCHEDULING_RULES:
+                st.markdown(f"- {rule}")
+
 
 def _slugify(name: str) -> str:
     s = re.sub(r"[^a-z0-9]+", "-", name.strip().lower()).strip("-")

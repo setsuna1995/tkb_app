@@ -3,7 +3,7 @@ import streamlit as st
 
 from data import repository as repo
 from ui_common import ROLE_CODE_LABELS, ROLE_LABEL_TO_CODE, get_conn, require_auth, require_school, \
-    sidebar_backup_export, sidebar_school_switcher
+    sidebar_backup_export, sidebar_fixed_rules, sidebar_school_switcher
 
 require_auth()
 school_slug = require_school()
@@ -98,4 +98,5 @@ with tab_teachers:
         st.rerun()
 
 sidebar_backup_export(conn)
+sidebar_fixed_rules()
 sidebar_school_switcher()
