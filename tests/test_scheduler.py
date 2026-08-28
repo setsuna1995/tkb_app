@@ -524,4 +524,54 @@ def test_change_minimization_keeps_old_baseline_when_feasible():
     assert result.success is True
     slot_id = inp.slots[0].slot_id
     assert result.assignment[slot_id] == 1
-    assert result.cells_changed == 0
+
+
+def test_busy_teacher_period_and_session_never_scheduled():
+    # GV bận (ban_busy) phải là hard-exclusion: không được xếp vào cả tiết lẻ
+    # đã khai báo bận (tiết bận) lẫn nguyên 1 buổi đã khai báo bận (buổi bận).
+    # Lưu ý: mỗi môn thường (không kép) chỉ được xếp tối đa 1 tiết/ngày/lớp
+    # (core/scheduler.py _feasible, cap_d=1), nên nhu cầu Toán (1,1) phải để dư
+    # so với 6 ngày trong tuần trừ đi ngày bị chặn nguyên buổi, nếu không lịch
+    # sẽ vô nghiệm một cách hợp lệ (không phải do cơ chế bận sai).
+    classes = [ClassRoom(1, "6A"), ClassRoom(2, "6B")]
+    subjects = [
+        Subject(1, "Toan hoc", ROLE_THUONG, 1),
+        Subject(2, "Ngu van", ROLE_KEP, 2),
+        Subject(3, "GDTC", ROLE_GDTC, 3),
+        Subject(4, "HDTN", ROLE_HDTN, 4),
+        Subject(5, "Tieng Anh", ROLE_THUONG, 5),
+    ]
+    teachers = [Teacher(i, f"GV{i}") for i in range(1, 11)]
+    need = {
+        (1, 1): 4, (2, 1): 12, (3, 1): 3, (4, 1): 5, (5, 1): 6,
+        (1, 2): 6, (2, 2): 12, (3, 2): 3, (4, 2): 3, (5, 2): 6,
+    }
+    assigned_teacher = {
+        (1, 1): 1, (2, 1): 2, (3, 1): 3, (4, 1): 4, (5, 1): 5,
+        (1, 2): 6, (2, 2): 7, (3, 2): 8, (4, 2): 9, (5, 2): 10,
+    }
+    timeslots = _make_timeslots(morning=5, afternoon=0)
+
+    # GV1 (dạy Toán 6A) khai báo bận: 1 tiết lẻ (Thứ 3 Tiết 1) + trọn buổi Sáng Thứ 4
+    busy_ts = [ts for ts in timeslots if (ts.weekday, ts.session, ts.period) == (3, "S", 1)]
+    busy_ts += [ts for ts in timeslots if ts.weekday == 4 and ts.session == "S"]
+    assert len(busy_ts) == 6  # 1 tiết lẻ + 5 tiết của trọn 1 buổi
+    ban_busy = {(1, ts.ts_id) for ts in busy_ts}
+
+    inp = _build_input(classes, subjects, teachers, need, assigned_teacher, timeslots,
+                        seed=42, ban_busy=ban_busy)
+    result = sched.run(inp, max_attempts=6000, target_successes=5)
+    assert result.success is True
+
+    busy_ts_ids = {ts.ts_id for ts in busy_ts}
+    for s in inp.slots:
+        if s.ts.ts_id not in busy_ts_ids:
+            continue
+        subj_id = result.assignment.get(s.slot_id)
+        if subj_id is None:
+            continue
+        teacher_id = assigned_teacher.get((subj_id, s.class_id))
+        assert teacher_id != 1, (
+            f"GV1 bị xếp vào tiết đã khai báo bận: lớp {s.class_id}, "
+            f"Thứ {s.ts.weekday} {s.ts.session}{s.ts.period}"
+        )

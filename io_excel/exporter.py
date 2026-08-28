@@ -1,5 +1,5 @@
 """Export the current DB state (or a specific accepted run) to a downloadable
-.xlsx, using export_template.xlsm (a copy of the school's own TKB_9lop_moi.xlsm)
+.xlsx, using export_template.xlsm (a copy of the school's own sample_school.xlsm)
 as the base -- so the output keeps the same fonts, header colors, borders and
 alternating row banding as the original workbook. Only the TKB_Mon (subject
 only, renamed from the template's TKB_Nhap) / TKB (subject + teacher) /

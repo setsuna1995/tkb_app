@@ -12,6 +12,7 @@ from data import db
 
 LEGACY_DB_PATH = str(Path(__file__).parent / "tkb_app_data.db")
 SCHOOLS_DIR = Path(__file__).parent / "schools"
+SAMPLE_SCHOOL_XLSM_PATH = Path(__file__).parent / "io_excel" / "sample_school.xlsm"
 
 ROLE_CODE_LABELS = {0: "Thường", 1: "Nặng", 2: "Kép", 3: "Nặng+Kép", 4: "GDTC", 5: "HDTN"}
 ROLE_LABEL_TO_CODE = {v: k for k, v in ROLE_CODE_LABELS.items()}
@@ -41,8 +42,27 @@ def _migrate_legacy_single_db() -> None:
     connection.close()
 
 
+def _seed_sample_school_if_empty() -> None:
+    """First-run only: if truly no school exists yet (fresh install, or all data
+    lost on an ephemeral-filesystem host restart), create one default school
+    pre-populated from the bundled sample dataset so the app is never empty."""
+    if any(SCHOOLS_DIR.glob("*.db")):
+        return
+    slug = create_school("Trường mẫu (dữ liệu mẫu)")
+    connection = get_conn(slug)
+    try:
+        from io_excel.importer import import_xlsm
+        import_xlsm(connection, str(SAMPLE_SCHOOL_XLSM_PATH))
+    except Exception:
+        connection.close()
+        get_conn.clear()
+        (SCHOOLS_DIR / f"{slug}.db").unlink(missing_ok=True)
+        st.warning("Không thể nạp dữ liệu mẫu cho trường mặc định. Hãy thử lại hoặc tạo trường mới thủ công.")
+
+
 def list_schools() -> list:
     _migrate_legacy_single_db()
+    _seed_sample_school_if_empty()
     from data import repository as repo
     schools = []
     for p in sorted(SCHOOLS_DIR.glob("*.db")):
@@ -119,15 +139,6 @@ def sidebar_school_switcher() -> None:
         if st.button(f"🏫 Đổi trường ({names.get(slug, slug)})"):
             st.session_state.pop("school_slug", None)
             st.rerun()
-
-
-def week_selector(conn, *, label: str = "Tuần làm việc", key: str = "week_selector") -> int:
-    from data import repository as repo
-    history = repo.list_seed_history(conn)
-    current = repo.get_current_week_no(conn)
-    options = sorted({h["week_no"] for h in history} | {current})
-    idx = options.index(current) if current in options else len(options) - 1
-    return st.selectbox(label, options, index=idx, key=key)
 
 
 def format_substitution_line(sub: dict, name_by_id: dict, class_names: dict) -> str:

@@ -67,7 +67,7 @@ with tab_subjects:
 
 with tab_teachers:
     teachers = repo.list_teachers(conn)
-    role_options = ["", "GVCN", "Tổ trưởng", "Tổ phó", "Tổng phụ trách"]
+    role_options = ["", "GVCN", "Tổ trưởng", "Tổ phó", "Phó hiệu trưởng", "Tổng phụ trách"]
     df = pd.DataFrame([{
         "teacher_id": t.teacher_id, "Tên GV": t.name, "Chức vụ": t.role,
         "Đi T2": t.must_monday, "GVCN": t.is_gvcn,

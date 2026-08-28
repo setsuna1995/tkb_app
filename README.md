@@ -70,7 +70,7 @@ python -m pytest
 ```
 
 Bộ test gồm: kiểm tra từng ràng buộc riêng lẻ của thuật toán xếp (core/scheduler),
-kiểm tra import đúng dữ liệu từ file Excel mẫu thật (`tests/fixtures/TKB_9lop_moi.xlsm`),
+kiểm tra import đúng dữ liệu từ file Excel mẫu thật (`io_excel/sample_school.xlsm`),
 và kiểm tra xếp TKB thành công + đúng ràng buộc trên chính dữ liệu thật đó.
 
 ## Triển khai lên Streamlit Community Cloud (miễn phí)

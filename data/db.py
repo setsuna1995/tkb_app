@@ -120,6 +120,7 @@ DEFAULT_ROLE_REDUCTION = {
     "Tổ trưởng": 3,
     "Tổ phó": 1,
     "Tổng phụ trách": 8,
+    "Phó hiệu trưởng": 15,
 }
 
 

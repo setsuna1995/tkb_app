@@ -114,6 +114,38 @@ with tab_grid:
                 st.info(f"Đã xóa toàn bộ tiết bận của {selected_teacher_name}.")
                 st.rerun()
 
+        st.markdown("**Nghỉ trọn buổi / cả ngày:**")
+        wd_pick = st.selectbox(
+            "Thứ", options=list(range(2, 8)), format_func=lambda w: f"Thứ {w}",
+            key="gvban_preset_weekday",
+        )
+        pcol4, pcol5, pcol6 = st.columns(3)
+        with pcol4:
+            if st.button(f"🌤️ Nghỉ trọn Sáng (Thứ {wd_pick})", use_container_width=True):
+                new_cells = set(busy_cells)
+                for p in range(1, 6):
+                    new_cells.add((wd_pick, "S", p))
+                repo.set_teacher_busy_cells(conn, sel_tid, new_cells)
+                st.success(f"Đã cập nhật: {selected_teacher_name} nghỉ trọn buổi Sáng Thứ {wd_pick}!")
+                st.rerun()
+        with pcol5:
+            if st.button(f"🌆 Nghỉ trọn Chiều (Thứ {wd_pick})", use_container_width=True):
+                new_cells = set(busy_cells)
+                for p in range(1, 6):
+                    new_cells.add((wd_pick, "C", p))
+                repo.set_teacher_busy_cells(conn, sel_tid, new_cells)
+                st.success(f"Đã cập nhật: {selected_teacher_name} nghỉ trọn buổi Chiều Thứ {wd_pick}!")
+                st.rerun()
+        with pcol6:
+            if st.button(f"🌑 Nghỉ trọn cả ngày (Thứ {wd_pick})", use_container_width=True):
+                new_cells = set(busy_cells)
+                for p in range(1, 6):
+                    new_cells.add((wd_pick, "S", p))
+                    new_cells.add((wd_pick, "C", p))
+                repo.set_teacher_busy_cells(conn, sel_tid, new_cells)
+                st.success(f"Đã cập nhật: {selected_teacher_name} nghỉ trọn cả ngày Thứ {wd_pick}!")
+                st.rerun()
+
     st.write("---")
     st.subheader(f"Lưới tích chọn tiết bận: {selected_teacher_name}")
     st.caption("☑️ **Tích chọn ô** = Giáo viên bận (KHÔNG xếp tiết). ☐ **Bỏ tích** = Giáo viên rảnh (CÓ THỂ xếp tiết).")

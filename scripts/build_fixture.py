@@ -1,4 +1,4 @@
-"""Script to generate tests/fixtures/TKB_9lop_moi.xlsm and export_template.xlsm
+"""Script to generate io_excel/sample_school.xlsm and export_template.xlsm
 with 8 classes, 16 subjects, 17 teachers, 4-3 frame, Week 1 (C) and Week 2 (L) quotas,
 and all constraints from Phân công chuyên môn.xlsx and Định lượng số tiết theo tuần.
 """
@@ -16,7 +16,7 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from core import scheduler as sched
 from data import db, repository as repo
 
-FIXTURE_PATH = os.path.join(os.path.dirname(__file__), "..", "tests", "fixtures", "TKB_9lop_moi.xlsm")
+FIXTURE_PATH = os.path.join(os.path.dirname(__file__), "..", "io_excel", "sample_school.xlsm")
 TEMPLATE_PATH = os.path.join(os.path.dirname(__file__), "..", "io_excel", "export_template.xlsm")
 
 def generate():
@@ -53,9 +53,9 @@ def generate():
 
     teacher_defs = [
         ("Hà", "Phó hiệu trưởng", True, False),
-        ("Huyền Ly", "Tổ trưởng", True, False),
+        ("Huyền Ly", "", True, False),
         ("Nguyễn Ly", "GVCN", True, True),
-        ("Sơn", "Tổ phó", True, False),
+        ("Sơn", "", True, False),
         ("Hoà", "GVCN", True, True),
         ("Khu", "Thư ký HĐ", True, False),
         ("Hồng", "", False, False),
@@ -63,7 +63,7 @@ def generate():
         ("Lệ", "GVCN", True, True),
         ("Thành", "Tổ trưởng", True, False),
         ("Lan", "GVCN", True, True),
-        ("Trung", "Tổ phó", True, False),
+        ("Trung", "", True, False),
         ("Giang", "GVCN", True, True),
         ("Hoa", "GVCN", True, True),
         ("Lan Ly", "Hỗ trợ TPT", True, False),
@@ -156,6 +156,7 @@ def generate():
 
     # 1. Update PhanCong
     ws_pc = wb["PhanCong"]
+    ws_pc.cell(1, 1).value = "PHÂN CÔNG CHUYÊN MÔN — 8 lớp (2 lớp/khối, khối 6–9)"
     # Clear old data
     for r in range(2, ws_pc.max_row + 1):
         for c in range(1, ws_pc.max_column + 1):

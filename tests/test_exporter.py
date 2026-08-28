@@ -9,7 +9,7 @@ from data import db, repository as repo
 from io_excel.exporter import export_xlsx, export_xlsx_both_parities
 from io_excel.importer import import_xlsm
 
-FIXTURE = os.path.join(os.path.dirname(__file__), "fixtures", "TKB_9lop_moi.xlsm")
+FIXTURE = os.path.join(os.path.dirname(__file__), "..", "io_excel", "sample_school.xlsm")
 
 
 @pytest.fixture()

@@ -5,8 +5,7 @@ from core import scheduler as sched
 from core.models import ROLE_KEP, ROLE_NANG_KEP, WEEKDAY_NAMES, WEEKDAYS
 from core.validation import compute_quota_diff, find_teacher_conflicts
 from data import repository as repo
-from ui_common import get_conn, require_auth, require_school, sidebar_backup_export, sidebar_school_switcher, \
-    week_selector
+from ui_common import get_conn, require_auth, require_school, sidebar_backup_export, sidebar_school_switcher
 
 require_auth()
 school_slug = require_school()
@@ -124,6 +123,125 @@ if result is not None:
             st.session_state.pop("last_result", None)
             st.session_state.pop("last_input", None)
             st.rerun()
+
+st.write("---")
+with st.expander("📅 Xếp nhiều tuần cùng lúc", expanded=False):
+    history = repo.list_seed_history(conn)
+    week_lookup = {h["week_no"]: (h["seed"], h["parity"]) for h in history}
+    if not week_lookup:
+        cur_seed, cur_parity = repo.get_tuan_config(conn)
+        week_lookup = {1: (cur_seed, cur_parity)}
+
+    def _batch_week_label(wn):
+        s, p = week_lookup[wn]
+        return f"Tuần {wn} ({'Chẵn' if p == 'C' else 'Lẻ'}, seed {s})"
+
+    batch_week_nos = st.multiselect(
+        "Chọn các tuần cần xếp",
+        options=sorted(week_lookup),
+        default=sorted(week_lookup)[:1],
+        format_func=_batch_week_label,
+        key="batch_week_select",
+    )
+
+    batch_extra_kep_names = st.multiselect(
+        "Môn cần xếp 2 tiết liền kề (kép) CHỈ cho các tuần này",
+        extra_kep_options,
+        key="batch_extra_kep_select",
+    )
+    batch_extra_kep_ids = frozenset(s.subject_id for s in subjects if s.name in batch_extra_kep_names)
+
+    batch_parities = {week_lookup[wn][1] for wn in batch_week_nos}
+    batch_proceed_anyway = True
+    for par in sorted(batch_parities):
+        par_quota = repo.get_teacher_quota_view(conn, par)
+        par_over = [q for q in par_quota if q["cap"] > 0 and q["over"] > 0]
+        if par_over:
+            st.warning(
+                f"Tuần {'Chẵn' if par == 'C' else 'Lẻ'} — Các GV vượt định mức trung bình 2 tuần:\n"
+                + "\n".join(f"- {q['name']}: TB {q['load_avg']}/{q['cap']} (vượt {q['over']})" for q in par_over)
+            )
+            if not st.checkbox(
+                f"Vẫn tiếp tục xếp tuần {'Chẵn' if par == 'C' else 'Lẻ'} dù vượt định mức",
+                key=f"batch_proceed_{par}",
+            ):
+                batch_proceed_anyway = False
+
+    if st.button("🚀 Xếp các tuần đã chọn", disabled=not batch_week_nos or not batch_proceed_anyway):
+        batch_results = {}
+        for wn in batch_week_nos:
+            b_seed, b_parity = week_lookup[wn]
+            b_inp = repo.build_scheduling_input(conn, parity=b_parity, seed=b_seed, extra_kep_ids=batch_extra_kep_ids)
+            with st.spinner(f"Đang xếp Tuần {wn}..."):
+                b_result = sched.run(b_inp)
+            batch_results[wn] = (b_seed, b_parity, b_inp, b_result)
+        st.session_state["batch_results"] = batch_results
+
+    def _batch_highlight_nonzero(row):
+        return ["background-color: #ffc7ce" if col != "Môn" and row[col] != 0 else "" for col in row.index]
+
+    batch_results = st.session_state.get("batch_results", {})
+    for wn, (b_seed, b_parity, b_inp, b_result) in list(batch_results.items()):
+        with st.expander(f"Kết quả Tuần {wn} ({'Chẵn' if b_parity == 'C' else 'Lẻ'})", expanded=True):
+            if not b_result.success:
+                st.error(b_result.failure_reason)
+                continue
+            st.success(
+                f"Xếp thành công sau {b_result.attempts_tried} lần thử "
+                f"({b_result.successes_found} phương án hợp lệ). "
+                f"Giữ nguyên {b_result.cells_total - b_result.cells_changed}/{b_result.cells_total} ô, "
+                f"thay đổi {b_result.cells_changed} ô."
+            )
+
+            b_subject_names = {s.subject_id: s.name for s in b_inp.subjects}
+            b_classes_sorted = sorted(b_inp.classes, key=lambda c: c.sort_order)
+            b_tabs = st.tabs([c.name for c in b_classes_sorted])
+            for tab, cls in zip(b_tabs, b_classes_sorted):
+                with tab:
+                    cls_slots = [s for s in b_inp.slots if s.class_id == cls.class_id]
+                    periods = sorted({(s.ts.session, s.ts.period) for s in cls_slots},
+                                      key=lambda sp: (0 if sp[0] == "S" else 1, sp[1]))
+                    grid = {key: {} for key in periods}
+                    for s in cls_slots:
+                        subj_id = b_result.assignment.get(s.slot_id)
+                        grid[(s.ts.session, s.ts.period)][s.ts.weekday] = b_subject_names.get(subj_id, "")
+                    rows = []
+                    for (sess, per) in periods:
+                        row = {"Buổi": "Sáng" if sess == "S" else "Chiều", "Tiết": per}
+                        for wd in WEEKDAYS:
+                            row[WEEKDAY_NAMES[wd]] = grid[(sess, per)].get(wd, "")
+                        rows.append(row)
+                    st.dataframe(pd.DataFrame(rows), hide_index=True, use_container_width=True)
+
+            b_conflicts = find_teacher_conflicts(b_inp.slots, b_result.assignment, b_inp.assigned_teacher)
+            if b_conflicts:
+                st.error(f"Phát hiện {len(b_conflicts)} trường hợp GV trùng lịch (không nên xảy ra, báo lỗi này).")
+
+            st.caption("Kiểm tra định mức (thực tế − định mức, kỳ vọng 0)")
+            b_diff = compute_quota_diff(b_inp.slots, b_result.assignment, repo.get_periods_per_week(conn), b_parity)
+            b_check_rows = []
+            for subj in sorted(b_inp.subjects, key=lambda s: s.sort_order):
+                row = {"Môn": subj.name}
+                for cls in b_classes_sorted:
+                    row[cls.name] = b_diff.get((subj.subject_id, cls.class_id), 0)
+                b_check_rows.append(row)
+            st.dataframe(
+                pd.DataFrame(b_check_rows).style.apply(_batch_highlight_nonzero, axis=1),
+                hide_index=True, use_container_width=True,
+            )
+
+            if st.button(f"✅ Chấp nhận Tuần {wn}", key=f"batch_accept_{wn}"):
+                b_cells = {
+                    (s.class_id, s.ts.weekday, s.ts.session, s.ts.period): b_result.assignment.get(s.slot_id)
+                    for s in b_inp.slots
+                }
+                repo.bulk_replace_tkb_nhap(conn, b_cells)
+                b_run_id = repo.save_run(conn, wn, b_seed, b_parity, b_result.cells_changed, b_result.cells_total,
+                                          True, "OK")
+                repo.save_tkb_result(conn, b_run_id, b_cells)
+                st.success(f"Đã lưu Tuần {wn} làm thời khóa biểu chính thức.")
+                del st.session_state["batch_results"][wn]
+                st.rerun()
 
 sidebar_backup_export(conn)
 sidebar_school_switcher()
