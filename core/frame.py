@@ -47,7 +47,8 @@ def validate_periods(morning_periods: int, afternoon_periods: int,
 def active_cells(morning_periods: int, afternoon_periods: int, study_sunday: bool = False,
                   allow_saturday: bool = False, short_weekday: int | None = None,
                   short_morning_periods: int | None = None,
-                  short_afternoon_periods: int | None = None) -> list:
+                  short_afternoon_periods: int | None = None,
+                  reserved_off_weekdays_chieu: tuple = RESERVED_OFF_WEEKDAYS_CHIEU) -> list:
     """Returns [(weekday, session, period), ...] for one class's frame.
 
     allow_saturday: khi trường học 2 buổi/ngày (afternoon_periods > 0), mặc định
@@ -85,7 +86,7 @@ def active_cells(morning_periods: int, afternoon_periods: int, study_sunday: boo
                 day_afternoon = short_afternoon_periods
         for p in range(1, day_morning + 1):
             cells.append((wd, "S", p))
-        if wd in RESERVED_OFF_WEEKDAYS_CHIEU:
+        if wd in reserved_off_weekdays_chieu:
             continue
         for p in range(1, day_afternoon + 1):
             cells.append((wd, "C", p))
@@ -95,13 +96,16 @@ def active_cells(morning_periods: int, afternoon_periods: int, study_sunday: boo
 def total_cells_per_class(morning_periods: int, afternoon_periods: int, study_sunday: bool = False,
                            allow_saturday: bool = False, short_weekday: int | None = None,
                            short_morning_periods: int | None = None,
-                           short_afternoon_periods: int | None = None) -> int:
+                           short_afternoon_periods: int | None = None,
+                           reserved_off_weekdays_chieu: tuple = RESERVED_OFF_WEEKDAYS_CHIEU) -> int:
     return len(active_cells(morning_periods, afternoon_periods, study_sunday, allow_saturday,
-                             short_weekday, short_morning_periods, short_afternoon_periods))
+                             short_weekday, short_morning_periods, short_afternoon_periods,
+                             reserved_off_weekdays_chieu))
 
 
 def suggest_short_day(morning_periods: int, afternoon_periods: int, quota_total: int,
-                       allow_saturday: bool = False) -> tuple[int, int | None, int | None] | None:
+                       allow_saturday: bool = False,
+                       reserved_off_weekdays_chieu: tuple = RESERVED_OFF_WEEKDAYS_CHIEU) -> tuple[int, int | None, int | None] | None:
     """Đề xuất dồn phần chênh lệch (deficit) giữa khung đồng nhất và định mức thực tế
     vào đúng 1 ngày, ưu tiên Thứ 7 -- thay vì để thuật toán xếp lịch vô tình để trống
     rải rác. Trả về (short_weekday, short_morning_periods, short_afternoon_periods)
@@ -114,7 +118,8 @@ def suggest_short_day(morning_periods: int, afternoon_periods: int, quota_total:
     -> Thứ 2 -- bỏ qua buổi chiều Thứ 5/Thứ 6 vì RESERVED_OFF_WEEKDAYS_CHIEU luôn khoá
     2 buổi đó bất kể cấu hình, nên không thể "trừ" tiết vào đấy.
     """
-    uniform_total = total_cells_per_class(morning_periods, afternoon_periods, allow_saturday=allow_saturday)
+    uniform_total = total_cells_per_class(morning_periods, afternoon_periods, allow_saturday=allow_saturday,
+                                           reserved_off_weekdays_chieu=reserved_off_weekdays_chieu)
     deficit = uniform_total - quota_total
     if deficit <= 0:
         return None
@@ -123,7 +128,7 @@ def suggest_short_day(morning_periods: int, afternoon_periods: int, quota_total:
     candidates = [7] if not skip_saturday else [6, 5, 4, 3, 2]
 
     for wd in candidates:
-        avail_afternoon = 0 if wd in RESERVED_OFF_WEEKDAYS_CHIEU else afternoon_periods
+        avail_afternoon = 0 if wd in reserved_off_weekdays_chieu else afternoon_periods
         avail_morning = morning_periods
         # Trừ vào buổi có nhiều tiết khả dụng hơn trước; nếu bằng nhau, trừ buổi sáng.
         order = ("C", "S") if avail_afternoon > avail_morning else ("S", "C")
@@ -150,7 +155,8 @@ def suggest_short_day(morning_periods: int, afternoon_periods: int, quota_total:
 
 def is_short_day_config_valid(morning_periods: int, afternoon_periods: int, allow_saturday: bool,
                                short_weekday: int | None, short_morning_periods: int | None,
-                               short_afternoon_periods: int | None) -> bool:
+                               short_afternoon_periods: int | None,
+                               reserved_off_weekdays_chieu: tuple = RESERVED_OFF_WEEKDAYS_CHIEU) -> bool:
     """Kiểm tra 1 cấu hình ngày lệch tiết đã lưu còn hợp lý với khung (morning_periods,
     afternoon_periods, allow_saturday) MỚI hay không -- dùng khi áp lại preset/tùy chỉnh
     cho 1 lớp đã có ngày lệch tiết, để quyết định giữ nguyên hay phải reset về đồng nhất
@@ -169,7 +175,7 @@ def is_short_day_config_valid(morning_periods: int, afternoon_periods: int, allo
         if short_morning_periods == 1 or not (0 <= short_morning_periods < morning_periods):
             return False
     if short_afternoon_periods is not None:
-        if short_weekday in RESERVED_OFF_WEEKDAYS_CHIEU:
+        if short_weekday in reserved_off_weekdays_chieu:
             return False  # buổi chiều ngày này luôn bị khoá (ôn bồi dưỡng), override vô nghĩa
         if short_afternoon_periods == 1 or not (0 <= short_afternoon_periods < afternoon_periods):
             return False
@@ -177,11 +183,13 @@ def is_short_day_config_valid(morning_periods: int, afternoon_periods: int, allo
 
 
 def check_capacity(morning_periods: int, afternoon_periods: int, class_quota_totals: dict,
-                    study_sunday: bool = False, allow_saturday: bool = False) -> str:
+                    study_sunday: bool = False, allow_saturday: bool = False,
+                    reserved_off_weekdays_chieu: tuple = RESERVED_OFF_WEEKDAYS_CHIEU) -> str:
     """class_quota_totals: class_id -> total periods needed (sum over subjects, one parity).
     Mirrors ModKhung.KiemTraDuCho's "will it fit?" warning.
     """
-    total_per_class = total_cells_per_class(morning_periods, afternoon_periods, study_sunday, allow_saturday)
+    total_per_class = total_cells_per_class(morning_periods, afternoon_periods, study_sunday, allow_saturday,
+                                             reserved_off_weekdays_chieu=reserved_off_weekdays_chieu)
     if not class_quota_totals:
         return f">> Đủ chỗ (khung {total_per_class} ô/lớp)."
     max_quota = max(class_quota_totals.values())

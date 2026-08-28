@@ -38,6 +38,16 @@ def test_total_cells_per_class_reflects_short_weekday_reduction():
     assert total_with_short_day == total_uniform - 1
 
 
+def test_active_cells_respects_custom_reserved_off_weekdays_chieu():
+    default_cells = frame.active_cells(4, 3)
+    assert (5, "C", 1) not in default_cells  # Thứ 5 chiều khoá theo mặc định
+    assert (2, "C", 1) in default_cells      # Thứ 2 chiều KHÔNG khoá theo mặc định
+
+    custom_cells = frame.active_cells(4, 3, reserved_off_weekdays_chieu=(2, 3))
+    assert (5, "C", 1) in custom_cells        # Thứ 5 không còn bị khoá
+    assert (2, "C", 1) not in custom_cells    # Thứ 2 giờ bị khoá thay thế
+
+
 # ---------------------------------------------------------------------------
 # suggest_short_day()
 # ---------------------------------------------------------------------------
