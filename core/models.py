@@ -80,6 +80,24 @@ class RoleIndex:
 
 
 @dataclass
+class SchedulingConfig:
+    """Ràng buộc "lựa chọn của trường" -- khác trường có thể chọn khác, không phải
+    bất biến thuật toán. Mọi default dưới đây = đúng hằng số hardcode trước khi có
+    cấu hình này, để hành vi không đổi cho tới khi trường chủ động lưu giá trị khác.
+    """
+    gdtc_avoid_period: int = 5
+    chao_co_weekday: int = 2
+    chao_co_period: int = 1
+    max_heavy_consecutive: int = 3
+    max_periods_per_session: int = 4
+    teacher_off_sessions_per_week: int = 1
+    forbidden_off_cells: frozenset = field(
+        default_factory=lambda: frozenset({(2, "S"), (5, "S"), (6, "S"), (5, "C"), (6, "C")})
+    )
+    reserved_off_weekdays_chieu: tuple = (5, 6)
+
+
+@dataclass
 class SchedulingInput:
     classes: list          # list[ClassRoom]
     subjects: list          # list[Subject]
@@ -91,6 +109,7 @@ class SchedulingInput:
     timeslots: list         # list[TimeSlot]
     seed: int = 0            # 0 = random each run
     extra_kep_ids: frozenset = field(default_factory=frozenset)  # subject_id cần xếp kép CHỈ tuần này
+    config: SchedulingConfig = field(default_factory=SchedulingConfig)
 
 
 @dataclass
