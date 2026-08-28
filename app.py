@@ -16,6 +16,7 @@ pages = {
         st.Page("pages/03_DinhMuc.py", title="Định mức tiết / tuần", icon="📊"),
         st.Page("pages/04_GV_Ban.py", title="Giáo viên bận", icon="🚫"),
         st.Page("pages/05_Khung_tiet.py", title="Khung tiết", icon="🗓️"),
+        st.Page("pages/10_Cau_hinh_Xep_lich.py", title="Cấu hình xếp lịch", icon="⚙️"),
     ],
     "Xếp & sửa thời khóa biểu": [
         st.Page("pages/06_Xep_TKB.py", title="Xếp TKB tự động", icon="🚀"),
