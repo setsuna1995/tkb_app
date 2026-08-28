@@ -7,7 +7,7 @@ import sqlite3
 from datetime import datetime, timezone
 
 from core import frame as frame_mod
-from core.models import ClassRoom, SchedulingInput, Slot, Subject, Teacher, TimeSlot, WEEKDAYS
+from core.models import ClassRoom, SchedulingConfig, SchedulingInput, Slot, Subject, Teacher, TimeSlot, WEEKDAYS
 
 
 def _now() -> str:
@@ -514,6 +514,65 @@ def set_meta(conn: sqlite3.Connection, key: str, value: str) -> None:
         (key, value),
     )
     conn.commit()
+
+
+# ---------------------------------------------------------------------------
+# scheduling_config -- per-school overrides for core.scheduler / core.frame
+# ---------------------------------------------------------------------------
+
+def _parse_off_cells(raw: str) -> frozenset:
+    cells = set()
+    for token in raw.split(","):
+        token = token.strip()
+        if not token:
+            continue
+        cells.add((int(token[:-1]), token[-1]))
+    return frozenset(cells)
+
+
+def _format_off_cells(cells) -> str:
+    return ",".join(f"{wd}{session}" for wd, session in sorted(cells))
+
+
+def _parse_weekday_tuple(raw: str) -> tuple:
+    return tuple(int(x) for x in raw.split(",") if x.strip())
+
+
+def _format_weekday_tuple(weekdays) -> str:
+    return ",".join(str(wd) for wd in weekdays)
+
+
+def get_scheduling_config(conn: sqlite3.Connection) -> SchedulingConfig:
+    default = SchedulingConfig()
+    forbidden_raw = get_meta(conn, "sched_forbidden_off_cells")
+    reserved_raw = get_meta(conn, "sched_reserved_off_weekdays_chieu")
+    return SchedulingConfig(
+        gdtc_avoid_period=int(get_meta(conn, "sched_gdtc_avoid_period") or default.gdtc_avoid_period),
+        chao_co_weekday=int(get_meta(conn, "sched_chao_co_weekday") or default.chao_co_weekday),
+        chao_co_period=int(get_meta(conn, "sched_chao_co_period") or default.chao_co_period),
+        max_heavy_consecutive=int(get_meta(conn, "sched_max_heavy_consecutive") or default.max_heavy_consecutive),
+        max_periods_per_session=int(
+            get_meta(conn, "sched_max_periods_per_session") or default.max_periods_per_session
+        ),
+        teacher_off_sessions_per_week=int(
+            get_meta(conn, "sched_teacher_off_sessions_per_week") or default.teacher_off_sessions_per_week
+        ),
+        forbidden_off_cells=_parse_off_cells(forbidden_raw) if forbidden_raw else default.forbidden_off_cells,
+        reserved_off_weekdays_chieu=(
+            _parse_weekday_tuple(reserved_raw) if reserved_raw else default.reserved_off_weekdays_chieu
+        ),
+    )
+
+
+def set_scheduling_config(conn: sqlite3.Connection, config: SchedulingConfig) -> None:
+    set_meta(conn, "sched_gdtc_avoid_period", str(config.gdtc_avoid_period))
+    set_meta(conn, "sched_chao_co_weekday", str(config.chao_co_weekday))
+    set_meta(conn, "sched_chao_co_period", str(config.chao_co_period))
+    set_meta(conn, "sched_max_heavy_consecutive", str(config.max_heavy_consecutive))
+    set_meta(conn, "sched_max_periods_per_session", str(config.max_periods_per_session))
+    set_meta(conn, "sched_teacher_off_sessions_per_week", str(config.teacher_off_sessions_per_week))
+    set_meta(conn, "sched_forbidden_off_cells", _format_off_cells(config.forbidden_off_cells))
+    set_meta(conn, "sched_reserved_off_weekdays_chieu", _format_weekday_tuple(config.reserved_off_weekdays_chieu))
 
 
 # ---------------------------------------------------------------------------
