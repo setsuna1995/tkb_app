@@ -295,7 +295,8 @@ def _try_swap_repair(class_id: int, slot: Slot, state: _State, role_index,
 
 def _assign_off_slots(teacher_ids: set, teachers_by_id: dict, rng: random.Random,
                        gvcn_shl_cell: Optional[dict] = None,
-                       off_slot_count: int = 1) -> dict:
+                       off_slot_count: int = 1,
+                       forbidden_off_cells: frozenset = FORBIDDEN_OFF_CELLS) -> dict:
     """Pick each teacher's off-slot(s) for the week: off_slot_count (weekday, session)
     pairs, each on a DIFFERENT weekday when possible (never 2 off-sessions on the
     same day, i.e. never a full day off), drawn from every cell except
@@ -316,7 +317,7 @@ def _assign_off_slots(teacher_ids: set, teachers_by_id: dict, rng: random.Random
         t = teachers_by_id.get(tid)
         must_monday = t.must_monday if t else False
         is_gvcn = t.is_gvcn if t else False
-        forbidden = set(FORBIDDEN_OFF_CELLS)
+        forbidden = set(forbidden_off_cells)
         if must_monday:
             forbidden.add((2, "C"))
         if is_gvcn:
@@ -423,7 +424,11 @@ def run(inp: SchedulingInput, *, max_attempts: int = SO_LAN_THU,
         for cls in inp.classes:
             state.rem_need_count[cls.class_id] = need_cls[cls.class_id]
             state.rem_slot_count[cls.class_id] = slot_cls_n[cls.class_id]
-        state.gv_off_slots = _assign_off_slots(all_teacher_ids, teachers_by_id, rng, gvcn_shl_cell)
+        state.gv_off_slots = _assign_off_slots(
+            all_teacher_ids, teachers_by_id, rng, gvcn_shl_cell,
+            off_slot_count=config.teacher_off_sessions_per_week,
+            forbidden_off_cells=config.forbidden_off_cells,
+        )
         state.shl_days = shl_days
 
         if attempt > lock_threshold and attempt % 2 == 0:

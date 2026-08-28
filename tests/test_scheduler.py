@@ -248,6 +248,18 @@ def test_off_slot_count_defaults_to_1_buoi_per_week():
         assert len(offs[1]) == 1
 
 
+def test_assign_off_slots_respects_custom_forbidden_cells_and_count():
+    rng = random.Random(1)
+    teachers_by_id = {1: Teacher(1, "Normal", role="", must_monday=False, is_gvcn=False, cap=19)}
+    custom_forbidden = frozenset({(2, "S"), (2, "C"), (3, "S"), (3, "C"), (4, "S"), (4, "C")})
+    off_slots = sched._assign_off_slots(
+        {1}, teachers_by_id, rng, off_slot_count=2, forbidden_off_cells=custom_forbidden,
+    )
+    assert len(off_slots[1]) == 2
+    for cell in off_slots[1]:
+        assert cell not in custom_forbidden
+
+
 def test_active_cells_never_includes_chieu_thu5_thu6():
     for morning, afternoon in ((5, 0), (4, 3), (5, 2), (4, 4)):
         cells = frame.active_cells(morning, afternoon)
