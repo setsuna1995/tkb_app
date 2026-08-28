@@ -14,6 +14,7 @@ def _class_quota_total(ppw: dict, class_id: int, parity: str) -> int:
 require_auth()
 school_slug = require_school()
 conn = get_conn(school_slug)
+config = repo.get_scheduling_config(conn)
 st.title("Khung tiết (buổi sáng / chiều)")
 
 classes = repo.list_classes(conn)
@@ -30,7 +31,7 @@ preset_cols = st.columns(len(frame_mod.PRESETS))
 chosen = None
 preset_display = {"S4_C3": "Sáng 4 + Chiều 3", "S5": "Sáng 5", "S5_C2": "Sáng 5 + Chiều 2", "S4_C4": "Sáng 4 + Chiều 4"}
 for col, (key, (m, a)) in zip(preset_cols, frame_mod.PRESETS.items()):
-    total = frame_mod.total_cells_per_class(m, a)
+    total = frame_mod.total_cells_per_class(m, a, reserved_off_weekdays_chieu=config.reserved_off_weekdays_chieu)
     if col.button(f"{preset_display.get(key, key)}\n({total} ô/tuần/lớp)", key=f"preset_{key}"):
         chosen = (m, a)
 
@@ -66,7 +67,7 @@ if chosen:
         _, parity = repo.get_tuan_config(conn)
         ppw = repo.get_periods_per_week(conn)
         quota_totals = {class_by_name[name]: _class_quota_total(ppw, class_by_name[name], parity) for name in selected}
-        msg = frame_mod.check_capacity(morning, afternoon, quota_totals, allow_saturday=allow_saturday)
+        msg = frame_mod.check_capacity(morning, afternoon, quota_totals, allow_saturday=allow_saturday, reserved_off_weekdays_chieu=config.reserved_off_weekdays_chieu)
         st.success(f"Đã áp dụng khung Sáng {morning} + Chiều {afternoon} cho {len(selected)} lớp.")
         st.info(msg)
         st.rerun()
@@ -75,7 +76,7 @@ st.subheader("Khung hiện tại theo lớp")
 rows = []
 for c in classes:
     m, a, ss, allow_sat, short_wd, short_m, short_a = repo.get_frame_template(conn, c.class_id)
-    total = frame_mod.total_cells_per_class(m, a, bool(ss), bool(allow_sat), short_wd, short_m, short_a)
+    total = frame_mod.total_cells_per_class(m, a, bool(ss), bool(allow_sat), short_wd, short_m, short_a, reserved_off_weekdays_chieu=config.reserved_off_weekdays_chieu)
     short_desc = "-"
     if short_wd:
         parts = []
@@ -84,7 +85,7 @@ for c in classes:
         if short_a is not None:
             parts.append(f"Chiều {short_a}")
         short_desc = f"{WEEKDAY_NAMES.get(short_wd, short_wd)}: {', '.join(parts)}"
-        if not frame_mod.is_short_day_config_valid(m, a, bool(allow_sat), short_wd, short_m, short_a):
+        if not frame_mod.is_short_day_config_valid(m, a, bool(allow_sat), short_wd, short_m, short_a, reserved_off_weekdays_chieu=config.reserved_off_weekdays_chieu):
             short_desc += " (⚠ tạm ẩn — không hợp lệ với khung hiện tại)"
     rows.append({
         "Lớp": c.name, "Sáng": m, "Chiều": a,
@@ -106,11 +107,11 @@ ppw = repo.get_periods_per_week(conn)
 suggestions = []
 for c in classes:
     m, a, ss, allow_sat, short_wd, short_m, short_a = repo.get_frame_template(conn, c.class_id)
-    if frame_mod.is_short_day_config_valid(m, a, bool(allow_sat), short_wd, short_m, short_a):
+    if frame_mod.is_short_day_config_valid(m, a, bool(allow_sat), short_wd, short_m, short_a, reserved_off_weekdays_chieu=config.reserved_off_weekdays_chieu):
         continue  # đã có ngày lệch hợp lệ và đang hoạt động -- không đề xuất chồng lên. Nếu ngày
         # lệch đã lưu đang "tạm ẩn" (không hợp lệ với khung hiện tại), vẫn đề xuất mới bên dưới.
     quota = _class_quota_total(ppw, c.class_id, parity)
-    suggestion = frame_mod.suggest_short_day(m, a, quota, allow_saturday=bool(allow_sat))
+    suggestion = frame_mod.suggest_short_day(m, a, quota, allow_saturday=bool(allow_sat), reserved_off_weekdays_chieu=config.reserved_off_weekdays_chieu)
     if suggestion is not None:
         suggestions.append((c, suggestion))
 

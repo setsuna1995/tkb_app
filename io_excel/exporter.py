@@ -274,6 +274,7 @@ def export_full_backup_xlsx(conn) -> bytes:
     seed_history = repo.list_seed_history(conn)
     base_cap = repo.get_base_cap(conn)
     min_floor = repo.get_min_floor(conn)
+    config = repo.get_scheduling_config(conn)
 
     n_classes = len(classes)
     n_subjects = len(subjects)
@@ -374,6 +375,7 @@ def export_full_backup_xlsx(conn) -> bytes:
         # active_cells() đã tự xử lý đúng ngày lệch tiết -- tái dùng thẳng, không tự suy luận lại.
         active_set = set(frame_mod.active_cells(
             morning, afternoon, bool(study_sunday), bool(allow_saturday), short_wd, short_m, short_a,
+            reserved_off_weekdays_chieu=config.reserved_off_weekdays_chieu,
         ))
         sessions = [("S", p) for p in range(1, morning + 1)] + [("C", p) for p in range(1, afternoon + 1)]
         for session, period in sessions:

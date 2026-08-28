@@ -17,6 +17,7 @@ seed, parity = repo.get_tuan_config(conn)
 classes = repo.list_classes(conn)
 subjects = repo.list_subjects(conn)
 teachers = repo.list_teachers(conn)
+config = repo.get_scheduling_config(conn)
 latest_run = repo.get_latest_run(conn)
 
 col1, col2, col3, col4 = st.columns(4)
@@ -36,6 +37,7 @@ for c in classes:
     m, a, ss, allow_sat, short_wd, short_m, short_a = repo.get_frame_template(conn, c.class_id)
     class_totals[c.class_id] = frame_mod.total_cells_per_class(
         m, a, bool(ss), bool(allow_sat), short_wd, short_m, short_a,
+        reserved_off_weekdays_chieu=config.reserved_off_weekdays_chieu,
     )
     class_quota_by_parity[c.class_id] = {
         par: sum(v for (_s, cid, p), v in ppw.items() if cid == c.class_id and p == par)

@@ -5,8 +5,9 @@ import openpyxl
 import pytest
 
 from core import scheduler as sched
+from core.models import SchedulingConfig, WEEKDAYS
 from data import db, repository as repo
-from io_excel.exporter import export_xlsx, export_xlsx_both_parities
+from io_excel.exporter import export_full_backup_xlsx, export_xlsx, export_xlsx_both_parities
 from io_excel.importer import import_xlsm
 
 FIXTURE = os.path.join(os.path.dirname(__file__), "..", "io_excel", "sample_school.xlsm")
@@ -119,3 +120,24 @@ def test_export_both_parities_preserves_freeze_panes(conn):
     assert wb["TKB_Mon_Chan"].freeze_panes == "D62"
     assert wb["TKB_Chan"].freeze_panes == "D2"
     assert wb["TKB_GV_Chan"].freeze_panes == "D2"
+
+
+def test_export_full_backup_khung_sheet_respects_custom_reserved_off_weekdays_chieu(conn):
+    repo.set_scheduling_config(conn, SchedulingConfig(reserved_off_weekdays_chieu=(2, 3)))
+    data = export_full_backup_xlsx(conn)
+    wb = openpyxl.load_workbook(io.BytesIO(data))
+    ws_khung = wb["Khung"]
+    ws_nh = wb["TKB_Nhap"]
+
+    # tìm dòng đầu tiên của lớp đầu tiên ứng với (Chiều, tiết 1)
+    target_row = None
+    for row in range(2, ws_nh.max_row + 1):
+        if ws_nh.cell(row, 2).value == "C" and ws_nh.cell(row, 3).value == 1:
+            target_row = row
+            break
+    assert target_row is not None
+
+    thu5_col = 4 + list(WEEKDAYS).index(5)  # cột Thứ 5
+    thu2_col = 4 + list(WEEKDAYS).index(2)  # cột Thứ 2
+    assert ws_khung.cell(target_row, thu5_col).value == "x"   # Thứ 5 chiều KHÔNG còn bị khoá
+    assert ws_khung.cell(target_row, thu2_col).value != "x"   # Thứ 2 chiều giờ bị khoá thay thế
