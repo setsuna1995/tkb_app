@@ -164,5 +164,5 @@ with st.expander("Tuỳ chỉnh / bỏ ngày lệch tiết thủ công"):
         st.rerun()
 
 sidebar_backup_export(conn)
-sidebar_fixed_rules()
+sidebar_fixed_rules(conn)
 sidebar_school_switcher()
