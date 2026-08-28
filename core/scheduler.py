@@ -12,6 +12,7 @@ from collections import defaultdict
 from dataclasses import dataclass, field
 from typing import Optional
 
+from core import frame as frame_mod
 from core.models import ScheduleResult, SchedulingConfig, SchedulingInput, Slot, TimeSlot
 from core.roles import resolve_roles
 
@@ -103,10 +104,12 @@ def _feasible(class_id: int, ts: TimeSlot, subject_id: int, teacher_id: int,
         if p_session != ts.session or abs(p_period - ts.period) != 1:
             return False
     if subject_id in role_index.heavy_ids:
-        for w in (1, 2):
-            if w <= ts.period <= w + 3:
+        window = config.max_heavy_consecutive + 1
+        last_start = frame_mod.MAX_PERIODS_PER_SESSION - config.max_heavy_consecutive
+        for w in range(1, last_start + 1):
+            if w <= ts.period <= w + window - 1:
                 all_heavy = True
-                for offset in range(4):
+                for offset in range(window):
                     pos = w + offset
                     if not (state.heavy_at.get((class_id, ts.weekday, ts.session, pos), False) or pos == ts.period):
                         all_heavy = False

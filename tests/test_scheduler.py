@@ -202,6 +202,77 @@ def test_heavy_subject_run_of_3_cap():
     assert _feasible(1, ts4, 4, 103, state, role_index) is False
 
 
+def test_heavy_subject_consecutive_cap_stricter_than_default():
+    # N=2: 1 rồi 2 (heavy) đã đủ; tiết thứ 3 liên tiếp (heavy) phải bị chặn.
+    #
+    # Lưu ý: dùng 1 môn heavy THỨ 3 riêng biệt (Hoa) cho tiết 3 thay vì lặp lại
+    # subject_id đã đặt trước đó -- nếu tái dùng subject_id 1/2, check "positions
+    # >= cap_d" (mỗi môn tối đa 1 tiết/ngày, không phải KEP) sẽ return False TRƯỚC
+    # khi chạm tới nhánh heavy-window đang muốn kiểm thử, khiến assertion pass vì
+    # lý do không liên quan (test giả -- xác nhận bằng cách chạy lại trên code cũ,
+    # chưa generalize, vẫn ra False).
+    subjects = [
+        Subject(1, "Toan", ROLE_NANG), Subject(2, "Ly", ROLE_NANG),
+        Subject(3, "Hoa", ROLE_NANG), Subject(4, "HDTN", ROLE_HDTN),
+    ]
+    role_index = resolve_roles(subjects)
+    config = SchedulingConfig(max_heavy_consecutive=2)
+    state = _State(remaining_need={(1, 1): 10, (2, 1): 10, (3, 1): 10}, busy=set())
+
+    ts1 = TimeSlot(1, 2, "S", 1)
+    assert _feasible(1, ts1, 1, 100, state, role_index, config=config) is True
+    _put_at(state, Slot(1, 1, ts1), 1, 100, role_index)
+
+    ts2 = TimeSlot(2, 2, "S", 2)
+    assert _feasible(1, ts2, 2, 101, state, role_index, config=config) is True
+    _put_at(state, Slot(2, 1, ts2), 2, 101, role_index)
+
+    ts3 = TimeSlot(3, 2, "S", 3)
+    assert _feasible(1, ts3, 3, 102, state, role_index, config=config) is False
+
+
+def test_heavy_subject_consecutive_cap_looser_than_default():
+    # N=4: chuỗi 4 tiết heavy liên tiếp phải được phép (mặc định N=3 sẽ chặn ở đây).
+    #
+    # Lưu ý: dùng 1 môn heavy THỨ 4 riêng biệt (Sinh) cho tiết 4 -- cùng lý do như
+    # test_heavy_subject_consecutive_cap_stricter_than_default ở trên (tránh check
+    # "positions >= cap_d" che mất nhánh heavy-window đang muốn kiểm thử).
+    subjects = [
+        Subject(1, "Toan", ROLE_NANG), Subject(2, "Ly", ROLE_NANG),
+        Subject(3, "Hoa", ROLE_NANG), Subject(4, "Sinh", ROLE_NANG), Subject(5, "HDTN", ROLE_HDTN),
+    ]
+    role_index = resolve_roles(subjects)
+    config = SchedulingConfig(max_heavy_consecutive=4)
+    state = _State(remaining_need={(1, 1): 10, (2, 1): 10, (3, 1): 10, (4, 1): 10}, busy=set())
+
+    ts1 = TimeSlot(1, 2, "S", 1)
+    _put_at(state, Slot(1, 1, ts1), 1, 100, role_index)
+    ts2 = TimeSlot(2, 2, "S", 2)
+    _put_at(state, Slot(2, 1, ts2), 2, 101, role_index)
+    ts3 = TimeSlot(3, 2, "S", 3)
+    _put_at(state, Slot(3, 1, ts3), 3, 102, role_index)
+
+    ts4 = TimeSlot(4, 2, "S", 4)
+    assert _feasible(1, ts4, 4, 103, state, role_index, config=config) is True
+
+
+def test_heavy_subject_run_of_3_cap_unchanged_with_default_config():
+    # Regression: gọi lại y hệt test_heavy_subject_run_of_3_cap nhưng truyền config mặc định
+    # tường minh -- phải cho kết quả giống hệt không truyền config.
+    subjects = [
+        Subject(1, "Toan", ROLE_NANG), Subject(2, "Ly", ROLE_NANG),
+        Subject(3, "Hoa", ROLE_NANG), Subject(4, "Sinh", ROLE_NANG), Subject(5, "HDTN", ROLE_HDTN),
+    ]
+    role_index = resolve_roles(subjects)
+    config = SchedulingConfig()
+    state = _State(remaining_need={(1, 1): 10, (2, 1): 10, (3, 1): 10, (4, 1): 10}, busy=set())
+    _put_at(state, Slot(1, 1, TimeSlot(1, 2, "S", 1)), 1, 100, role_index)
+    _put_at(state, Slot(2, 1, TimeSlot(2, 2, "S", 2)), 2, 101, role_index)
+    _put_at(state, Slot(3, 1, TimeSlot(3, 2, "S", 3)), 3, 102, role_index)
+    ts4 = TimeSlot(4, 2, "S", 4)
+    assert _feasible(1, ts4, 4, 103, state, role_index, config=config) is False
+
+
 def test_off_slots_respect_forbidden_cells_gvcn_and_must_monday():
     rng = random.Random(1)
     teachers_by_id = {
