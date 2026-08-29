@@ -88,8 +88,15 @@ def _build_effective_assigned_teacher(inp: SchedulingInput) -> dict:
 
 def _feasible(class_id: int, ts: TimeSlot, subject_id: int, teacher_id: int,
               state: _State, role_index, day_capacity: Optional[dict] = None,
-              config: Optional[SchedulingConfig] = None) -> bool:
+              config: Optional[SchedulingConfig] = None,
+              subject_class_allowed_cells: Optional[dict] = None) -> bool:
     config = config or SchedulingConfig()
+    # luật môn/lớp/buổi: nếu cặp (môn, lớp) có danh sách ô cho phép thì mọi ô khác
+    # bị cấm cứng. Không có luật (None / thiếu key) => không ràng buộc, y như cũ.
+    if subject_class_allowed_cells is not None:
+        allowed = subject_class_allowed_cells.get((subject_id, class_id))
+        if allowed is not None and (ts.weekday, ts.session) not in allowed:
+            return False
     if (teacher_id, ts.ts_id) in state.busy:
         return False
     if state.session_count[(teacher_id, ts.weekday, ts.session)] >= config.max_periods_per_session:
@@ -164,7 +171,8 @@ def _remove_at(state: _State, slot: Slot, role_index) -> tuple:
 
 def _repair_lone_periods(inp: SchedulingInput, state: _State, role_index,
                           assigned_teacher: dict, slots_by_class: dict,
-                          day_capacity: Optional[dict], config: Optional[SchedulingConfig] = None) -> None:
+                          day_capacity: Optional[dict], config: Optional[SchedulingConfig] = None,
+                          subject_class_allowed_cells: Optional[dict] = None) -> None:
     """Best-effort: for every (class, weekday, session) left with only period 1
     filled (out of >=2 periods available -- BAT_LIEN_MACH means a lone period is
     always period 1), try to also fill period 2 so the session isn't stranded at
@@ -185,12 +193,13 @@ def _repair_lone_periods(inp: SchedulingInput, state: _State, role_index,
             state.assigned[slot.slot_id] = None
             state.rem_slot_count[class_id] += 1
         pick = _pick_best_simple(class_id, slot, state, role_index, inp.subjects, assigned_teacher,
-                                  day_capacity, config)
+                                  day_capacity, config, subject_class_allowed_cells)
         if pick is not None:
             _put_at(state, slot, pick[0], pick[1], role_index)
         else:
             _try_swap_repair(class_id, slot, state, role_index, inp.subjects,
-                              assigned_teacher, slots_by_class, day_capacity, config)
+                              assigned_teacher, slots_by_class, day_capacity, config,
+                              subject_class_allowed_cells)
 
 
 def _has_lone_period(inp: SchedulingInput, state: _State) -> bool:
@@ -215,7 +224,8 @@ def _has_lone_period(inp: SchedulingInput, state: _State) -> bool:
 def _pick_best_scored(class_id: int, slot: Slot, state: _State, role_index,
                        subjects: list, assigned_teacher: dict, pu: float, rng: random.Random,
                        day_capacity: Optional[dict] = None,
-                       config: Optional[SchedulingConfig] = None) -> Optional[tuple]:
+                       config: Optional[SchedulingConfig] = None,
+                       subject_class_allowed_cells: Optional[dict] = None) -> Optional[tuple]:
     config = config or SchedulingConfig()
     ts = slot.ts
     best_subject = None
@@ -236,7 +246,8 @@ def _pick_best_scored(class_id: int, slot: Slot, state: _State, role_index,
         if subj.subject_id == role_index.hdtn_id and (class_id, ts.weekday) in state.shl_days:
             continue
         teacher_id = assigned_teacher[key]
-        if not _feasible(class_id, ts, subj.subject_id, teacher_id, state, role_index, day_capacity, config):
+        if not _feasible(class_id, ts, subj.subject_id, teacher_id, state, role_index, day_capacity, config,
+                          subject_class_allowed_cells):
             continue
         score = state.remaining_need[key] * 100 + rng.random()
         if ts.weekday > 2 and state.placed[(class_id, subj.subject_id, ts.weekday - 1)]:
@@ -269,7 +280,8 @@ def _pick_best_scored(class_id: int, slot: Slot, state: _State, role_index,
 def _pick_best_simple(class_id: int, slot: Slot, state: _State, role_index,
                        subjects: list, assigned_teacher: dict,
                        day_capacity: Optional[dict] = None,
-                       config: Optional[SchedulingConfig] = None) -> Optional[tuple]:
+                       config: Optional[SchedulingConfig] = None,
+                       subject_class_allowed_cells: Optional[dict] = None) -> Optional[tuple]:
     ts = slot.ts
     best_subject = None
     best_teacher = None
@@ -282,7 +294,8 @@ def _pick_best_simple(class_id: int, slot: Slot, state: _State, role_index,
         if subj.subject_id == role_index.hdtn_id and (class_id, ts.weekday) in state.shl_days:
             continue
         teacher_id = assigned_teacher[key]
-        if not _feasible(class_id, ts, subj.subject_id, teacher_id, state, role_index, day_capacity, config):
+        if not _feasible(class_id, ts, subj.subject_id, teacher_id, state, role_index, day_capacity, config,
+                          subject_class_allowed_cells):
             continue
         if remaining > best_remaining:
             best_remaining = remaining
@@ -296,7 +309,8 @@ def _pick_best_simple(class_id: int, slot: Slot, state: _State, role_index,
 def _try_swap_repair(class_id: int, slot: Slot, state: _State, role_index,
                       subjects: list, assigned_teacher: dict,
                       slots_by_class: dict, day_capacity: Optional[dict] = None,
-                      config: Optional[SchedulingConfig] = None) -> bool:
+                      config: Optional[SchedulingConfig] = None,
+                      subject_class_allowed_cells: Optional[dict] = None) -> bool:
     ts = slot.ts
     for other in slots_by_class[class_id]:
         if other.slot_id == slot.slot_id:
@@ -304,10 +318,11 @@ def _try_swap_repair(class_id: int, slot: Slot, state: _State, role_index,
         if state.assigned.get(other.slot_id, None) in (None, -1) or state.pinned.get(other.slot_id):
             continue
         moved_subject, moved_teacher = _remove_at(state, other, role_index)
-        if _feasible(class_id, ts, moved_subject, moved_teacher, state, role_index, day_capacity, config):
+        if _feasible(class_id, ts, moved_subject, moved_teacher, state, role_index, day_capacity, config,
+                      subject_class_allowed_cells):
             _put_at(state, slot, moved_subject, moved_teacher, role_index)
             refill = _pick_best_simple(class_id, other, state, role_index, subjects, assigned_teacher,
-                                        day_capacity, config)
+                                        day_capacity, config, subject_class_allowed_cells)
             if refill is not None:
                 _put_at(state, other, refill[0], refill[1], role_index)
                 return True
@@ -401,6 +416,7 @@ def run(inp: SchedulingInput, *, max_attempts: int = SO_LAN_THU,
         target_successes: int = SO_PA_TOT, lock_threshold: int = NGUONG_KHOA) -> ScheduleResult:
     role_index = resolve_roles(inp.subjects, inp.extra_kep_ids)
     config = inp.config
+    subject_class_allowed_cells = inp.subject_class_allowed_cells
     assigned_teacher = _build_effective_assigned_teacher(inp)
     teachers_by_id = {t.teacher_id: t for t in inp.teachers}
     all_teacher_ids = set(assigned_teacher.values())
@@ -502,7 +518,8 @@ def run(inp: SchedulingInput, *, max_attempts: int = SO_LAN_THU,
                 if state.remaining_need.get(key, 0) > 0:
                     teacher_id = assigned_teacher.get(key)
                     if teacher_id is not None and _feasible(slot.class_id, slot.ts, role_index.hdtn_id,
-                                                              teacher_id, state, role_index, day_capacity, config):
+                                                              teacher_id, state, role_index, day_capacity, config,
+                                                              subject_class_allowed_cells):
                         _put_at(state, slot, role_index.hdtn_id, teacher_id, role_index)
                         state.pinned[slot.slot_id] = True
 
@@ -526,7 +543,8 @@ def run(inp: SchedulingInput, *, max_attempts: int = SO_LAN_THU,
             for slot in candidates:
                 class_id = slot.class_id
                 pick = _pick_best_scored(class_id, slot, state, role_index, inp.subjects,
-                                          assigned_teacher, pu, rng, day_capacity, config)
+                                          assigned_teacher, pu, rng, day_capacity, config,
+                                          subject_class_allowed_cells)
                 # order groups (weekday, session) together with period ascending
                 # (see base_groups), so period 1 is always decided before period 2:
                 # never cheaply leave period 2 empty right after filling period 1.
@@ -540,7 +558,8 @@ def run(inp: SchedulingInput, *, max_attempts: int = SO_LAN_THU,
                     state.rem_slot_count[class_id] -= 1
                 else:
                     fixed = _try_swap_repair(class_id, slot, state, role_index, inp.subjects,
-                                              assigned_teacher, slots_by_class, day_capacity, config)
+                                              assigned_teacher, slots_by_class, day_capacity, config,
+                                              subject_class_allowed_cells)
                     if not fixed:
                         done = False
                         break
@@ -558,7 +577,8 @@ def run(inp: SchedulingInput, *, max_attempts: int = SO_LAN_THU,
                 state.remaining_need[key] += 1
                 state.rem_need_count[cid] += 1
                 tid = assigned_teacher[key]
-                if _feasible(cid, target.ts, role_index.hdtn_id, tid, state, role_index, day_capacity, config):
+                if _feasible(cid, target.ts, role_index.hdtn_id, tid, state, role_index, day_capacity, config,
+                              subject_class_allowed_cells):
                     _put_at(state, target, role_index.hdtn_id, tid, role_index)
                     state.pinned[target.slot_id] = True
                 else:
@@ -566,7 +586,8 @@ def run(inp: SchedulingInput, *, max_attempts: int = SO_LAN_THU,
                     break
 
         if done:
-            _repair_lone_periods(inp, state, role_index, assigned_teacher, slots_by_class, day_capacity, config)
+            _repair_lone_periods(inp, state, role_index, assigned_teacher, slots_by_class, day_capacity, config,
+                                  subject_class_allowed_cells)
             if _has_lone_period(inp, state):
                 done = False
 

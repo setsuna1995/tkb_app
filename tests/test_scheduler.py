@@ -87,6 +87,34 @@ def test_feasible_defaults_to_current_behavior_when_config_omitted():
     assert _feasible(1, ts5, 1, 100, state, role_index) is False  # vẫn né tiết 5 như cũ
 
 
+def test_feasible_rejects_placement_outside_subject_class_allowed_cells():
+    subjects = [Subject(1, "Toan", ROLE_THUONG), Subject(2, "HDTN", ROLE_HDTN)]
+    role_index = resolve_roles(subjects)
+    state = _State(remaining_need={(1, 1): 10}, busy=set())
+    allowed = {(1, 1): frozenset({(3, "C")})}
+    ts_wrong = TimeSlot(1, 2, "S", 1)
+    assert _feasible(1, ts_wrong, 1, 100, state, role_index, subject_class_allowed_cells=allowed) is False
+    ts_right = TimeSlot(2, 3, "C", 1)
+    assert _feasible(1, ts_right, 1, 100, state, role_index, subject_class_allowed_cells=allowed) is True
+
+
+def test_feasible_unaffected_when_class_subject_pair_absent_from_allowed_cells():
+    subjects = [Subject(1, "Toan", ROLE_THUONG), Subject(2, "HDTN", ROLE_HDTN)]
+    role_index = resolve_roles(subjects)
+    state = _State(remaining_need={(1, 1): 10}, busy=set())
+    allowed = {(1, 99): frozenset({(3, "C")})}  # luật chỉ áp dụng cho lớp 99, không phải lớp 1
+    ts = TimeSlot(1, 2, "S", 1)
+    assert _feasible(1, ts, 1, 100, state, role_index, subject_class_allowed_cells=allowed) is True
+
+
+def test_feasible_defaults_to_current_behavior_when_subject_class_allowed_cells_omitted():
+    subjects = [Subject(1, "Toan", ROLE_THUONG), Subject(2, "HDTN", ROLE_HDTN)]
+    role_index = resolve_roles(subjects)
+    state = _State(remaining_need={(1, 1): 10}, busy=set())
+    ts = TimeSlot(1, 2, "S", 1)
+    assert _feasible(1, ts, 1, 100, state, role_index) is True
+
+
 def test_day_cap_5_per_day():
     subjects = [Subject(1, "Toan", ROLE_THUONG), Subject(2, "HDTN", ROLE_HDTN)]
     role_index = resolve_roles(subjects)
@@ -522,6 +550,42 @@ def test_small_synthetic_schedule_succeeds_and_meets_quotas():
         if result.assignment.get(slot.slot_id) is not None:
             filled_count[(slot.class_id, slot.ts.weekday, slot.ts.session)] += 1
     assert all(v != 1 for v in filled_count.values()), filled_count
+
+
+def test_subject_class_rule_thread_through_run():
+    # Luật môn/lớp/buổi phải được tôn trọng xuyên suốt sched.run(), không chỉ ở _feasible.
+    # Khung 6 ngày × (2 sáng + 2 chiều) = 24 ô, định mức = đúng 24 tiết để lấp đầy khung
+    # (giống mọi test full-run khác trong file này) -- mọi môn cap 1 tiết/ngày nên mỗi ngày
+    # cần đúng 4 môn khác nhau. Nhạc/6A bị giới hạn ở (Thứ 3, Thứ 6) buổi chiều.
+    classes = [ClassRoom(1, "6A")]
+    subjects = [
+        Subject(1, "Toan hoc", ROLE_THUONG, 1),
+        Subject(2, "Nhac", ROLE_THUONG, 2),
+        Subject(3, "HDTN", ROLE_HDTN, 3),
+        Subject(4, "Tieng Anh", ROLE_THUONG, 4),
+        Subject(5, "Lich su", ROLE_THUONG, 5),
+    ]
+    teachers = [Teacher(1, "GV1"), Teacher(2, "GV2"), Teacher(3, "GVCN", is_gvcn=True),
+                Teacher(4, "GV4"), Teacher(5, "GV5")]
+    need = {(1, 1): 6, (2, 1): 2, (3, 1): 6, (4, 1): 5, (5, 1): 5}
+    assigned_teacher = {(1, 1): 1, (2, 1): 2, (3, 1): 3, (4, 1): 4, (5, 1): 5}
+    timeslots = _make_timeslots(morning=2, afternoon=2)
+    inp = _build_input(classes, subjects, teachers, need, assigned_teacher, timeslots, seed=42)
+    inp.subject_class_allowed_cells = {(2, 1): frozenset({(3, "C"), (6, "C")})}  # Nhạc/6A chỉ (Thứ 3, Thứ 6) chiều
+
+    result = sched.run(inp, max_attempts=6000, target_successes=3)
+    assert result.success is True
+
+    nhac_cells = []
+    for slot in inp.slots:
+        if slot.class_id != 1:
+            continue
+        assigned_subject = result.assignment.get(slot.slot_id)
+        if assigned_subject == 2:
+            nhac_cells.append((slot.ts.weekday, slot.ts.session, slot.ts.period))
+            assert (slot.ts.weekday, slot.ts.session) in {(3, "C"), (6, "C")}
+    # cả 2 tiết Nhạc đều phải được xếp -- nếu không, assert trên đúng một cách vô nghĩa
+    assert len(nhac_cells) == 2, nhac_cells
 
 
 def test_chao_co_position_configurable_in_full_run():
