@@ -30,6 +30,10 @@ IDLE_DAY_BONUS = 30       # điểm thưởng mềm khi đặt tiết vào ngày
                           # (< 100 = remaining_need*100 nên không vượt môn thiếu tiết;
                           # < 50 = phạt dàn-môn nên heuristic đó vẫn ưu tiên hơn) --
                           # cố gắng không để GV trống trọn 1 ngày làm việc
+HEAVY_MORNING_BONUS = 30          # điểm thưởng khi môn "Nặng" rơi vào N tiết đầu buổi sáng
+                                  # (N = config.heavy_subject_priority_periods, 0 = tắt) -- cùng bậc IDLE_DAY_BONUS
+AFTERNOON_MISMATCH_PENALTY = 30   # điểm phạt khi môn KHÔNG nằm trong config.afternoon_preferred_subject_ids
+                                  # rơi vào buổi chiều (rỗng = tắt -- không phạt gì)
 
 # Buổi không được chọn làm buổi nghỉ của GV: sáng Thứ 2/5/6 (hoạt động cố định
 # buổi sáng những ngày này), và chiều Thứ 5/6 (đã bị khoá hẳn khỏi TKB ở
@@ -207,6 +211,7 @@ def _pick_best_scored(class_id: int, slot: Slot, state: _State, role_index,
                        subjects: list, assigned_teacher: dict, pu: float, rng: random.Random,
                        day_capacity: Optional[dict] = None,
                        config: Optional[SchedulingConfig] = None) -> Optional[tuple]:
+    config = config or SchedulingConfig()
     ts = slot.ts
     best_subject = None
     best_teacher = None
@@ -232,6 +237,13 @@ def _pick_best_scored(class_id: int, slot: Slot, state: _State, role_index,
         if (state.session_count[(teacher_id, ts.weekday, "S")]
                 + state.session_count[(teacher_id, ts.weekday, "C")]) == 0:
             score += IDLE_DAY_BONUS
+        # 2 ưu tiên mềm (yêu cầu #1+#2, spec 2026-08-29) -- độc lập, tắt khi config mặc định.
+        if (subj.subject_id in role_index.heavy_ids and config.heavy_subject_priority_periods > 0
+                and ts.session == "S" and ts.period <= config.heavy_subject_priority_periods):
+            score += HEAVY_MORNING_BONUS
+        if (ts.session == "C" and config.afternoon_preferred_subject_ids
+                and subj.subject_id not in config.afternoon_preferred_subject_ids):
+            score -= AFTERNOON_MISMATCH_PENALTY
         if slot.old_subject_id == subj.subject_id and rng.random() > pu:
             score += 1_000_000
         if score > best_score:

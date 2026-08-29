@@ -753,3 +753,76 @@ def test_build_scheduling_input_respects_saved_scheduling_config(tmp_path):
         if slot.ts.period == 4:
             assert result.assignment.get(slot.slot_id) != gdtc_id
     conn.close()
+
+
+# ---------------------------------------------------------------------------
+# _pick_best_scored soft-preference bias: heavy subjects toward early morning,
+# preferred subjects toward afternoon (2026-08-29 spec)
+# ---------------------------------------------------------------------------
+
+def test_heavy_subject_priority_bonus_only_applies_within_configured_window():
+    subjects = [Subject(1, "Toan", ROLE_NANG), Subject(2, "Nhac", ROLE_THUONG), Subject(3, "HDTN", ROLE_HDTN)]
+    role_index = resolve_roles(subjects)
+    config = SchedulingConfig(heavy_subject_priority_periods=2)
+    assigned_teacher = {(1, 1): 100, (2, 1): 101}
+
+    # Tiết 1 (trong ngưỡng 2 tiết đầu): môn nặng luôn thắng, bất kể seed --
+    # bonus (30) > nhiễu rng tối đa (< 1) khi remaining_need bằng nhau.
+    for seed in range(10):
+        state = _State(remaining_need={(1, 1): 5, (2, 1): 5}, busy=set())
+        slot = Slot(1, 1, TimeSlot(1, 2, "S", 1))
+        pick = sched._pick_best_scored(1, slot, state, role_index, subjects, assigned_teacher,
+                                        0.0, random.Random(seed), config=config)
+        assert pick == (1, 100), f"seed={seed}: môn nặng phải thắng tiết 1 (trong ngưỡng ưu tiên 2 tiết đầu)"
+
+    # Tiết 3 (ngoài ngưỡng): không còn bonus -> kết quả phải đổi tuỳ seed, không luôn là môn nặng.
+    outcomes = set()
+    for seed in range(10):
+        state = _State(remaining_need={(1, 1): 5, (2, 1): 5}, busy=set())
+        state.occupied[(1, 2, "S", 2)] = True  # thoả liền mạch cho tiết 3
+        slot = Slot(1, 1, TimeSlot(1, 2, "S", 3))
+        pick = sched._pick_best_scored(1, slot, state, role_index, subjects, assigned_teacher,
+                                        0.0, random.Random(seed), config=config)
+        outcomes.add(pick)
+    assert len(outcomes) == 2, "tiết 3 nằm ngoài ngưỡng ưu tiên -> không còn thiên vị, cả 2 môn đều có thể thắng"
+
+
+def test_afternoon_preferred_subjects_soft_bias():
+    subjects = [Subject(1, "Nhac", ROLE_THUONG), Subject(2, "Su", ROLE_THUONG), Subject(3, "HDTN", ROLE_HDTN)]
+    role_index = resolve_roles(subjects)
+    config = SchedulingConfig(afternoon_preferred_subject_ids=frozenset({1}))
+    assigned_teacher = {(1, 1): 100, (2, 1): 101}
+
+    # Buổi chiều: Nhạc (trong danh sách ưu tiên) luôn thắng Sử (không trong danh sách).
+    for seed in range(10):
+        state = _State(remaining_need={(1, 1): 5, (2, 1): 5}, busy=set())
+        slot = Slot(1, 1, TimeSlot(1, 2, "C", 1))
+        pick = sched._pick_best_scored(1, slot, state, role_index, subjects, assigned_teacher,
+                                        0.0, random.Random(seed), config=config)
+        assert pick == (1, 100), f"seed={seed}: Nhạc (afternoon_preferred_subject_ids) phải thắng Sử buổi chiều"
+
+    # Buổi sáng: danh sách ưu tiên buổi chiều không áp dụng -> kết quả phải đổi tuỳ seed.
+    outcomes = set()
+    for seed in range(10):
+        state = _State(remaining_need={(1, 1): 5, (2, 1): 5}, busy=set())
+        slot = Slot(1, 1, TimeSlot(1, 2, "S", 1))
+        pick = sched._pick_best_scored(1, slot, state, role_index, subjects, assigned_teacher,
+                                        0.0, random.Random(seed), config=config)
+        outcomes.add(pick)
+    assert len(outcomes) == 2, "buổi sáng không áp dụng luật ưu tiên buổi chiều -> không còn thiên vị"
+
+
+def test_pick_best_scored_unbiased_with_default_config():
+    # Regression: config=None (mặc định) -> không thiên vị gì, kể cả tiết 1 buổi sáng.
+    subjects = [Subject(1, "Toan", ROLE_NANG), Subject(2, "Nhac", ROLE_THUONG), Subject(3, "HDTN", ROLE_HDTN)]
+    role_index = resolve_roles(subjects)
+    assigned_teacher = {(1, 1): 100, (2, 1): 101}
+
+    outcomes = set()
+    for seed in range(10):
+        state = _State(remaining_need={(1, 1): 5, (2, 1): 5}, busy=set())
+        slot = Slot(1, 1, TimeSlot(1, 2, "S", 1))
+        pick = sched._pick_best_scored(1, slot, state, role_index, subjects, assigned_teacher,
+                                        0.0, random.Random(seed))
+        outcomes.add(pick)
+    assert len(outcomes) == 2
