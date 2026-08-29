@@ -52,6 +52,10 @@ heavy_subject_priority_periods = st.number_input(
     config.heavy_subject_priority_periods,
     help="Chỉ là gợi ý cho thuật toán -- không cấm tuyệt đối, không làm hỏng khả năng tìm lời giải.",
 )
+st.caption(
+    "Ưu tiên mềm này thể hiện rõ nhất khi xếp TKB tự động trên tuần TRỐNG (chưa có dữ liệu cũ). "
+    "Khi xếp lại đè lên TKB đã có sẵn, cơ chế \"giữ nguyên tiết cũ\" luôn được ưu tiên hơn nên hiệu ứng sẽ khó thấy."
+)
 
 st.subheader("Buổi/ngày khoá cứng")
 st.caption("Buổi không được chọn làm buổi nghỉ của giáo viên:")

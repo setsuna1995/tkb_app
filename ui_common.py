@@ -52,7 +52,7 @@ def sidebar_fixed_rules(conn) -> None:
     with st.sidebar:
         with st.expander("📐 Quy tắc xếp lịch"):
             st.caption(
-                "7 dòng đầu chỉnh được ở trang **Cấu hình xếp lịch**. "
+                f"{len(configurable_rules)} dòng đầu chỉnh được ở trang **Cấu hình xếp lịch**. "
                 "3 dòng cuối là ràng buộc cố định của thuật toán."
             )
             for rule in configurable_rules:
