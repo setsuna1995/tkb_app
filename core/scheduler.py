@@ -50,7 +50,8 @@ FAILURE_MESSAGE = (
     "(2) GV_Bận cấm quá nhiều giờ của GV tải năng;\n"
     "(3) định mức SoTiet vượt khả năng khung tiết;\n"
     "(4) cấu hình nghỉ riêng của 1 GV quá chặt (off_sessions_override cao kết hợp "
-    "ghim buổi/ngày nghỉ cố định) khiến các lớp GV đó dạy không đủ ô còn trống để xếp."
+    "ghim buổi/ngày nghỉ cố định) khiến các lớp GV đó dạy không đủ ô còn trống để xếp;\n"
+    "(5) luật gán môn/lớp theo buổi (trang Cấu hình xếp lịch) quá chặt so với số tiết/tuần cần xếp."
 )
 
 

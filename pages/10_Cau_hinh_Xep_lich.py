@@ -1,7 +1,7 @@
 import streamlit as st
 
 from core import frame as frame_mod
-from core.models import SchedulingConfig, WEEKDAY_NAMES, WEEKDAYS
+from core.models import ROLE_HDTN, SchedulingConfig, WEEKDAY_NAMES, WEEKDAYS
 from data import repository as repo
 from ui_common import get_conn, require_auth, require_school, sidebar_backup_export, sidebar_fixed_rules, \
     sidebar_school_switcher
@@ -106,6 +106,56 @@ if st.button("💾 Lưu cấu hình", type="primary"):
     repo.set_scheduling_config(conn, new_config)
     st.success("Đã lưu cấu hình xếp lịch.")
     st.rerun()
+
+st.subheader("Ràng buộc môn/lớp theo buổi cụ thể (tuỳ chọn)")
+st.caption(
+    "Ví dụ: 1 môn ở một số lớp CHỈ được xếp vào đúng các (thứ, buổi) đã chọn -- "
+    "ràng buộc CỨNG, có thể khiến thuật toán không tìm được lời giải nếu quá chặt."
+)
+all_classes = repo.list_classes(conn)
+all_subjects_for_rules = repo.list_subjects(conn)
+rule_subjects = [s for s in all_subjects_for_rules if s.role_code != ROLE_HDTN]
+if not rule_subjects or not all_classes:
+    st.info("Cần khai báo ít nhất 1 môn (khác HDTN) và 1 lớp trước khi tạo luật.")
+else:
+    with st.form("add_subject_class_rule", clear_on_submit=True):
+        rule_subject_id = st.selectbox(
+            "Môn", options=[s.subject_id for s in rule_subjects],
+            format_func=lambda sid: next(s.name for s in rule_subjects if s.subject_id == sid),
+        )
+        rule_class_ids = st.multiselect(
+            "Lớp áp dụng", options=[c.class_id for c in all_classes],
+            format_func=lambda cid: next(c.name for c in all_classes if c.class_id == cid),
+        )
+        rule_cells = st.multiselect(
+            "Chỉ được xếp vào các (Thứ, Buổi) này",
+            options=[(wd, s) for wd in WEEKDAYS for s in ("S", "C")],
+            format_func=lambda cell: f"{WEEKDAY_NAMES[cell[0]]} {'Sáng' if cell[1] == 'S' else 'Chiều'}",
+        )
+        if st.form_submit_button("➕ Thêm luật"):
+            if rule_class_ids and rule_cells:
+                repo.upsert_subject_class_rule(conn, rule_subject_id, rule_class_ids, rule_cells)
+                st.success("Đã thêm luật.")
+                st.rerun()
+            else:
+                st.error("Cần chọn ít nhất 1 lớp và 1 (thứ, buổi).")
+
+existing_rules = repo.list_subject_class_rules(conn)
+if existing_rules:
+    st.caption("Luật hiện có:")
+    subject_names = {s.subject_id: s.name for s in all_subjects_for_rules}
+    class_names = {c.class_id: c.name for c in all_classes}
+    for rule in existing_rules:
+        subj_name = subject_names.get(rule["subject_id"], str(rule["subject_id"]))
+        cls_names = ", ".join(class_names.get(cid, str(cid)) for cid in rule["class_ids"])
+        cell_names = ", ".join(
+            f"{WEEKDAY_NAMES[wd]} {'Sáng' if s == 'S' else 'Chiều'}" for wd, s in sorted(rule["cells"])
+        )
+        col1, col2 = st.columns([5, 1])
+        col1.markdown(f"- **{subj_name}** ({cls_names}) chỉ xếp vào: {cell_names}")
+        if col2.button("🗑️", key=f"del_rule_{rule['rule_id']}"):
+            repo.delete_subject_class_rule(conn, rule["rule_id"])
+            st.rerun()
 
 sidebar_backup_export(conn)
 sidebar_fixed_rules(conn)
