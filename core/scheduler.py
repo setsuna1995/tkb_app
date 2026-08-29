@@ -28,7 +28,10 @@ BAT_NGHI_1_BUOI = True    # every teacher gets exactly 1 half-day-off slot/week
 BAT_LIEN_MACH = True      # no gaps within a session for a class
 IDLE_DAY_BONUS = 30       # điểm thưởng mềm khi đặt tiết vào ngày GV đang trống hẳn
                           # (< 100 = remaining_need*100 nên không vượt môn thiếu tiết;
-                          # < 50 = phạt dàn-môn nên heuristic đó vẫn ưu tiên hơn) --
+                          # < 50 = phạt dàn-môn nên 1 mình nó không đảo được ưu tiên đó --
+                          # nhưng khi CÙNG lúc cộng dồn với HEAVY_MORNING_BONUS trên cùng 1
+                          # candidate, 30+30=60 > 50 thì cặp bonus mềm này CÓ THỂ thắng phạt
+                          # dàn-môn; đây là hành vi mềm có chủ đích, không phải bug) --
                           # cố gắng không để GV trống trọn 1 ngày làm việc
 HEAVY_MORNING_BONUS = 30          # điểm thưởng khi môn "Nặng" rơi vào N tiết đầu buổi sáng
                                   # (N = config.heavy_subject_priority_periods, 0 = tắt) -- cùng bậc IDLE_DAY_BONUS
@@ -215,7 +218,13 @@ def _pick_best_scored(class_id: int, slot: Slot, state: _State, role_index,
     ts = slot.ts
     best_subject = None
     best_teacher = None
-    best_score = -1.0
+    # -1.0 used to be a safe floor (min feasible score was 1*100 - 100 = 0.0), but
+    # AFTERNOON_MISMATCH_PENALTY can now push a feasible candidate as low as
+    # 100 - 100 - 30 = -30, which is < -1.0 -- that silently turned a solvable
+    # slot into an unsolved one (score > best_score was never true). float("-inf")
+    # is always beaten by any real score delta, so this can never reject a
+    # feasible candidate regardless of how low soft-rule penalties push its score.
+    best_score = float("-inf")
     for subj in subjects:
         key = (subj.subject_id, class_id)
         if state.remaining_need.get(key, 0) <= 0:

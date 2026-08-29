@@ -779,7 +779,7 @@ def test_heavy_subject_priority_bonus_only_applies_within_configured_window():
     outcomes = set()
     for seed in range(10):
         state = _State(remaining_need={(1, 1): 5, (2, 1): 5}, busy=set())
-        state.occupied[(1, 2, "S", 2)] = True  # thoả liền mạch cho tiết 3
+        state.occupied[(1, 2, "S", 2)] = True  # BAT_LIEN_MACH trong _feasible: tiết 3 chỉ khả thi khi tiết 2 đã có
         slot = Slot(1, 1, TimeSlot(1, 2, "S", 3))
         pick = sched._pick_best_scored(1, slot, state, role_index, subjects, assigned_teacher,
                                         0.0, random.Random(seed), config=config)
@@ -812,6 +812,27 @@ def test_afternoon_preferred_subjects_soft_bias():
     assert len(outcomes) == 2, "buổi sáng không áp dụng luật ưu tiên buổi chiều -> không còn thiên vị"
 
 
+def test_pick_best_scored_never_returns_none_for_a_feasible_candidate_under_heavy_penalty_stacking():
+    # Regression: best_score sentinel must not silently reject a feasible candidate
+    # once soft-rule penalties push its score below the old -1.0 floor.
+    subjects = [Subject(1, "Toan", ROLE_THUONG), Subject(2, "HDTN", ROLE_HDTN)]
+    role_index = resolve_roles(subjects)
+    config = SchedulingConfig(afternoon_preferred_subject_ids=frozenset({99}))  # 99 doesn't exist -> subject 1 is never "preferred"
+    state = _State(remaining_need={(1, 1): 1}, busy=set())
+    # Force both ±50 "dàn-môn" (spread) penalties to apply: subject 1 already placed
+    # on both the day before and the day after weekday 4.
+    state.placed[(1, 1, 3)].append(("C", 1))
+    state.placed[(1, 1, 5)].append(("C", 1))
+    # Deny the IDLE_DAY_BONUS: this teacher already has a session that day.
+    state.session_count[(100, 4, "S")] = 1
+    assigned_teacher = {(1, 1): 100}
+    slot = Slot(1, 1, TimeSlot(1, 4, "C", 1))
+
+    pick = sched._pick_best_scored(1, slot, state, role_index, subjects, assigned_teacher,
+                                    0.0, random.Random(1), config=config)
+    assert pick == (1, 100), "a feasible candidate must never be rejected just because its score is very low"
+
+
 def test_pick_best_scored_unbiased_with_default_config():
     # Regression: config=None (mặc định) -> không thiên vị gì, kể cả tiết 1 buổi sáng.
     subjects = [Subject(1, "Toan", ROLE_NANG), Subject(2, "Nhac", ROLE_THUONG), Subject(3, "HDTN", ROLE_HDTN)]
@@ -826,3 +847,27 @@ def test_pick_best_scored_unbiased_with_default_config():
                                         0.0, random.Random(seed))
         outcomes.add(pick)
     assert len(outcomes) == 2
+
+
+def test_full_run_succeeds_with_both_soft_subject_preferences_enabled():
+    # Smoke test: sched.run() end-to-end with heavy_subject_priority_periods AND
+    # afternoon_preferred_subject_ids both set together must not break a full run --
+    # they're soft/best-effort only (Finding 1's fix is what guarantees this).
+    classes = [ClassRoom(1, "6A")]
+    subjects = [
+        Subject(1, "Toan", ROLE_NANG),      # môn "Nặng" -- ưu tiên (mềm) buổi sáng sớm
+        Subject(2, "Van", ROLE_KEP),        # môn thường (kép) -- ưu tiên (mềm) buổi chiều
+        Subject(3, "HDTN", ROLE_HDTN),
+    ]
+    teachers = [Teacher(1, "GVToan"), Teacher(2, "GVVan"), Teacher(3, "GVCN", is_gvcn=True)]
+    need = {(1, 1): 2, (2, 1): 4, (3, 1): 2}
+    assigned_teacher = {(1, 1): 1, (2, 1): 2, (3, 1): 3}
+    timeslots = _make_timeslots(morning=2, afternoon=2, weekdays=(2, 6))
+    inp = _build_input(classes, subjects, teachers, need, assigned_teacher, timeslots, seed=1)
+    inp.config = SchedulingConfig(
+        heavy_subject_priority_periods=2,
+        afternoon_preferred_subject_ids=frozenset({2}),
+    )
+
+    result = sched.run(inp, max_attempts=6000, target_successes=3)
+    assert result.success is True
