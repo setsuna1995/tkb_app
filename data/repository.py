@@ -88,23 +88,34 @@ def list_teachers(conn: sqlite3.Connection) -> list:
     ) for r in rows]
 
 
+_KEEP = object()  # sentinel: "caller didn't pass this kwarg, leave the column untouched on UPDATE"
+
+
 def upsert_teacher(conn: sqlite3.Connection, name: str, role: str = "", must_monday: bool = False,
                     is_gvcn: bool = False, teacher_id=None,
-                    off_sessions_override=None, pinned_full_day_off=None, pinned_afternoon_off=None) -> int:
+                    off_sessions_override=_KEEP, pinned_full_day_off=_KEEP, pinned_afternoon_off=_KEEP) -> int:
     if teacher_id is not None:
-        conn.execute(
-            "UPDATE teachers SET name=?, role=?, must_monday=?, is_gvcn=?, "
-            "off_sessions_override=?, pinned_full_day_off=?, pinned_afternoon_off=? WHERE teacher_id=?",
-            (name, role, int(must_monday), int(is_gvcn),
-             off_sessions_override, pinned_full_day_off, pinned_afternoon_off, teacher_id),
-        )
+        set_clauses = ["name=?", "role=?", "must_monday=?", "is_gvcn=?"]
+        params = [name, role, int(must_monday), int(is_gvcn)]
+        for col, val in (
+            ("off_sessions_override", off_sessions_override),
+            ("pinned_full_day_off", pinned_full_day_off),
+            ("pinned_afternoon_off", pinned_afternoon_off),
+        ):
+            if val is not _KEEP:
+                set_clauses.append(f"{col}=?")
+                params.append(val)
+        params.append(teacher_id)
+        conn.execute(f"UPDATE teachers SET {', '.join(set_clauses)} WHERE teacher_id=?", params)
         conn.commit()
         return teacher_id
     cur = conn.execute(
         "INSERT INTO teachers (name, role, must_monday, is_gvcn, "
         "off_sessions_override, pinned_full_day_off, pinned_afternoon_off) VALUES (?, ?, ?, ?, ?, ?, ?)",
         (name, role, int(must_monday), int(is_gvcn),
-         off_sessions_override, pinned_full_day_off, pinned_afternoon_off),
+         None if off_sessions_override is _KEEP else off_sessions_override,
+         None if pinned_full_day_off is _KEEP else pinned_full_day_off,
+         None if pinned_afternoon_off is _KEEP else pinned_afternoon_off),
     )
     conn.commit()
     return cur.lastrowid

@@ -59,3 +59,32 @@ def test_teacher_off_override_and_pins_default_to_none(conn):
     assert t.off_sessions_override is None
     assert t.pinned_full_day_off is None
     assert t.pinned_afternoon_off is None
+
+
+def test_upsert_teacher_without_new_kwargs_preserves_existing_pins_and_override(conn):
+    # Regression for the Excel re-import bug: io_excel/importer.py's DinhMuc_GV
+    # loop calls upsert_teacher(conn, name, role=..., must_monday=..., is_gvcn=...,
+    # teacher_id=tid) on an UPDATE, never mentioning the 3 new columns -- that must
+    # NOT wipe a previously-saved off_sessions_override/pinned_full_day_off/
+    # pinned_afternoon_off back to NULL.
+    tid = repo.upsert_teacher(conn, "GV The duc", role="", must_monday=False, is_gvcn=False,
+                               off_sessions_override=3, pinned_full_day_off=4, pinned_afternoon_off=3)
+    # Simulate an Excel re-import call: same shape as io_excel/importer.py's call, no new kwargs at all.
+    repo.upsert_teacher(conn, "GV The duc", role="", must_monday=False, is_gvcn=False, teacher_id=tid)
+    teachers = {t.teacher_id: t for t in repo.list_teachers(conn)}
+    t = teachers[tid]
+    assert t.off_sessions_override == 3
+    assert t.pinned_full_day_off == 4
+    assert t.pinned_afternoon_off == 3
+
+
+def test_upsert_teacher_can_still_explicitly_clear_pins_and_override(conn):
+    tid = repo.upsert_teacher(conn, "GV The duc", off_sessions_override=3, pinned_full_day_off=4,
+                               pinned_afternoon_off=3)
+    repo.upsert_teacher(conn, "GV The duc", teacher_id=tid,
+                        off_sessions_override=None, pinned_full_day_off=None, pinned_afternoon_off=None)
+    teachers = {t.teacher_id: t for t in repo.list_teachers(conn)}
+    t = teachers[tid]
+    assert t.off_sessions_override is None
+    assert t.pinned_full_day_off is None
+    assert t.pinned_afternoon_off is None
