@@ -13,7 +13,7 @@ from dataclasses import dataclass, field
 from typing import Optional
 
 from core import frame as frame_mod
-from core.models import ScheduleResult, SchedulingConfig, SchedulingInput, Slot, TimeSlot
+from core.models import ScheduleResult, SchedulingConfig, SchedulingInput, Slot, TimeSlot, WEEKDAYS
 from core.roles import resolve_roles
 
 MAX_GV_BUOI = 4          # teacher cap per session (never a "full" 5-period session)
@@ -48,7 +48,9 @@ FAILURE_MESSAGE = (
     "(1) GV HDTN (GVCN) trùng nhau giữa 2 lớp - chào cờ & SHL diễn ra đồng thời "
     "nên MỖI LỚP cần GVCN riêng;\n"
     "(2) GV_Bận cấm quá nhiều giờ của GV tải năng;\n"
-    "(3) định mức SoTiet vượt khả năng khung tiết."
+    "(3) định mức SoTiet vượt khả năng khung tiết;\n"
+    "(4) cấu hình nghỉ riêng của 1 GV quá chặt (off_sessions_override cao kết hợp "
+    "ghim buổi/ngày nghỉ cố định) khiến các lớp GV đó dạy không đủ ô còn trống để xếp."
 )
 
 
@@ -333,10 +335,12 @@ def _assign_off_slots(teacher_ids: set, teachers_by_id: dict, rng: random.Random
     A teacher's own off_sessions_override/pinned_full_day_off/pinned_afternoon_off
     (yêu cầu #3, spec 2026-08-29) override this per teacher: pinned cells are
     guaranteed off first (a full-day pin is the one sanctioned exception to "never
-    a full day off"), and the remaining off_sessions_override - len(pinned) slots
-    are chosen at random exactly as for any other teacher. A pin that conflicts
-    with forbidden_off_cells/must_monday is dropped silently here (defense in
-    depth) -- the UI must validate this before ever saving such a pin.
+    a full day off"), and the remaining effective_count - len(pinned) slots
+    (effective_count = off_sessions_override, falling back to off_slot_count when
+    no override is set) are chosen at random exactly as for any other teacher. A
+    pin that conflicts with forbidden_off_cells/must_monday, or names a weekday
+    outside WEEKDAYS, is dropped silently here (defense in depth) -- the UI must
+    validate this before ever saving such a pin.
 
     gvcn_shl_cell: teacher_id -> (weekday, session), the cell holding sinh hoạt lớp
     (tiết cuối buổi sáng: Thứ 6 khi lớp học 2 buổi/ngày, Thứ 7 khi 1 buổi/ngày) for
@@ -359,12 +363,12 @@ def _assign_off_slots(teacher_ids: set, teachers_by_id: dict, rng: random.Random
         pinned_weekdays = set()
         if t and t.pinned_full_day_off is not None:
             wd = t.pinned_full_day_off
-            if (wd, "S") not in forbidden and (wd, "C") not in forbidden:
+            if wd in WEEKDAYS and (wd, "S") not in forbidden and (wd, "C") not in forbidden:
                 pinned_cells |= {(wd, "S"), (wd, "C")}
                 pinned_weekdays.add(wd)
         if t and t.pinned_afternoon_off is not None:
             wd = t.pinned_afternoon_off
-            if (wd, "C") not in forbidden and wd not in pinned_weekdays:
+            if wd in WEEKDAYS and (wd, "C") not in forbidden and wd not in pinned_weekdays:
                 pinned_cells.add((wd, "C"))
                 pinned_weekdays.add(wd)
 

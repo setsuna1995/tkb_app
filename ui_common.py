@@ -49,10 +49,24 @@ def sidebar_fixed_rules(conn) -> None:
         configurable_rules.append(
             "Buổi chiều được ưu tiên (không bắt buộc) cho một số môn đã chọn ở trang Cấu hình xếp lịch"
         )
+    teachers = repo.list_teachers(conn)
+    has_teacher_overrides = any(
+        t.off_sessions_override is not None or t.pinned_full_day_off is not None
+        or t.pinned_afternoon_off is not None
+        for t in teachers
+    )
+    if has_teacher_overrides:
+        configurable_rules.append(
+            "Một số giáo viên có số buổi nghỉ/tuần hoặc buổi/ngày nghỉ cố định riêng "
+            "(khác quy tắc chung ở trên) - xem chi tiết ở trang Khai báo"
+        )
     with st.sidebar:
         with st.expander("📐 Quy tắc xếp lịch"):
+            edit_pages = "trang **Cấu hình xếp lịch**"
+            if has_teacher_overrides:
+                edit_pages += " hoặc **Khai báo** (riêng từng GV)"
             st.caption(
-                f"{len(configurable_rules)} dòng đầu chỉnh được ở trang **Cấu hình xếp lịch**. "
+                f"{len(configurable_rules)} dòng đầu chỉnh được ở {edit_pages}. "
                 "3 dòng cuối là ràng buộc cố định của thuật toán."
             )
             for rule in configurable_rules:

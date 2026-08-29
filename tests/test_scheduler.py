@@ -935,3 +935,30 @@ def test_full_run_succeeds_with_both_soft_subject_preferences_enabled():
 
     result = sched.run(inp, max_attempts=6000, target_successes=3)
     assert result.success is True
+
+
+def test_full_run_succeeds_with_teacher_pinned_and_override_off_days():
+    # Smoke test: sched.run() end-to-end with a teacher's off_sessions_override/
+    # pinned_full_day_off set (Task 3's per-teacher off-day customization, spec
+    # 2026-08-29-gv-nghi-rieng) must not break a full run. Small synthetic input
+    # with a bit of slack (8 slots, need=6) so the constraint solver has room;
+    # GV1 (Toan) is pinned off all of Thứ 4 via off_sessions_override=2 +
+    # pinned_full_day_off=4.
+    classes = [ClassRoom(1, "6A")]
+    subjects = [
+        Subject(1, "Toan", ROLE_THUONG, 1),
+        Subject(2, "Van", ROLE_KEP, 2),
+        Subject(3, "HDTN", ROLE_HDTN, 3),
+    ]
+    teachers = [
+        Teacher(1, "GV1", off_sessions_override=2, pinned_full_day_off=4),
+        Teacher(2, "GV2"),
+        Teacher(3, "GV3"),
+    ]
+    need = {(1, 1): 2, (2, 1): 2, (3, 1): 2}
+    assigned_teacher = {(1, 1): 1, (2, 1): 2, (3, 1): 3}
+    timeslots = _make_timeslots(morning=2, afternoon=0, weekdays=(2, 3, 4, 5))
+    inp = _build_input(classes, subjects, teachers, need, assigned_teacher, timeslots, seed=42)
+
+    result = sched.run(inp, max_attempts=6000, target_successes=5)
+    assert result.success is True
