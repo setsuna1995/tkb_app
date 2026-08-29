@@ -1,4 +1,4 @@
-from core.models import SchedulingConfig, SchedulingInput
+from core.models import SchedulingConfig, SchedulingInput, Teacher
 
 
 def test_scheduling_config_defaults_match_current_hardcoded_behavior():
@@ -27,3 +27,17 @@ def test_scheduling_input_defaults_to_default_scheduling_config():
         ban_busy=set(), slots=[], timeslots=[],
     )
     assert inp.config == SchedulingConfig()
+
+
+def test_teacher_defaults_have_no_off_override_or_pins():
+    t = Teacher(1, "GV1")
+    assert t.off_sessions_override is None
+    assert t.pinned_full_day_off is None
+    assert t.pinned_afternoon_off is None
+
+
+def test_teacher_accepts_off_override_and_pins():
+    t = Teacher(1, "GV1", off_sessions_override=3, pinned_full_day_off=5, pinned_afternoon_off=3)
+    assert t.off_sessions_override == 3
+    assert t.pinned_full_day_off == 5
+    assert t.pinned_afternoon_off == 3

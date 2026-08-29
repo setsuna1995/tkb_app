@@ -46,6 +46,9 @@ class Teacher:
     must_monday: bool = False
     is_gvcn: bool = False
     cap: int = 19               # computed: 19 - role reduction
+    off_sessions_override: Optional[int] = None    # None = dùng config.teacher_off_sessions_per_week chung
+    pinned_full_day_off: Optional[int] = None      # thứ (2-7) ghim nghỉ TRỌN NGÀY -- ngoại lệ "không nghỉ trọn ngày"
+    pinned_afternoon_off: Optional[int] = None     # thứ ghim nghỉ 1 buổi CHIỀU cố định
 
 
 @dataclass(frozen=True)
