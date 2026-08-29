@@ -1,6 +1,6 @@
 import pytest
 
-from core.models import ROLE_THUONG, SchedulingConfig
+from core.models import ROLE_HDTN, ROLE_THUONG, SchedulingConfig
 from data import db, repository as repo
 
 
@@ -140,3 +140,21 @@ def test_build_scheduling_input_attaches_subject_class_allowed_cells(conn):
 
     inp = repo.build_scheduling_input(conn, parity="C")
     assert inp.subject_class_allowed_cells == {(subject_id, class_id): frozenset({(3, "C")})}
+
+
+def test_upsert_subject_class_rule_rejects_empty_cells(conn):
+    subject_id = repo.upsert_subject(conn, "Nhac", ROLE_THUONG)
+    with pytest.raises(ValueError):
+        repo.upsert_subject_class_rule(conn, subject_id, [1], frozenset())
+
+
+def test_upsert_subject_class_rule_rejects_empty_class_ids(conn):
+    subject_id = repo.upsert_subject(conn, "Nhac", ROLE_THUONG)
+    with pytest.raises(ValueError):
+        repo.upsert_subject_class_rule(conn, subject_id, [], {(3, "C")})
+
+
+def test_upsert_subject_class_rule_rejects_hdtn_subject(conn):
+    hdtn_id = repo.upsert_subject(conn, "HDTN", ROLE_HDTN)
+    with pytest.raises(ValueError):
+        repo.upsert_subject_class_rule(conn, hdtn_id, [1], {(3, "C")})

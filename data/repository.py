@@ -7,7 +7,8 @@ import sqlite3
 from datetime import datetime, timezone
 
 from core import frame as frame_mod
-from core.models import ClassRoom, SchedulingConfig, SchedulingInput, Slot, Subject, Teacher, TimeSlot, WEEKDAYS
+from core.models import ClassRoom, ROLE_HDTN, SchedulingConfig, SchedulingInput, Slot, Subject, Teacher, TimeSlot, \
+    WEEKDAYS
 
 
 def _now() -> str:
@@ -591,6 +592,13 @@ def list_subject_class_rules(conn: sqlite3.Connection) -> list:
 
 
 def upsert_subject_class_rule(conn: sqlite3.Connection, subject_id: int, class_ids, cells, rule_id=None) -> int:
+    if not cells:
+        raise ValueError("Luật phải có ít nhất 1 (thứ, buổi) được phép.")
+    if not class_ids:
+        raise ValueError("Luật phải áp dụng cho ít nhất 1 lớp.")
+    row = conn.execute("SELECT role_code FROM subjects WHERE subject_id=?", (subject_id,)).fetchone()
+    if row and row["role_code"] == ROLE_HDTN:
+        raise ValueError("Không thể tạo luật cho môn HDTN (đã có vị trí ghim cố định riêng).")
     class_ids_str = ",".join(str(cid) for cid in sorted(class_ids))
     cells_str = _format_off_cells(cells)
     if rule_id is not None:
