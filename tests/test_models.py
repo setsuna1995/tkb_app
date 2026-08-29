@@ -41,3 +41,11 @@ def test_teacher_accepts_off_override_and_pins():
     assert t.off_sessions_override == 3
     assert t.pinned_full_day_off == 5
     assert t.pinned_afternoon_off == 3
+
+
+def test_scheduling_input_defaults_subject_class_allowed_cells_to_empty_dict():
+    inp = SchedulingInput(
+        classes=[], subjects=[], teachers=[], need={}, assigned_teacher={},
+        ban_busy=set(), slots=[], timeslots=[],
+    )
+    assert inp.subject_class_allowed_cells == {}

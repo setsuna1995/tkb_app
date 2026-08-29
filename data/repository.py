@@ -694,6 +694,7 @@ def build_scheduling_input(conn: sqlite3.Connection, parity: str, seed: int = 0,
     subjects = list_subjects(conn)
     teachers = list_teachers(conn)
     config = get_scheduling_config(conn)
+    subject_class_allowed_cells = get_subject_class_allowed_cells(conn)
 
     need = {(s, c): p for (s, c, par), p in get_periods_per_week(conn).items() if par == parity and p > 0}
     assigned_teacher = {key: tid for key, tid in get_assignments(conn).items() if tid is not None}
@@ -736,4 +737,5 @@ def build_scheduling_input(conn: sqlite3.Connection, parity: str, seed: int = 0,
         assigned_teacher=assigned_teacher, ban_busy=ban_busy,
         slots=slots, timeslots=timeslots, seed=seed,
         extra_kep_ids=extra_kep_ids, config=config,
+        subject_class_allowed_cells=subject_class_allowed_cells,
     )

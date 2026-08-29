@@ -115,6 +115,7 @@ class SchedulingInput:
     seed: int = 0            # 0 = random each run
     extra_kep_ids: frozenset = field(default_factory=frozenset)  # subject_id cần xếp kép CHỈ tuần này
     config: SchedulingConfig = field(default_factory=SchedulingConfig)
+    subject_class_allowed_cells: dict = field(default_factory=dict)  # (subject_id, class_id) -> frozenset[(weekday, session)]
 
 
 @dataclass

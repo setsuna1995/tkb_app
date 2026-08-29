@@ -131,3 +131,12 @@ def test_get_subject_class_allowed_cells_expands_per_class_and_merges_rules(conn
 
 def test_get_subject_class_allowed_cells_empty_when_no_rules(conn):
     assert repo.get_subject_class_allowed_cells(conn) == {}
+
+
+def test_build_scheduling_input_attaches_subject_class_allowed_cells(conn):
+    class_id = repo.upsert_class(conn, "6A")
+    subject_id = repo.upsert_subject(conn, "Nhac", ROLE_THUONG)
+    repo.upsert_subject_class_rule(conn, subject_id, [class_id], {(3, "C")})
+
+    inp = repo.build_scheduling_input(conn, parity="C")
+    assert inp.subject_class_allowed_cells == {(subject_id, class_id): frozenset({(3, "C")})}
