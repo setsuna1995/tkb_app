@@ -29,3 +29,12 @@ def test_set_then_get_scheduling_config_round_trips(conn):
     )
     repo.set_scheduling_config(conn, custom)
     assert repo.get_scheduling_config(conn) == custom
+
+
+def test_set_then_get_scheduling_config_round_trips_soft_bias_fields(conn):
+    custom = SchedulingConfig(
+        heavy_subject_priority_periods=2,
+        afternoon_preferred_subject_ids=frozenset({3, 7}),
+    )
+    repo.set_scheduling_config(conn, custom)
+    assert repo.get_scheduling_config(conn) == custom

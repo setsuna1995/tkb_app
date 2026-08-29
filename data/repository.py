@@ -542,10 +542,19 @@ def _format_weekday_tuple(weekdays) -> str:
     return ",".join(str(wd) for wd in weekdays)
 
 
+def _parse_id_set(raw: str) -> frozenset:
+    return frozenset(int(x) for x in raw.split(",") if x.strip())
+
+
+def _format_id_set(ids) -> str:
+    return ",".join(str(i) for i in sorted(ids))
+
+
 def get_scheduling_config(conn: sqlite3.Connection) -> SchedulingConfig:
     default = SchedulingConfig()
     forbidden_raw = get_meta(conn, "sched_forbidden_off_cells")
     reserved_raw = get_meta(conn, "sched_reserved_off_weekdays_chieu")
+    afternoon_preferred_raw = get_meta(conn, "sched_afternoon_preferred_subject_ids")
     return SchedulingConfig(
         gdtc_avoid_period=int(get_meta(conn, "sched_gdtc_avoid_period") or default.gdtc_avoid_period),
         chao_co_weekday=int(get_meta(conn, "sched_chao_co_weekday") or default.chao_co_weekday),
@@ -561,6 +570,13 @@ def get_scheduling_config(conn: sqlite3.Connection) -> SchedulingConfig:
         reserved_off_weekdays_chieu=(
             _parse_weekday_tuple(reserved_raw) if reserved_raw else default.reserved_off_weekdays_chieu
         ),
+        heavy_subject_priority_periods=int(
+            get_meta(conn, "sched_heavy_subject_priority_periods") or default.heavy_subject_priority_periods
+        ),
+        afternoon_preferred_subject_ids=(
+            _parse_id_set(afternoon_preferred_raw) if afternoon_preferred_raw
+            else default.afternoon_preferred_subject_ids
+        ),
     )
 
 
@@ -573,6 +589,8 @@ def set_scheduling_config(conn: sqlite3.Connection, config: SchedulingConfig) ->
     set_meta(conn, "sched_teacher_off_sessions_per_week", str(config.teacher_off_sessions_per_week))
     set_meta(conn, "sched_forbidden_off_cells", _format_off_cells(config.forbidden_off_cells))
     set_meta(conn, "sched_reserved_off_weekdays_chieu", _format_weekday_tuple(config.reserved_off_weekdays_chieu))
+    set_meta(conn, "sched_heavy_subject_priority_periods", str(config.heavy_subject_priority_periods))
+    set_meta(conn, "sched_afternoon_preferred_subject_ids", _format_id_set(config.afternoon_preferred_subject_ids))
 
 
 # ---------------------------------------------------------------------------
