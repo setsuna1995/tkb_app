@@ -94,7 +94,7 @@ def _feasible(class_id: int, ts: TimeSlot, subject_id: int, teacher_id: int,
     config = config or SchedulingConfig()
     # luật môn/lớp/buổi: nếu cặp (môn, lớp) có danh sách ô cho phép thì mọi ô khác
     # bị cấm cứng. Không có luật (None / thiếu key) => không ràng buộc, y như cũ.
-    if subject_class_allowed_cells is not None:
+    if subject_class_allowed_cells:
         allowed = subject_class_allowed_cells.get((subject_id, class_id))
         if allowed is not None and (ts.weekday, ts.session) not in allowed:
             return False

@@ -1026,3 +1026,46 @@ def test_full_run_succeeds_with_teacher_pinned_and_override_off_days():
 
     result = sched.run(inp, max_attempts=6000, target_successes=5)
     assert result.success is True
+
+
+# ---------------------------------------------------------------------------
+# End-to-end regression: the subject/class allowed-cells hard constraint must hold
+# on EVERY write, across every placement path threaded through the scheduler
+# (greedy fill, swap-repair, lone-period repair, ...), not just at _feasible().
+# ---------------------------------------------------------------------------
+
+def test_subject_class_allowed_cells_holds_across_every_placement_in_a_real_run():
+    conn = db.get_connection(":memory:")
+    db.init_db(conn)
+    import_xlsm(conn, FIXTURE)
+
+    # Khoa học tự nhiên (Sinh học) / lớp 7A4 (subject_id=6, class_id=3, role_code
+    # ROLE_THUONG): định mức tuần Chẵn thật trong dữ liệu mẫu là đúng 2 tiết -- ràng
+    # buộc còn đúng 2 ô cho phép (Thứ 3, Thứ 4 buổi chiều), cả 2 đều là buổi chiều
+    # đang hoạt động của lớp 7A4 (không rơi vào buổi chiều Thứ 5/Thứ 6 bị giữ trống
+    # toàn trường), nên bài toán vẫn giải được đủ 2 tiết.
+    subject_id = 6
+    class_id = 3
+    repo.upsert_subject_class_rule(conn, subject_id, [class_id], {(2, "C"), (3, "C")})
+    inp = repo.build_scheduling_input(conn, parity="C")
+    assert inp.need[(subject_id, class_id)] == 2
+
+    original_put_at = sched._put_at
+    violations = []
+
+    def wrapped_put_at(state, slot, subj_id, teacher_id, role_index):
+        key = (subj_id, slot.class_id)
+        allowed = inp.subject_class_allowed_cells.get(key)
+        if allowed is not None and (slot.ts.weekday, slot.ts.session) not in allowed:
+            violations.append((key, slot.ts.weekday, slot.ts.session))
+        return original_put_at(state, slot, subj_id, teacher_id, role_index)
+
+    sched._put_at = wrapped_put_at
+    try:
+        result = sched.run(inp, max_attempts=6000, target_successes=3)
+    finally:
+        sched._put_at = original_put_at
+
+    assert result.success is True
+    assert violations == []
+    conn.close()
