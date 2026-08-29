@@ -38,3 +38,24 @@ def test_set_then_get_scheduling_config_round_trips_soft_bias_fields(conn):
     )
     repo.set_scheduling_config(conn, custom)
     assert repo.get_scheduling_config(conn) == custom
+
+
+def test_upsert_and_list_teacher_round_trips_off_override_and_pins(conn):
+    tid = repo.upsert_teacher(
+        conn, "GV The duc", role="", must_monday=False, is_gvcn=False,
+        off_sessions_override=3, pinned_full_day_off=5, pinned_afternoon_off=3,
+    )
+    teachers = {t.teacher_id: t for t in repo.list_teachers(conn)}
+    t = teachers[tid]
+    assert t.off_sessions_override == 3
+    assert t.pinned_full_day_off == 5
+    assert t.pinned_afternoon_off == 3
+
+
+def test_teacher_off_override_and_pins_default_to_none(conn):
+    tid = repo.upsert_teacher(conn, "GV Thuong")
+    teachers = {t.teacher_id: t for t in repo.list_teachers(conn)}
+    t = teachers[tid]
+    assert t.off_sessions_override is None
+    assert t.pinned_full_day_off is None
+    assert t.pinned_afternoon_off is None

@@ -77,24 +77,34 @@ def delete_subject(conn: sqlite3.Connection, subject_id: int) -> None:
 
 def list_teachers(conn: sqlite3.Connection) -> list:
     rows = conn.execute(
-        "SELECT teacher_id, name, role, must_monday, is_gvcn FROM teachers ORDER BY name"
+        "SELECT teacher_id, name, role, must_monday, is_gvcn, "
+        "off_sessions_override, pinned_full_day_off, pinned_afternoon_off FROM teachers ORDER BY name"
     ).fetchall()
-    return [Teacher(r["teacher_id"], r["name"], r["role"], bool(r["must_monday"]), bool(r["is_gvcn"]))
-            for r in rows]
+    return [Teacher(
+        r["teacher_id"], r["name"], r["role"], bool(r["must_monday"]), bool(r["is_gvcn"]),
+        off_sessions_override=r["off_sessions_override"],
+        pinned_full_day_off=r["pinned_full_day_off"],
+        pinned_afternoon_off=r["pinned_afternoon_off"],
+    ) for r in rows]
 
 
 def upsert_teacher(conn: sqlite3.Connection, name: str, role: str = "", must_monday: bool = False,
-                    is_gvcn: bool = False, teacher_id=None) -> int:
+                    is_gvcn: bool = False, teacher_id=None,
+                    off_sessions_override=None, pinned_full_day_off=None, pinned_afternoon_off=None) -> int:
     if teacher_id is not None:
         conn.execute(
-            "UPDATE teachers SET name=?, role=?, must_monday=?, is_gvcn=? WHERE teacher_id=?",
-            (name, role, int(must_monday), int(is_gvcn), teacher_id),
+            "UPDATE teachers SET name=?, role=?, must_monday=?, is_gvcn=?, "
+            "off_sessions_override=?, pinned_full_day_off=?, pinned_afternoon_off=? WHERE teacher_id=?",
+            (name, role, int(must_monday), int(is_gvcn),
+             off_sessions_override, pinned_full_day_off, pinned_afternoon_off, teacher_id),
         )
         conn.commit()
         return teacher_id
     cur = conn.execute(
-        "INSERT INTO teachers (name, role, must_monday, is_gvcn) VALUES (?, ?, ?, ?)",
-        (name, role, int(must_monday), int(is_gvcn)),
+        "INSERT INTO teachers (name, role, must_monday, is_gvcn, "
+        "off_sessions_override, pinned_full_day_off, pinned_afternoon_off) VALUES (?, ?, ?, ?, ?, ?, ?)",
+        (name, role, int(must_monday), int(is_gvcn),
+         off_sessions_override, pinned_full_day_off, pinned_afternoon_off),
     )
     conn.commit()
     return cur.lastrowid
