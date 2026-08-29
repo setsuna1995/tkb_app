@@ -49,6 +49,12 @@ def sidebar_fixed_rules(conn) -> None:
         configurable_rules.append(
             "Buổi chiều được ưu tiên (không bắt buộc) cho một số môn đã chọn ở trang Cấu hình xếp lịch"
         )
+    subject_class_rules = repo.list_subject_class_rules(conn)
+    if subject_class_rules:
+        configurable_rules.append(
+            f"{len(subject_class_rules)} luật gán môn/lớp theo buổi cụ thể đang áp dụng "
+            "(xem chi tiết ở trang Cấu hình xếp lịch)"
+        )
     teachers = repo.list_teachers(conn)
     has_teacher_overrides = any(
         t.off_sessions_override is not None or t.pinned_full_day_off is not None
