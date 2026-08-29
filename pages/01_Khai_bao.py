@@ -1,6 +1,7 @@
 import pandas as pd
 import streamlit as st
 
+from core.models import WEEKDAY_NAMES, WEEKDAYS
 from data import repository as repo
 from ui_common import ROLE_CODE_LABELS, ROLE_LABEL_TO_CODE, get_conn, require_auth, require_school, \
     sidebar_backup_export, sidebar_fixed_rules, sidebar_school_switcher
@@ -8,6 +9,7 @@ from ui_common import ROLE_CODE_LABELS, ROLE_LABEL_TO_CODE, get_conn, require_au
 require_auth()
 school_slug = require_school()
 conn = get_conn(school_slug)
+config = repo.get_scheduling_config(conn)
 st.title("Khai báo Lớp / Môn / Giáo viên")
 
 tab_classes, tab_subjects, tab_teachers = st.tabs(["Lớp học", "Môn học", "Giáo viên"])
@@ -68,34 +70,81 @@ with tab_subjects:
 with tab_teachers:
     teachers = repo.list_teachers(conn)
     role_options = ["", "GVCN", "Tổ trưởng", "Tổ phó", "Phó hiệu trưởng", "Tổng phụ trách"]
+    weekday_pin_options = [""] + [WEEKDAY_NAMES[wd] for wd in WEEKDAYS]
     df = pd.DataFrame([{
         "teacher_id": t.teacher_id, "Tên GV": t.name, "Chức vụ": t.role,
         "Đi T2": t.must_monday, "GVCN": t.is_gvcn,
+        "Nghỉ mấy buổi/tuần": t.off_sessions_override,
+        "Nghỉ trọn ngày - Thứ": WEEKDAY_NAMES.get(t.pinned_full_day_off, ""),
+        "Nghỉ chiều cố định - Thứ": WEEKDAY_NAMES.get(t.pinned_afternoon_off, ""),
     } for t in teachers])
     edited = st.data_editor(
         df, num_rows="dynamic", key="editor_teachers", hide_index=True,
         column_config={
             "teacher_id": None,
             "Chức vụ": st.column_config.SelectboxColumn(options=role_options),
+            "Nghỉ mấy buổi/tuần": st.column_config.NumberColumn(
+                min_value=0, max_value=3, step=1, help="Bỏ trống = dùng mặc định chung của trường",
+            ),
+            "Nghỉ trọn ngày - Thứ": st.column_config.SelectboxColumn(
+                options=weekday_pin_options,
+                help="Ghim nghỉ CẢ NGÀY -- ngoại lệ so với quy tắc chung \"không nghỉ trọn ngày\"",
+            ),
+            "Nghỉ chiều cố định - Thứ": st.column_config.SelectboxColumn(options=weekday_pin_options),
         },
     )
     if st.button("Lưu danh sách giáo viên"):
-        existing_ids = {t.teacher_id for t in teachers}
-        kept_ids = set()
+        weekday_name_to_num = {WEEKDAY_NAMES[wd]: wd for wd in WEEKDAYS}
+        errors = []
+        to_save = []
         for _, row in edited.iterrows():
             name = str(row["Tên GV"] or "").strip()
             if not name:
                 continue
             tid = row.get("teacher_id")
             tid = int(tid) if pd.notna(tid) else None
-            new_id = repo.upsert_teacher(
-                conn, name, str(row["Chức vụ"] or ""), bool(row["Đi T2"]), bool(row["GVCN"]), teacher_id=tid,
-            )
-            kept_ids.add(new_id)
-        for tid in existing_ids - kept_ids:
-            repo.delete_teacher(conn, tid)
-        st.success("Đã lưu danh sách giáo viên.")
-        st.rerun()
+            must_monday = bool(row["Đi T2"])
+            is_gvcn = bool(row["GVCN"])
+            off_override = row.get("Nghỉ mấy buổi/tuần")
+            off_override = int(off_override) if pd.notna(off_override) else None
+            full_day_name = str(row.get("Nghỉ trọn ngày - Thứ") or "").strip()
+            afternoon_name = str(row.get("Nghỉ chiều cố định - Thứ") or "").strip()
+            pinned_full_day_off = weekday_name_to_num.get(full_day_name)
+            pinned_afternoon_off = weekday_name_to_num.get(afternoon_name)
+
+            if must_monday and pinned_full_day_off == 2:
+                errors.append(f"{name}: đã chọn \"Đi T2\" nên không thể ghim nghỉ trọn ngày Thứ 2.")
+            if must_monday and pinned_afternoon_off == 2:
+                errors.append(f"{name}: đã chọn \"Đi T2\" nên không thể ghim nghỉ chiều Thứ 2.")
+            if pinned_full_day_off is not None and (
+                (pinned_full_day_off, "S") in config.forbidden_off_cells
+                or (pinned_full_day_off, "C") in config.forbidden_off_cells
+            ):
+                errors.append(f"{name}: Thứ ghim nghỉ trọn ngày nằm trong \"Buổi cấm chọn làm buổi nghỉ GV\".")
+            if pinned_afternoon_off is not None and (pinned_afternoon_off, "C") in config.forbidden_off_cells:
+                errors.append(f"{name}: buổi chiều ghim nghỉ nằm trong \"Buổi cấm chọn làm buổi nghỉ GV\".")
+
+            to_save.append((tid, name, str(row["Chức vụ"] or ""), must_monday, is_gvcn,
+                             off_override, pinned_full_day_off, pinned_afternoon_off))
+
+        if errors:
+            for e in errors:
+                st.error(e)
+        else:
+            existing_ids = {t.teacher_id for t in teachers}
+            kept_ids = set()
+            for tid, name, role, must_monday, is_gvcn, off_override, full_day_off, afternoon_off in to_save:
+                new_id = repo.upsert_teacher(
+                    conn, name, role, must_monday, is_gvcn, teacher_id=tid,
+                    off_sessions_override=off_override,
+                    pinned_full_day_off=full_day_off,
+                    pinned_afternoon_off=afternoon_off,
+                )
+                kept_ids.add(new_id)
+            for tid in existing_ids - kept_ids:
+                repo.delete_teacher(conn, tid)
+            st.success("Đã lưu danh sách giáo viên.")
+            st.rerun()
 
 sidebar_backup_export(conn)
 sidebar_fixed_rules(conn)
