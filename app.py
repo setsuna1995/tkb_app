@@ -9,6 +9,7 @@ st.set_page_config(page_title="Xếp Thời Khóa Biểu", layout="wide")
 pages = {
     "Tổng quan": [
         st.Page("pages/00_Trang_chu.py", title="Trang chủ", icon="🏠", default=True),
+        st.Page("pages/11_Huong_Dan.py", title="Hướng dẫn sử dụng", icon="📖"),
     ],
     "Thiết lập dữ liệu": [
         st.Page("pages/01_Khai_bao.py", title="Khai báo Lớp / Môn / Giáo viên", icon="🏫"),
