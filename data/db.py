@@ -113,6 +113,13 @@ CREATE TABLE IF NOT EXISTS app_meta (
     key          TEXT PRIMARY KEY,
     value        TEXT
 );
+
+CREATE TABLE IF NOT EXISTS subject_class_slot_rules (
+    rule_id      INTEGER PRIMARY KEY AUTOINCREMENT,
+    subject_id   INTEGER NOT NULL REFERENCES subjects(subject_id) ON DELETE CASCADE,
+    class_ids    TEXT NOT NULL,
+    cells        TEXT NOT NULL
+);
 """
 
 DEFAULT_ROLE_REDUCTION = {

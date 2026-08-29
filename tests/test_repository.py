@@ -1,6 +1,6 @@
 import pytest
 
-from core.models import SchedulingConfig
+from core.models import ROLE_THUONG, SchedulingConfig
 from data import db, repository as repo
 
 
@@ -88,3 +88,46 @@ def test_upsert_teacher_can_still_explicitly_clear_pins_and_override(conn):
     assert t.off_sessions_override is None
     assert t.pinned_full_day_off is None
     assert t.pinned_afternoon_off is None
+
+
+def test_subject_class_rule_crud_round_trips(conn):
+    subject_id = repo.upsert_subject(conn, "Nhac", ROLE_THUONG)
+    rule_id = repo.upsert_subject_class_rule(conn, subject_id=subject_id, class_ids=[3, 7, 9],
+                                              cells={(3, "C"), (6, "C")})
+    rules = repo.list_subject_class_rules(conn)
+    assert len(rules) == 1
+    assert rules[0]["rule_id"] == rule_id
+    assert rules[0]["subject_id"] == subject_id
+    assert rules[0]["class_ids"] == [3, 7, 9]
+    assert rules[0]["cells"] == frozenset({(3, "C"), (6, "C")})
+
+
+def test_subject_class_rule_update_by_rule_id(conn):
+    subject_id = repo.upsert_subject(conn, "Nhac", ROLE_THUONG)
+    rule_id = repo.upsert_subject_class_rule(conn, subject_id, [3], {(3, "C")})
+    repo.upsert_subject_class_rule(conn, subject_id, [3, 7], {(3, "C"), (4, "C")}, rule_id=rule_id)
+    rules = repo.list_subject_class_rules(conn)
+    assert len(rules) == 1
+    assert rules[0]["class_ids"] == [3, 7]
+    assert rules[0]["cells"] == frozenset({(3, "C"), (4, "C")})
+
+
+def test_subject_class_rule_delete(conn):
+    subject_id = repo.upsert_subject(conn, "Nhac", ROLE_THUONG)
+    rule_id = repo.upsert_subject_class_rule(conn, subject_id, [3], {(3, "C")})
+    repo.delete_subject_class_rule(conn, rule_id)
+    assert repo.list_subject_class_rules(conn) == []
+
+
+def test_get_subject_class_allowed_cells_expands_per_class_and_merges_rules(conn):
+    subject_id = repo.upsert_subject(conn, "Nhac", ROLE_THUONG)
+    repo.upsert_subject_class_rule(conn, subject_id=subject_id, class_ids=[3, 7], cells={(3, "C")})
+    repo.upsert_subject_class_rule(conn, subject_id=subject_id, class_ids=[3], cells={(6, "C")})  # cùng (môn, lớp 3) -> hợp nhất
+    allowed = repo.get_subject_class_allowed_cells(conn)
+    assert allowed[(subject_id, 3)] == frozenset({(3, "C"), (6, "C")})
+    assert allowed[(subject_id, 7)] == frozenset({(3, "C")})
+    assert (subject_id, 9) not in allowed
+
+
+def test_get_subject_class_allowed_cells_empty_when_no_rules(conn):
+    assert repo.get_subject_class_allowed_cells(conn) == {}

@@ -571,6 +571,57 @@ def _format_id_set(ids) -> str:
     return ",".join(str(i) for i in sorted(ids))
 
 
+# ---------------------------------------------------------------------------
+# subject_class_slot_rules -- per-(subject, class) hard placement restriction
+# ---------------------------------------------------------------------------
+
+def list_subject_class_rules(conn: sqlite3.Connection) -> list:
+    rows = conn.execute(
+        "SELECT rule_id, subject_id, class_ids, cells FROM subject_class_slot_rules ORDER BY rule_id"
+    ).fetchall()
+    return [
+        {
+            "rule_id": r["rule_id"],
+            "subject_id": r["subject_id"],
+            "class_ids": [int(x) for x in r["class_ids"].split(",") if x.strip()],
+            "cells": _parse_off_cells(r["cells"]),
+        }
+        for r in rows
+    ]
+
+
+def upsert_subject_class_rule(conn: sqlite3.Connection, subject_id: int, class_ids, cells, rule_id=None) -> int:
+    class_ids_str = ",".join(str(cid) for cid in sorted(class_ids))
+    cells_str = _format_off_cells(cells)
+    if rule_id is not None:
+        conn.execute(
+            "UPDATE subject_class_slot_rules SET subject_id=?, class_ids=?, cells=? WHERE rule_id=?",
+            (subject_id, class_ids_str, cells_str, rule_id),
+        )
+        conn.commit()
+        return rule_id
+    cur = conn.execute(
+        "INSERT INTO subject_class_slot_rules (subject_id, class_ids, cells) VALUES (?, ?, ?)",
+        (subject_id, class_ids_str, cells_str),
+    )
+    conn.commit()
+    return cur.lastrowid
+
+
+def delete_subject_class_rule(conn: sqlite3.Connection, rule_id: int) -> None:
+    conn.execute("DELETE FROM subject_class_slot_rules WHERE rule_id=?", (rule_id,))
+    conn.commit()
+
+
+def get_subject_class_allowed_cells(conn: sqlite3.Connection) -> dict:
+    result = {}
+    for rule in list_subject_class_rules(conn):
+        for class_id in rule["class_ids"]:
+            key = (rule["subject_id"], class_id)
+            result[key] = result.get(key, frozenset()) | rule["cells"]
+    return result
+
+
 def get_scheduling_config(conn: sqlite3.Connection) -> SchedulingConfig:
     default = SchedulingConfig()
     forbidden_raw = get_meta(conn, "sched_forbidden_off_cells")
