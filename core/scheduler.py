@@ -330,6 +330,14 @@ def _assign_off_slots(teacher_ids: set, teachers_by_id: dict, rng: random.Random
     calls this with the default -- every teacher gets exactly 1 buổi nghỉ/tuần,
     regardless of whether the school runs a 1- or 2-buổi/ngày model.
 
+    A teacher's own off_sessions_override/pinned_full_day_off/pinned_afternoon_off
+    (yêu cầu #3, spec 2026-08-29) override this per teacher: pinned cells are
+    guaranteed off first (a full-day pin is the one sanctioned exception to "never
+    a full day off"), and the remaining off_sessions_override - len(pinned) slots
+    are chosen at random exactly as for any other teacher. A pin that conflicts
+    with forbidden_off_cells/must_monday is dropped silently here (defense in
+    depth) -- the UI must validate this before ever saving such a pin.
+
     gvcn_shl_cell: teacher_id -> (weekday, session), the cell holding sinh hoạt lớp
     (tiết cuối buổi sáng: Thứ 6 khi lớp học 2 buổi/ngày, Thứ 7 khi 1 buổi/ngày) for
     that GVCN's own homeroom class -- only that one (weekday, session) is barred,
@@ -347,23 +355,41 @@ def _assign_off_slots(teacher_ids: set, teachers_by_id: dict, rng: random.Random
         if is_gvcn:
             forbidden.add(gvcn_shl_cell.get(tid, (7, "C")))
 
+        pinned_cells = set()
+        pinned_weekdays = set()
+        if t and t.pinned_full_day_off is not None:
+            wd = t.pinned_full_day_off
+            if (wd, "S") not in forbidden and (wd, "C") not in forbidden:
+                pinned_cells |= {(wd, "S"), (wd, "C")}
+                pinned_weekdays.add(wd)
+        if t and t.pinned_afternoon_off is not None:
+            wd = t.pinned_afternoon_off
+            if (wd, "C") not in forbidden and wd not in pinned_weekdays:
+                pinned_cells.add((wd, "C"))
+                pinned_weekdays.add(wd)
+
+        effective_count = t.off_sessions_override if (t and t.off_sessions_override is not None) else off_slot_count
+        remaining_count = max(0, effective_count - len(pinned_cells))
+
         by_weekday = defaultdict(list)
         for wd in (2, 3, 4, 5, 6, 7):
+            if wd in pinned_weekdays:
+                continue
             for session in ("S", "C"):
                 if (wd, session) not in forbidden:
                     by_weekday[wd].append(session)
         eligible_weekdays = [wd for wd, sessions in by_weekday.items() if sessions]
 
-        if len(eligible_weekdays) >= off_slot_count:
-            chosen_weekdays = rng.sample(eligible_weekdays, off_slot_count)
-            gv_off_slots[tid] = {(wd, rng.choice(by_weekday[wd])) for wd in chosen_weekdays}
+        if len(eligible_weekdays) >= remaining_count:
+            chosen_weekdays = rng.sample(eligible_weekdays, remaining_count)
+            gv_off_slots[tid] = pinned_cells | {(wd, rng.choice(by_weekday[wd])) for wd in chosen_weekdays}
         else:
             # not enough distinct eligible days -- take as many off-cells as
-            # possible instead of leaving off_slot_count unmet (may repeat a
+            # possible instead of leaving remaining_count unmet (may repeat a
             # weekday with both sessions as a last resort).
             all_eligible_cells = [(wd, s) for wd in eligible_weekdays for s in by_weekday[wd]]
-            picks = rng.sample(all_eligible_cells, min(off_slot_count, len(all_eligible_cells)))
-            gv_off_slots[tid] = set(picks)
+            picks = rng.sample(all_eligible_cells, min(remaining_count, len(all_eligible_cells)))
+            gv_off_slots[tid] = pinned_cells | set(picks)
     return gv_off_slots
 
 

@@ -308,6 +308,70 @@ def test_off_slots_respect_forbidden_cells_gvcn_and_must_monday():
         assert (2, "S") not in offs[3]
 
 
+def test_teacher_pinned_full_day_off():
+    rng = random.Random(1)
+    teachers_by_id = {1: Teacher(1, "GV The duc", pinned_full_day_off=4)}
+    for _ in range(50):
+        offs = sched._assign_off_slots({1}, teachers_by_id, rng, off_slot_count=1)
+        assert (4, "S") in offs[1]
+        assert (4, "C") in offs[1]
+
+
+def test_teacher_pinned_afternoon_off():
+    rng = random.Random(1)
+    teachers_by_id = {1: Teacher(1, "GV Thuong", pinned_afternoon_off=3)}
+    for _ in range(50):
+        offs = sched._assign_off_slots({1}, teachers_by_id, rng, off_slot_count=1)
+        assert (3, "C") in offs[1]
+
+
+def test_teacher_off_sessions_override():
+    rng = random.Random(1)
+    teachers_by_id = {
+        1: Teacher(1, "GV The duc", off_sessions_override=3),
+        2: Teacher(2, "GV Thuong"),
+    }
+    for _ in range(50):
+        offs = sched._assign_off_slots({1, 2}, teachers_by_id, rng, off_slot_count=1)
+        assert len(offs[1]) == 3
+        assert len(offs[2]) == 1
+
+
+def test_teacher_pinned_full_day_and_extra_afternoon_off():
+    # Yêu cầu #3 thật: 1 ngày nghỉ trọn + 1 buổi chiều cố định khác ngày = 3 buổi nghỉ/tuần.
+    rng = random.Random(1)
+    teachers_by_id = {
+        1: Teacher(1, "GV The duc", off_sessions_override=3, pinned_full_day_off=4, pinned_afternoon_off=3),
+    }
+    for _ in range(50):
+        offs = sched._assign_off_slots({1}, teachers_by_id, rng, off_slot_count=1)
+        assert len(offs[1]) == 3
+        assert (4, "S") in offs[1]
+        assert (4, "C") in offs[1]
+        assert (3, "C") in offs[1]
+
+
+def test_pinned_off_conflicts_with_forbidden_are_dropped():
+    # Thứ 6 nằm trọn trong FORBIDDEN_OFF_CELLS mặc định (sáng VÀ chiều) -> pin bị bỏ qua,
+    # GV vẫn nhận đủ off_slot_count buổi nghỉ ngẫu nhiên như GV thường (không crash, không kẹt).
+    rng = random.Random(1)
+    teachers_by_id = {1: Teacher(1, "GV", pinned_full_day_off=6)}
+    for _ in range(50):
+        offs = sched._assign_off_slots({1}, teachers_by_id, rng, off_slot_count=1)
+        assert (6, "S") not in offs[1]
+        assert (6, "C") not in offs[1]
+        assert len(offs[1]) == 1
+
+
+def test_off_slots_unchanged_when_no_override_or_pins():
+    # Regression: GV không có 3 field mới -> hành vi y hệt trước khi có tính năng này.
+    rng = random.Random(1)
+    teachers_by_id = {1: Teacher(1, "Normal", cap=19)}
+    for _ in range(50):
+        offs = sched._assign_off_slots({1}, teachers_by_id, rng, off_slot_count=1)
+        assert len(offs[1]) == 1
+
+
 def test_gvcn_off_slot_defaults_to_chieu_thu7_when_saturday_session_unknown():
     rng = random.Random(2)
     teachers_by_id = {1: Teacher(1, "GVCN_Teacher", role="GVCN", is_gvcn=True, cap=15)}
