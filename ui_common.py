@@ -41,6 +41,14 @@ def sidebar_fixed_rules(conn) -> None:
         "Buổi chiều luôn để trống toàn trường (ôn bồi dưỡng/phụ đạo): "
         + ", ".join(f"Thứ {wd}" for wd in config.reserved_off_weekdays_chieu),
     ]
+    if config.heavy_subject_priority_periods > 0:
+        configurable_rules.append(
+            f"Môn nặng được ưu tiên (không bắt buộc) vào {config.heavy_subject_priority_periods} tiết đầu buổi sáng"
+        )
+    if config.afternoon_preferred_subject_ids:
+        configurable_rules.append(
+            "Buổi chiều được ưu tiên (không bắt buộc) cho một số môn đã chọn ở trang Cấu hình xếp lịch"
+        )
     with st.sidebar:
         with st.expander("📐 Quy tắc xếp lịch"):
             st.caption(

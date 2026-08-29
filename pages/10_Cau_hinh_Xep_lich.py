@@ -47,6 +47,12 @@ teacher_off_sessions_per_week = c5.number_input(
     "Mỗi giáo viên: nghỉ mấy buổi/tuần", 0, 3, config.teacher_off_sessions_per_week,
 )
 
+heavy_subject_priority_periods = st.number_input(
+    "Môn nặng: ưu tiên (không bắt buộc) mấy tiết đầu buổi sáng (0 = tắt)", 0, max_p,
+    config.heavy_subject_priority_periods,
+    help="Chỉ là gợi ý cho thuật toán -- không cấm tuyệt đối, không làm hỏng khả năng tìm lời giải.",
+)
+
 st.subheader("Buổi/ngày khoá cứng")
 st.caption("Buổi không được chọn làm buổi nghỉ của giáo viên:")
 forbidden_selection = st.multiselect(
@@ -65,6 +71,21 @@ reserved_weekdays_selection = st.multiselect(
     label_visibility="collapsed",
 )
 
+st.subheader("Ưu tiên buổi (mềm, không bắt buộc)")
+st.caption(
+    "Các môn dưới đây được ưu tiên xếp vào buổi chiều (không cấm tuyệt đối môn khác, "
+    "chỉ là gợi ý cho thuật toán). Để trống = tắt tính năng này."
+)
+all_subjects = repo.list_subjects(conn)
+subject_names = {s.subject_id: s.name for s in all_subjects}
+afternoon_preferred_selection = st.multiselect(
+    "Môn ưu tiên buổi chiều",
+    options=[s.subject_id for s in all_subjects],
+    default=[sid for sid in config.afternoon_preferred_subject_ids if sid in subject_names],
+    format_func=lambda sid: subject_names.get(sid, str(sid)),
+    label_visibility="collapsed",
+)
+
 if st.button("💾 Lưu cấu hình", type="primary"):
     new_config = SchedulingConfig(
         gdtc_avoid_period=int(gdtc_avoid_period),
@@ -75,6 +96,8 @@ if st.button("💾 Lưu cấu hình", type="primary"):
         teacher_off_sessions_per_week=int(teacher_off_sessions_per_week),
         forbidden_off_cells=frozenset(forbidden_selection),
         reserved_off_weekdays_chieu=tuple(sorted(reserved_weekdays_selection)),
+        heavy_subject_priority_periods=int(heavy_subject_priority_periods),
+        afternoon_preferred_subject_ids=frozenset(afternoon_preferred_selection),
     )
     repo.set_scheduling_config(conn, new_config)
     st.success("Đã lưu cấu hình xếp lịch.")
