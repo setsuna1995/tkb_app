@@ -10,7 +10,8 @@ class MissingHDTNError(Exception):
     """Raised when no subject has role_code 5 (HDTN) -- mirrors the VBA hard-stop."""
 
 
-def resolve_roles(subjects: list, extra_kep_ids: frozenset = frozenset()) -> RoleIndex:
+def resolve_roles(subjects: list, extra_kep_ids: frozenset = frozenset(),
+                   hdtn_thematic_week: bool = False) -> RoleIndex:
     """extra_kep_ids: subject_id cần xếp "kép" (2 tiết liền kề cùng buổi) CHỈ cho lần chạy này,
     không phải thuộc tính cố định của môn (role_code) -- dùng khi 1 tuần cụ thể cần thêm môn
     khác ngoài các môn đã cố định KEP/NANG_KEP cũng xếp liền kề (vd Toán/KHTN tuần kiểm tra).
@@ -34,4 +35,10 @@ def resolve_roles(subjects: list, extra_kep_ids: frozenset = frozenset()) -> Rol
             "Không tìm thấy môn có MÃ = 5 (HDTN). Hãy điền số 5 vào cột MÃ VAI TRÒ "
             "tại dòng 'Hoạt động trải nghiệm, hướng nghiệp'."
         )
+    # Môn kép (cố định hoặc "chỉ tuần này") cần khối 2 tiết liền kề. "Tuần chuyên đề"
+    # (spec 2026-08-30) ghi đè HDTN riêng thành khối 3 -- không cộng dồn với kep_ids.
+    for subject_id in idx.kep_ids:
+        idx.block_size[subject_id] = 2
+    if hdtn_thematic_week:
+        idx.block_size[idx.hdtn_id] = 3
     return idx

@@ -78,6 +78,7 @@ class Slot:
 class RoleIndex:
     heavy_ids: set = field(default_factory=set)
     kep_ids: set = field(default_factory=set)
+    block_size: dict = field(default_factory=dict)  # subject_id -> N (contiguous periods required, >=2)
     gdtc_id: Optional[int] = None
     hdtn_id: Optional[int] = None
 

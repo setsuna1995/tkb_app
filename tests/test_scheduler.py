@@ -5,7 +5,7 @@ from collections import defaultdict
 from core import frame
 from core import scheduler as sched
 from core.models import (
-    ROLE_GDTC, ROLE_HDTN, ROLE_KEP, ROLE_NANG, ROLE_THUONG,
+    ROLE_GDTC, ROLE_HDTN, ROLE_KEP, ROLE_NANG, ROLE_NANG_KEP, ROLE_THUONG,
     ClassRoom, SchedulingConfig, SchedulingInput, Slot, Subject, Teacher, TimeSlot,
 )
 from core.roles import resolve_roles
@@ -207,6 +207,31 @@ def test_extra_kep_ids_makes_normal_subject_require_adjacency_this_run_only():
 def test_resolve_roles_without_extra_kep_ids_is_unchanged():
     subjects = [Subject(1, "Toan", ROLE_THUONG), Subject(2, "HDTN", ROLE_HDTN)]
     assert resolve_roles(subjects).kep_ids == resolve_roles(subjects, extra_kep_ids=frozenset()).kep_ids == set()
+
+
+def test_resolve_roles_block_size_for_kep_subjects():
+    subjects = [Subject(1, "Van", ROLE_KEP), Subject(2, "Toan", ROLE_NANG_KEP),
+                Subject(3, "Su", ROLE_THUONG), Subject(4, "HDTN", ROLE_HDTN)]
+    role_index = resolve_roles(subjects)
+    assert role_index.block_size == {1: 2, 2: 2}
+
+
+def test_resolve_roles_block_size_includes_extra_kep_ids():
+    subjects = [Subject(1, "Toan", ROLE_THUONG), Subject(2, "HDTN", ROLE_HDTN)]
+    role_index = resolve_roles(subjects, extra_kep_ids=frozenset({1}))
+    assert role_index.block_size == {1: 2}
+
+
+def test_resolve_roles_hdtn_thematic_week_sets_block_size_3():
+    subjects = [Subject(1, "Van", ROLE_KEP), Subject(2, "HDTN", ROLE_HDTN)]
+    role_index = resolve_roles(subjects, hdtn_thematic_week=True)
+    assert role_index.block_size == {1: 2, 2: 3}
+
+
+def test_resolve_roles_hdtn_thematic_week_off_by_default():
+    subjects = [Subject(1, "HDTN", ROLE_HDTN)]
+    role_index = resolve_roles(subjects)
+    assert role_index.block_size == {}
 
 
 def test_heavy_subject_run_of_3_cap():
