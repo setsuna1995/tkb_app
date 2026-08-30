@@ -953,6 +953,50 @@ def test_full_run_kep_subject_with_odd_weekly_count_pairs_maximally():
     assert p2 - p1 == 1
 
 
+def test_full_run_all_three_rules_combined():
+    # R1 (mandatory kép pairing, odd count) + R2 (HDTN thematic week) + R3 (heavy
+    # afternoon ban) together, shaped after the real school data found during
+    # root-cause investigation (Ngoại ngữ-like odd kép subject, HDTN 3/week).
+    classes = [ClassRoom(1, "6A")]
+    subjects = [
+        Subject(1, "Ngoai ngu", ROLE_NANG_KEP, 1),   # heavy + kep, odd weekly count
+        Subject(2, "Nhac", ROLE_THUONG, 2),           # non-heavy, no session restriction
+        Subject(3, "HDTN", ROLE_HDTN, 3),
+    ]
+    teachers = [Teacher(1, "GVAnh"), Teacher(2, "GVNhac"), Teacher(3, "GVCN", is_gvcn=True)]
+    need = {(1, 1): 3, (2, 1): 2, (3, 1): 3}
+    assigned_teacher = {(1, 1): 1, (2, 1): 2, (3, 1): 3}
+    timeslots = _make_timeslots(morning=4, afternoon=3, weekdays=(2, 3, 4, 5, 6))
+    inp = _build_input(classes, subjects, teachers, need, assigned_teacher, timeslots,
+                        seed=11, hdtn_thematic_week=True)
+    inp.config = SchedulingConfig(heavy_subjects_morning_only=True)
+
+    result = sched.run(inp, max_attempts=6000, target_successes=5)
+    assert result.success is True
+
+    # R3: Ngoại ngữ (heavy) never lands in an afternoon slot
+    for slot in inp.slots:
+        if result.assignment.get(slot.slot_id) == 1:
+            assert slot.ts.session == "S", (slot.ts.weekday, slot.ts.session, slot.ts.period)
+
+    # R1: Ngoại ngữ's 3 periods pair maximally (1 pair + 1 single, never 3 singles)
+    placed_ngoai_ngu = defaultdict(list)
+    for slot in inp.slots:
+        if result.assignment.get(slot.slot_id) == 1:
+            placed_ngoai_ngu[slot.ts.weekday].append(slot.ts.period)
+    assert sorted(len(v) for v in placed_ngoai_ngu.values()) == [1, 2]
+
+    # R2: HDTN's 3 periods form a single contiguous block
+    placed_hdtn = defaultdict(list)
+    for slot in inp.slots:
+        if result.assignment.get(slot.slot_id) == 3:
+            placed_hdtn[slot.ts.weekday].append(slot.ts.period)
+    assert len(placed_hdtn) == 1, placed_hdtn
+    (_wd, periods), = placed_hdtn.items()
+    periods = sorted(periods)
+    assert periods == [periods[0], periods[0] + 1, periods[0] + 2]
+
+
 def _subject_at(inp, result, class_id, wd, session, period):
     for s in inp.slots:
         if (s.class_id == class_id and s.ts.weekday == wd
