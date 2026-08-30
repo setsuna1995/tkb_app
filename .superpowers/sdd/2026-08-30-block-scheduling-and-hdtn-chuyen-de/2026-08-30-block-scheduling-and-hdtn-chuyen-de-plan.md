@@ -534,18 +534,27 @@ def test_has_unpaired_block_allows_exactly_one_leftover_single():
 
 
 def test_merge_one_block_period_merges_two_lone_days_into_a_pair():
+    # IMPORTANT: use real Slot objects looked up via slot_by_coord (built from
+    # inp.slots), never hand-fabricated Slot/TimeSlot objects with made-up
+    # slot_id/ts_id values -- _merge_one_block_period looks the *same* coordinate
+    # up again through slot_by_coord internally (for the target cell) and via
+    # _remove_at/_put_at (for the source cell's bookkeeping in state.assigned/
+    # state.busy, keyed by slot_id/ts_id). A hand-fabricated Slot's IDs won't
+    # match what slot_by_coord returns for that same (weekday, session, period),
+    # so state.assigned[<real slot_id>] would KeyError inside _remove_at.
     classes = [ClassRoom(1, "6A")]
     subjects = [Subject(1, "Van", ROLE_KEP), Subject(2, "HDTN", ROLE_HDTN)]
     role_index = resolve_roles(subjects)
+    teachers = [Teacher(100, "GV1"), Teacher(101, "GV2")]
     timeslots = _make_timeslots(morning=5, afternoon=0)
-    inp = _build_input(classes, subjects, [Teacher(1, "GV1"), Teacher(2, "GV2")],
-                        {(1, 1): 2, (2, 1): 3}, {(1, 1): 1, (2, 1): 2}, timeslots)
+    inp = _build_input(classes, subjects, teachers,
+                        {(1, 1): 2, (2, 1): 3}, {(1, 1): 100, (2, 1): 101}, timeslots)
     slot_by_coord = _slot_by_coord(inp.slots)
     state = _State(remaining_need={(1, 1): 0, (2, 1): 0}, busy=set())
-    ts_mon = TimeSlot(1, 2, "S", 1)
-    ts_tue = TimeSlot(2, 3, "S", 3)
-    _put_at(state, Slot(1, 1, ts_mon), 1, 100, role_index)
-    _put_at(state, Slot(2, 1, ts_tue), 1, 100, role_index)
+    mon_slot = slot_by_coord[(1, 2, "S", 1)]
+    tue_slot = slot_by_coord[(1, 3, "S", 3)]
+    _put_at(state, mon_slot, 1, 100, role_index)
+    _put_at(state, tue_slot, 1, 100, role_index)
 
     ok = sched._merge_one_block_period(1, 1, 3, 2, state, role_index, subjects,
                                         {(1, 1): 100, (2, 1): 101}, slot_by_coord, None, None, None)
@@ -566,8 +575,10 @@ def test_repair_unpaired_blocks_resolves_three_lone_hdtn_days_into_one_block():
     inp = _build_input(classes, subjects, teachers, need, assigned_teacher, timeslots)
     slot_by_coord = _slot_by_coord(inp.slots)
     state = _State(remaining_need={(1, 1): 0, (2, 1): 0}, busy=set())
+    # Real slots from slot_by_coord, not hand-fabricated ones -- see the comment
+    # in test_merge_one_block_period_merges_two_lone_days_into_a_pair above for why.
     for wd, period in ((2, 1), (3, 1), (4, 1)):
-        _put_at(state, Slot(wd, 1, TimeSlot(wd, wd, "S", period)), 2, assigned_teacher[(2, 1)], role_index)
+        _put_at(state, slot_by_coord[(1, wd, "S", period)], 2, assigned_teacher[(2, 1)], role_index)
     assert sched._has_unpaired_block(inp, state, role_index) is True
 
     sched._repair_unpaired_blocks(inp, state, role_index, assigned_teacher, slot_by_coord, None, None, None)

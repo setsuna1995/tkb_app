@@ -207,6 +207,36 @@ if config.heavy_subjects_morning_only and subject_id in role_index.heavy_ids and
   exactly like `_has_lone_period` — sets `done = False` and lets the existing
   best-of-N attempt loop (up to `SO_LAN_THU` = 6000) try a different random order.
 
+**Addendum (post-implementation finding, still 2026-08-30):** the above
+(scoring + post-hoc repair + reject/retry) was implemented exactly as specified
+and unit-tested clean, but running it against the real `sample_school.xlsm`
+fixture — 16 simultaneous (subject, class) kép combinations, all with an even
+weekly count (zero tolerance for a leftover single, everywhere at once) —
+produced a **deterministic 0/6000 success rate** (confirmed 0/4000 and 0/300 in
+extended repro). Root cause: post-hoc repair can only re-shuffle periods that
+are *already* placed; by the time it runs, the greedy fill has often already
+scattered too many kép subjects as singles with no adjacent slack cell left to
+consolidate into. This is a scale limitation of the repair-based design, not an
+implementation bug — see `.superpowers/sdd/2026-08-30-block-scheduling-and-hdtn-chuyen-de-plan/task-4-report.md`
+for the full investigation.
+
+Presented with this, Kiên chose to keep R1's 100%-hard requirement rather than
+loosen it (see §12). The fix, added on top of the above rather than replacing
+it: **`_try_place_block_atomically()`**, tried immediately before
+`_pick_best_scored` for every empty slot in `run()`'s main loop. For a subject
+that could start a *fresh* N-period block at this exact slot (enough
+`remaining_need` for a full block — not just the eventual single leftover — and
+no placement yet today), it atomically claims the whole forward window (this
+slot plus the next N-1) only if every slot in it is currently free and
+individually `_feasible`; otherwise it fully rolls back and falls through to
+the unchanged single-slot path. This prevents a block from ever being *started*
+unless it can be *completed* in the same action — the guarantee post-hoc repair
+could not provide — while leaving `_repair_unpaired_blocks`/`_has_unpaired_block`
+in place as a backstop for whatever a still-competing block subject or
+constraint interaction leaves behind. See the implementation notes in the
+plan's Task 4 (`.superpowers/sdd/2026-08-30-block-scheduling-and-hdtn-chuyen-de-plan/2026-08-30-block-scheduling-and-hdtn-chuyen-de-plan.md`)
+and its ledger for the exact code and the controller's ruling.
+
 ### 5.5 R2 — skipping chào cờ/SHL pins for a thematic week
 
 In `run()`, wrap the chào cờ pin block (`514-525`) and the entire SHL
@@ -324,10 +354,17 @@ block_size for the same subject_id.
   tight data (e.g. many classes doing R2 simultaneously — moot now since R2 is
   whole-school only, but combined with R1's block competition for limited
   same-session adjacent slots) may see `success=False` more often than before. This
-  is the explicitly-accepted trade-off from §12.
+  is the explicitly-accepted trade-off from §12. **Materialized and resolved**:
+  this risk was not hypothetical — it produced a deterministic 0/6000 failure on
+  the real school fixture (16 simultaneous zero-tolerance kép constraints). Fixed
+  by adding `_try_place_block_atomically()` (§5.4 addendum) rather than by raising
+  `SO_LAN_THU`, since the failure was structural (0 successes across thousands of
+  attempts), not merely rare.
 - **Repair complexity**: `_repair_unpaired_blocks()` (§5.4) is the most complex new
   code in this file — a cascading remove/place/refill/rollback chain. Needs thorough
-  unit coverage (§11) before trusting it in the full run loop.
+  unit coverage (§11) before trusting it in the full run loop. It turned out to be
+  necessary but insufficient alone — see the §5.4 addendum; it now serves as a
+  backstop behind `_try_place_block_atomically()`, which does most of the real work.
 - **role_code data step is manual**: R1 depends on Kiên updating 6 subjects'
   role_code himself; until he does, R1's mechanism will simply have nothing to act
   on for those subjects (safe no-op, not a bug).
@@ -382,3 +419,8 @@ block_size for the same subject_id.
 8. **R3 directionality** — confirmed one-directional (heavy banned from afternoon;
    non-heavy NOT banned from morning) after showing that the bidirectional reading
    makes R2's thematic week provably infeasible (§4's exact-fit capacity numbers).
+9. **Repair-based R1 hit a real wall on real data** (0/6000 success on the actual
+   school fixture, §5.4 addendum) — offered loosen-R1 / invest-in-a-stronger-
+   algorithm / revert-to-soft as options; Kiên chose to invest in a stronger
+   algorithm and keep the 100%-hard requirement. Resulted in
+   `_try_place_block_atomically()` (§5.4 addendum).

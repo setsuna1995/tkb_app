@@ -728,6 +728,150 @@ def test_chao_co_position_configurable_in_full_run():
             assert result.assignment.get(slot.slot_id) != hdtn_id
 
 
+# ---------------------------------------------------------------------------
+# Mandatory block-pairing: repair pass / validation (_repair_unpaired_blocks /
+# _has_unpaired_block / _merge_one_block_period)
+# ---------------------------------------------------------------------------
+
+def _slot_by_coord(slots):
+    return {(s.class_id, s.ts.weekday, s.ts.session, s.ts.period): s for s in slots}
+
+
+def test_has_unpaired_block_false_when_fully_paired():
+    classes = [ClassRoom(1, "6A")]
+    subjects = [Subject(1, "Van", ROLE_KEP), Subject(2, "HDTN", ROLE_HDTN)]
+    role_index = resolve_roles(subjects)
+    timeslots = _make_timeslots(morning=5, afternoon=0)
+    inp = _build_input(classes, subjects, [Teacher(1, "GV1"), Teacher(2, "GV2")],
+                        {(1, 1): 2, (2, 1): 3}, {(1, 1): 1, (2, 1): 2}, timeslots)
+    state = _State(remaining_need={(1, 1): 10}, busy=set())
+    ts1 = TimeSlot(1, 2, "S", 1)
+    ts2 = TimeSlot(2, 2, "S", 2)
+    _put_at(state, Slot(1, 1, ts1), 1, 100, role_index)
+    _put_at(state, Slot(2, 1, ts2), 1, 100, role_index)
+    assert sched._has_unpaired_block(inp, state, role_index) is False
+
+
+def test_has_unpaired_block_true_when_two_lone_days_exceed_allowance():
+    classes = [ClassRoom(1, "6A")]
+    subjects = [Subject(1, "Van", ROLE_KEP), Subject(2, "HDTN", ROLE_HDTN)]
+    role_index = resolve_roles(subjects)
+    timeslots = _make_timeslots(morning=5, afternoon=0)
+    inp = _build_input(classes, subjects, [Teacher(1, "GV1"), Teacher(2, "GV2")],
+                        {(1, 1): 2, (2, 1): 3}, {(1, 1): 1, (2, 1): 2}, timeslots)
+    state = _State(remaining_need={(1, 1): 10}, busy=set())
+    # 2 periods needed (block_size=2), but placed as 2 separate lone days -- excess
+    ts_mon = TimeSlot(1, 2, "S", 1)
+    ts_tue = TimeSlot(2, 3, "S", 1)
+    _put_at(state, Slot(1, 1, ts_mon), 1, 100, role_index)
+    _put_at(state, Slot(2, 1, ts_tue), 1, 100, role_index)
+    assert sched._has_unpaired_block(inp, state, role_index) is True
+
+
+def test_has_unpaired_block_allows_exactly_one_leftover_single():
+    # N=2, total_placed=3 (odd) -- 1 full pair + 1 leftover single is fine.
+    classes = [ClassRoom(1, "6A")]
+    subjects = [Subject(1, "Anh", ROLE_KEP), Subject(2, "HDTN", ROLE_HDTN)]
+    role_index = resolve_roles(subjects)
+    timeslots = _make_timeslots(morning=5, afternoon=0)
+    inp = _build_input(classes, subjects, [Teacher(1, "GV1"), Teacher(2, "GV2")],
+                        {(1, 1): 3, (2, 1): 3}, {(1, 1): 1, (2, 1): 2}, timeslots)
+    state = _State(remaining_need={(1, 1): 10}, busy=set())
+    ts_mon1 = TimeSlot(1, 2, "S", 1)
+    ts_mon2 = TimeSlot(2, 2, "S", 2)
+    ts_tue = TimeSlot(3, 3, "S", 1)
+    _put_at(state, Slot(1, 1, ts_mon1), 1, 100, role_index)
+    _put_at(state, Slot(2, 1, ts_mon2), 1, 100, role_index)
+    _put_at(state, Slot(3, 1, ts_tue), 1, 100, role_index)
+    assert sched._has_unpaired_block(inp, state, role_index) is False
+
+
+def test_merge_one_block_period_merges_two_lone_days_into_a_pair():
+    # IMPORTANT: use real Slot objects looked up via slot_by_coord (built from
+    # inp.slots), never hand-fabricated Slot/TimeSlot objects with made-up
+    # slot_id/ts_id values -- _merge_one_block_period looks the *same* coordinate
+    # up again through slot_by_coord internally (for the target cell) and via
+    # _remove_at/_put_at (for the source cell's bookkeeping in state.assigned/
+    # state.busy, keyed by slot_id/ts_id). A hand-fabricated Slot's IDs won't
+    # match what slot_by_coord returns for that same (weekday, session, period),
+    # so state.assigned[<real slot_id>] would KeyError inside _remove_at.
+    classes = [ClassRoom(1, "6A")]
+    subjects = [Subject(1, "Van", ROLE_KEP), Subject(2, "HDTN", ROLE_HDTN)]
+    role_index = resolve_roles(subjects)
+    teachers = [Teacher(100, "GV1"), Teacher(101, "GV2")]
+    timeslots = _make_timeslots(morning=5, afternoon=0)
+    inp = _build_input(classes, subjects, teachers,
+                        {(1, 1): 2, (2, 1): 3}, {(1, 1): 100, (2, 1): 101}, timeslots)
+    slot_by_coord = _slot_by_coord(inp.slots)
+    state = _State(remaining_need={(1, 1): 0, (2, 1): 0}, busy=set())
+    mon_slot = slot_by_coord[(1, 2, "S", 1)]
+    tue_slot = slot_by_coord[(1, 3, "S", 3)]
+    _put_at(state, mon_slot, 1, 100, role_index)
+    _put_at(state, tue_slot, 1, 100, role_index)
+
+    ok = sched._merge_one_block_period(1, 1, 3, 2, state, role_index, subjects,
+                                        {(1, 1): 100, (2, 1): 101}, slot_by_coord, None, None, None)
+    assert ok is True
+    assert state.placed[(1, 1, 3)] == []
+    positions = sorted(state.placed[(1, 1, 2)])
+    assert positions == [("S", 1), ("S", 2)]
+
+
+def test_merge_one_block_period_reclaims_adjacent_slack_cell():
+    # Day A (Monday) has a lone period; day B (Tuesday) also has a lone period, and
+    # the cell immediately after it (Tuesday period 2) is -1 (intentionally-empty
+    # slack), not another subject. The merge should reclaim that slack cell for the
+    # subject (forming a full pair on Tuesday) rather than skipping it, and leave
+    # day A's slot empty.
+    classes = [ClassRoom(1, "6A")]
+    subjects = [Subject(1, "Van", ROLE_KEP), Subject(2, "HDTN", ROLE_HDTN)]
+    role_index = resolve_roles(subjects)
+    teachers = [Teacher(100, "GV1"), Teacher(101, "GV2")]
+    timeslots = _make_timeslots(morning=5, afternoon=0)
+    inp = _build_input(classes, subjects, teachers,
+                        {(1, 1): 2, (2, 1): 3}, {(1, 1): 100, (2, 1): 101}, timeslots)
+    slot_by_coord = _slot_by_coord(inp.slots)
+    state = _State(remaining_need={(1, 1): 0, (2, 1): 0}, busy=set())
+    mon_slot = slot_by_coord[(1, 2, "S", 1)]
+    tue_slot = slot_by_coord[(1, 3, "S", 1)]
+    tue_slack_slot = slot_by_coord[(1, 3, "S", 2)]
+    _put_at(state, mon_slot, 1, 100, role_index)
+    _put_at(state, tue_slot, 1, 100, role_index)
+    state.assigned[tue_slack_slot.slot_id] = -1
+    state.rem_slot_count[1] -= 1
+
+    ok = sched._merge_one_block_period(1, 1, 2, 3, state, role_index, subjects,
+                                        {(1, 1): 100, (2, 1): 101}, slot_by_coord, None, None, None)
+    assert ok is True
+    assert state.assigned.get(mon_slot.slot_id) is None
+    assert state.placed[(1, 1, 2)] == []
+    assert state.assigned[tue_slack_slot.slot_id] == 1
+    positions = sorted(state.placed[(1, 1, 3)])
+    assert positions == [("S", 1), ("S", 2)]
+
+
+def test_repair_unpaired_blocks_resolves_three_lone_hdtn_days_into_one_block():
+    classes = [ClassRoom(1, "6A")]
+    subjects = [Subject(1, "Toan", ROLE_THUONG), Subject(2, "HDTN", ROLE_HDTN)]
+    role_index = resolve_roles(subjects, hdtn_thematic_week=True)
+    teachers = [Teacher(1, "GVToan"), Teacher(2, "GVCN")]
+    need = {(1, 1): 2, (2, 1): 3}
+    assigned_teacher = {(1, 1): 1, (2, 1): 2}
+    timeslots = _make_timeslots(morning=5, afternoon=0)
+    inp = _build_input(classes, subjects, teachers, need, assigned_teacher, timeslots)
+    slot_by_coord = _slot_by_coord(inp.slots)
+    state = _State(remaining_need={(1, 1): 0, (2, 1): 0}, busy=set())
+    # Real slots from slot_by_coord, not hand-fabricated ones -- see the comment
+    # in test_merge_one_block_period_merges_two_lone_days_into_a_pair above for why.
+    for wd, period in ((2, 1), (3, 1), (4, 1)):
+        _put_at(state, slot_by_coord[(1, wd, "S", period)], 2, assigned_teacher[(2, 1)], role_index)
+    assert sched._has_unpaired_block(inp, state, role_index) is True
+
+    sched._repair_unpaired_blocks(inp, state, role_index, assigned_teacher, slot_by_coord, None, None, None)
+
+    assert sched._has_unpaired_block(inp, state, role_index) is False
+
+
 def test_extra_kep_ids_forces_adjacency_in_full_run():
     # Toán học (subject 1, ROLE_THUONG) không phải KEP cố định, nhưng được đánh dấu
     # extra_kep_ids={1} cho lần chạy này -- mọi lần môn 1 xuất hiện 2 tiết cùng ngày ở 1 lớp
@@ -765,6 +909,47 @@ def test_extra_kep_ids_forces_adjacency_in_full_run():
         if len(positions) == 2:
             (s1, p1), (s2, p2) = sorted(positions)
             assert s1 == s2 and abs(p1 - p2) == 1, positions
+
+
+def test_full_run_kep_subject_with_odd_weekly_count_pairs_maximally():
+    # Mirrors the real school data found during root-cause investigation: Ngoại ngữ
+    # is a kép subject with an odd weekly count (3) in every class -- must place as
+    # 1 full pair + exactly 1 leftover single, never scattered as 3 separate days.
+    #
+    # Load = 30 (6 ngày x 5 tiết sáng) to fully fill the class's 1-buổi frame, same
+    # convention as test_small_synthetic_schedule_succeeds_and_meets_quotas /
+    # test_extra_kep_ids_forces_adjacency_in_full_run -- without it, Saturday's
+    # morning periods stay unfilled and the pre-existing SHL pin (which requires
+    # period 4 already occupied by a real subject before period 5 can be pinned,
+    # per BAT_LIEN_MACH) can never succeed, regardless of this task's changes.
+    classes = [ClassRoom(1, "6A")]
+    subjects = [
+        Subject(1, "Ngoai ngu", ROLE_NANG_KEP, 1),
+        Subject(2, "Toan hoc", ROLE_THUONG, 2),
+        Subject(3, "Ngu van", ROLE_KEP, 3),
+        Subject(4, "GDTC", ROLE_GDTC, 4),
+        Subject(5, "Tieng Anh", ROLE_THUONG, 5),
+        Subject(6, "HDTN", ROLE_HDTN, 6),
+    ]
+    teachers = [Teacher(1, "GV1"), Teacher(2, "GV2"), Teacher(3, "GV3"), Teacher(4, "GV4"),
+                Teacher(5, "GV5"), Teacher(6, "GVCN", is_gvcn=True)]
+    need = {(1, 1): 3, (2, 1): 6, (3, 1): 12, (4, 1): 3, (5, 1): 3, (6, 1): 3}
+    assigned_teacher = {(1, 1): 1, (2, 1): 2, (3, 1): 3, (4, 1): 4, (5, 1): 5, (6, 1): 6}
+    timeslots = _make_timeslots(morning=5, afternoon=0)
+    inp = _build_input(classes, subjects, teachers, need, assigned_teacher, timeslots, seed=1)
+
+    result = sched.run(inp, max_attempts=6000, target_successes=5)
+    assert result.success is True
+
+    placed = defaultdict(list)
+    for slot in inp.slots:
+        if result.assignment.get(slot.slot_id) == 1:
+            placed[slot.ts.weekday].append(slot.ts.period)
+    day_counts = sorted(len(v) for v in placed.values())
+    assert day_counts == [1, 2], day_counts
+    paired_day = [wd for wd, periods in placed.items() if len(periods) == 2][0]
+    p1, p2 = sorted(placed[paired_day])
+    assert p2 - p1 == 1
 
 
 def _subject_at(inp, result, class_id, wd, session, period):

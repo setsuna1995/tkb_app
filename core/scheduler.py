@@ -37,6 +37,9 @@ HEAVY_MORNING_BONUS = 30          # điểm thưởng khi môn "Nặng" rơi và
                                   # (N = config.heavy_subject_priority_periods, 0 = tắt) -- cùng bậc IDLE_DAY_BONUS
 AFTERNOON_MISMATCH_PENALTY = 30   # điểm phạt khi môn KHÔNG nằm trong config.afternoon_preferred_subject_ids
                                   # rơi vào buổi chiều (rỗng = tắt -- không phạt gì)
+BLOCK_COMPLETE_BONUS = 40         # điểm thưởng khi tiếp tục/hoàn thành 1 khối N tiết liền kề (role_index.block_size)
+                                  # -- gợi ý hiệu quả, không phải nguồn đúng đắn: _has_unpaired_block +
+                                  # best-of-N mới là cơ chế đảm bảo (xem _repair_unpaired_blocks)
 
 # Buổi không được chọn làm buổi nghỉ của GV: sáng Thứ 2/5/6 (hoạt động cố định
 # buổi sáng những ngày này), và chiều Thứ 5/6 (đã bị khoá hẳn khỏi TKB ở
@@ -226,6 +229,214 @@ def _has_lone_period(inp: SchedulingInput, state: _State) -> bool:
     return any(count == 1 and total_count[key] >= 2 for key, count in filled_count.items())
 
 
+def _merge_one_block_period(class_id: int, subject_id: int, wd_from: int, wd_to: int,
+                             state: _State, role_index, subjects: list, assigned_teacher: dict,
+                             slot_by_coord: dict, day_capacity: Optional[dict],
+                             config: Optional[SchedulingConfig],
+                             subject_class_allowed_cells: Optional[dict]) -> bool:
+    """Move exactly one already-placed period of (subject_id, class_id) from the
+    partial day wd_from onto the open end of wd_to's existing run, extending it by
+    one. Mirrors _try_swap_repair's remove/place/refill/rollback shape: if the
+    target cell is occupied by a different subject, that subject is displaced and
+    re-homed at the vacated source cell (or left as slack -1, or the whole merge is
+    rolled back to its original state). Returns False, with state fully restored,
+    if no adjacent target cell works.
+    """
+    from_positions = state.placed[(class_id, subject_id, wd_from)]
+    to_positions = state.placed[(class_id, subject_id, wd_to)]
+    if not from_positions or not to_positions:
+        return False
+    session_from, period_from = from_positions[-1]
+    session_to = to_positions[0][0]
+    to_periods = sorted(p_period for _p_session, p_period in to_positions)
+    source = slot_by_coord[(class_id, wd_from, session_from, period_from)]
+    teacher_id = assigned_teacher[(subject_id, class_id)]
+
+    for target_period in (to_periods[-1] + 1, to_periods[0] - 1):
+        target = slot_by_coord.get((class_id, wd_to, session_to, target_period))
+        if target is None:
+            continue
+        occupant = state.assigned.get(target.slot_id)
+        was_slack = occupant == -1
+        displaced_subject, displaced_teacher = (None, None)
+        if was_slack:
+            state.assigned[target.slot_id] = None
+            state.rem_slot_count[class_id] += 1
+        elif occupant is not None:
+            displaced_subject, displaced_teacher = _remove_at(state, target, role_index)
+        _remove_at(state, source, role_index)
+        if _feasible(class_id, target.ts, subject_id, teacher_id, state, role_index, day_capacity, config,
+                      subject_class_allowed_cells):
+            _put_at(state, target, subject_id, teacher_id, role_index)
+            if displaced_subject is None:
+                return True
+            if _feasible(class_id, source.ts, displaced_subject, displaced_teacher, state, role_index,
+                          day_capacity, config, subject_class_allowed_cells):
+                _put_at(state, source, displaced_subject, displaced_teacher, role_index)
+                return True
+            pick = _pick_best_simple(class_id, source, state, role_index, subjects, assigned_teacher,
+                                      day_capacity, config, subject_class_allowed_cells)
+            if pick is not None:
+                _put_at(state, source, pick[0], pick[1], role_index)
+                return True
+            if state.rem_slot_count[class_id] > state.rem_need_count[class_id]:
+                state.assigned[source.slot_id] = -1
+                state.rem_slot_count[class_id] -= 1
+                return True
+            # no refill found and no slack -- roll back this whole merge attempt
+            # (displaced_subject is guaranteed not None here -- the was_slack case
+            # always returns True above via the "displaced_subject is None" branch,
+            # so was_slack and "reached this line" are mutually exclusive)
+            _remove_at(state, target, role_index)
+            _put_at(state, source, subject_id, teacher_id, role_index)
+            _put_at(state, target, displaced_subject, displaced_teacher, role_index)
+            return False
+        # target infeasible for our subject -- restore source and target, try the other end
+        _put_at(state, source, subject_id, teacher_id, role_index)
+        if was_slack:
+            state.assigned[target.slot_id] = -1
+            state.rem_slot_count[class_id] -= 1
+        elif displaced_subject is not None:
+            _put_at(state, target, displaced_subject, displaced_teacher, role_index)
+    return False
+
+
+def _repair_unpaired_blocks(inp: SchedulingInput, state: _State, role_index,
+                             assigned_teacher: dict, slot_by_coord: dict,
+                             day_capacity: Optional[dict], config: Optional[SchedulingConfig] = None,
+                             subject_class_allowed_cells: Optional[dict] = None) -> None:
+    """Best-effort: for every (class, block subject) with more partial (0 < count <
+    N) days than the weekly total allows (at most one, and only when the total
+    isn't a multiple of N), merge two partial days into a fuller one via
+    _merge_one_block_period until no more excess remains or no merge succeeds.
+    _has_unpaired_block is the authoritative check run afterwards in case a merge
+    isn't found here.
+    """
+    for cls in inp.classes:
+        class_id = cls.class_id
+        for subject_id, block_n in role_index.block_size.items():
+            if block_n < 2:
+                continue
+            total_placed = sum(len(state.placed[(class_id, subject_id, wd)]) for wd in WEEKDAYS)
+            if total_placed == 0:
+                continue
+            allowed_partial_days = 1 if total_placed % block_n else 0
+            partial_days = [wd for wd in WEEKDAYS
+                             if 0 < len(state.placed[(class_id, subject_id, wd)]) < block_n]
+            while len(partial_days) > allowed_partial_days:
+                merged = False
+                for wd_a in partial_days:
+                    for wd_b in partial_days:
+                        if wd_b == wd_a:
+                            continue
+                        if len(state.placed[(class_id, subject_id, wd_b)]) >= block_n:
+                            continue
+                        if _merge_one_block_period(class_id, subject_id, wd_a, wd_b, state, role_index,
+                                                    inp.subjects, assigned_teacher, slot_by_coord,
+                                                    day_capacity, config, subject_class_allowed_cells):
+                            merged = True
+                            break
+                    if merged:
+                        break
+                if not merged:
+                    break
+                partial_days = [wd for wd in WEEKDAYS
+                                 if 0 < len(state.placed[(class_id, subject_id, wd)]) < block_n]
+
+
+def _has_unpaired_block(inp: SchedulingInput, state: _State, role_index) -> bool:
+    """True if any (class, block subject) has more partial-day placements left than
+    its weekly total allows (see _repair_unpaired_blocks's docstring for the rule).
+    """
+    for cls in inp.classes:
+        class_id = cls.class_id
+        for subject_id, block_n in role_index.block_size.items():
+            if block_n < 2:
+                continue
+            total_placed = sum(len(state.placed[(class_id, subject_id, wd)]) for wd in WEEKDAYS)
+            if total_placed == 0:
+                continue
+            allowed_partial_days = 1 if total_placed % block_n else 0
+            partial_days = sum(
+                1 for wd in WEEKDAYS if 0 < len(state.placed[(class_id, subject_id, wd)]) < block_n
+            )
+            if partial_days > allowed_partial_days:
+                return True
+    return False
+
+
+def _try_place_block_atomically(class_id: int, slot: Slot, state: _State, role_index,
+                                  subjects: list, assigned_teacher: dict,
+                                  day_capacity: Optional[dict], config: Optional[SchedulingConfig],
+                                  subject_class_allowed_cells: Optional[dict],
+                                  slot_by_coord: dict) -> bool:
+    """Best-effort priority step, tried before _pick_best_scored for every empty
+    slot: if a block subject (role_index.block_size >= 2) could START a fresh
+    N-period block here (no placement yet today, and enough remaining_need for a
+    full block, not just the eventual leftover single), claim the whole block
+    atomically -- this slot plus the next (N-1) slots forward in the same session
+    -- so a block is never started unless it can be completed in the same action.
+    This is what makes block-pairing converge reliably on real (tightly-loaded)
+    data; _repair_unpaired_blocks/_has_unpaired_block remain a backstop for
+    whatever this still misses.
+
+    Returns True and mutates state (all N slots placed) on success; returns False
+    with state fully unchanged (nothing placed, not even a partial claim) otherwise.
+    """
+    ts = slot.ts
+    candidates = []
+    for subj in subjects:
+        block_n = role_index.block_size.get(subj.subject_id, 1)
+        if block_n < 2:
+            continue
+        key = (subj.subject_id, class_id)
+        remaining = state.remaining_need.get(key, 0)
+        if remaining < block_n:
+            continue  # not enough left for a full block -- leave to the single-slot path
+        if state.placed[(class_id, subj.subject_id, ts.weekday)]:
+            continue  # already has a placement today -- not a fresh start
+        if subj.subject_id == role_index.hdtn_id and (class_id, ts.weekday) in state.shl_days:
+            continue
+        teacher_id = assigned_teacher[key]
+        if not _feasible(class_id, ts, subj.subject_id, teacher_id, state, role_index, day_capacity, config,
+                          subject_class_allowed_cells):
+            continue
+        candidates.append((subj.subject_id, teacher_id, block_n))
+    if not candidates:
+        return False
+    # prefer keeping the old subject already at this slot (mirrors _pick_best_scored's
+    # "giữ nguyên tiết cũ" preference), else the highest remaining_need
+    candidates.sort(key=lambda c: (
+        0 if slot.old_subject_id == c[0] else 1,
+        -state.remaining_need.get((c[0], class_id), 0),
+    ))
+    for subject_id, teacher_id, block_n in candidates:
+        window = [slot]
+        ok = True
+        for offset in range(1, block_n):
+            next_slot = slot_by_coord.get((class_id, ts.weekday, ts.session, ts.period + offset))
+            if next_slot is None or state.assigned.get(next_slot.slot_id) is not None:
+                ok = False
+                break
+            window.append(next_slot)
+        if not ok:
+            continue
+        placed_so_far = []
+        for w_slot in window:
+            if _feasible(class_id, w_slot.ts, subject_id, teacher_id, state, role_index, day_capacity, config,
+                          subject_class_allowed_cells):
+                _put_at(state, w_slot, subject_id, teacher_id, role_index)
+                placed_so_far.append(w_slot)
+            else:
+                ok = False
+                break
+        if ok:
+            return True
+        for w_slot in reversed(placed_so_far):
+            _remove_at(state, w_slot, role_index)
+    return False
+
+
 def _pick_best_scored(class_id: int, slot: Slot, state: _State, role_index,
                        subjects: list, assigned_teacher: dict, pu: float, rng: random.Random,
                        day_capacity: Optional[dict] = None,
@@ -250,6 +461,17 @@ def _pick_best_scored(class_id: int, slot: Slot, state: _State, role_index,
         # được giữ chỗ và HDTN cap 1 tiết/ngày nên phải chừa cả ngày cho ô ghim.
         if subj.subject_id == role_index.hdtn_id and (class_id, ts.weekday) in state.shl_days:
             continue
+        # _try_place_block_atomically is always tried right before this function for
+        # this same slot (see run()'s wiring) -- if it declined, every fresh-block-start
+        # candidate (enough remaining_need for a FULL block, no placement yet today)
+        # already failed to claim a full window here. Don't let the single-slot scorer
+        # place one anyway as a lone single -- that's exactly the fragmentation the
+        # atomic mechanism exists to prevent. Let it wait for a slot elsewhere in the
+        # week where the full window actually fits.
+        block_n = role_index.block_size.get(subj.subject_id, 1)
+        if (block_n >= 2 and not state.placed[(class_id, subj.subject_id, ts.weekday)]
+                and state.remaining_need[key] >= block_n):
+            continue
         teacher_id = assigned_teacher[key]
         if not _feasible(class_id, ts, subj.subject_id, teacher_id, state, role_index, day_capacity, config,
                           subject_class_allowed_cells):
@@ -271,6 +493,8 @@ def _pick_best_scored(class_id: int, slot: Slot, state: _State, role_index,
         if (ts.session == "C" and config.afternoon_preferred_subject_ids
                 and subj.subject_id not in config.afternoon_preferred_subject_ids):
             score -= AFTERNOON_MISMATCH_PENALTY
+        if role_index.block_size.get(subj.subject_id, 1) >= 2 and state.placed[(class_id, subj.subject_id, ts.weekday)]:
+            score += BLOCK_COMPLETE_BONUS
         if slot.old_subject_id == subj.subject_id and rng.random() > pu:
             score += 1_000_000
         if score > best_score:
@@ -462,11 +686,13 @@ def run(inp: SchedulingInput, *, max_attempts: int = SO_LAN_THU,
     slots_by_ts = defaultdict(list)
     slots_by_class = defaultdict(list)
     day_capacity = defaultdict(int)
+    slot_by_coord = {}
     for slot in inp.slots:
         slot_cls_n[slot.class_id] += 1
         slots_by_ts[slot.ts.ts_id].append(slot)
         slots_by_class[slot.class_id].append(slot)
         day_capacity[(slot.class_id, slot.ts.weekday)] += 1
+        slot_by_coord[(slot.class_id, slot.ts.weekday, slot.ts.session, slot.ts.period)] = slot
 
     base_order = sorted(inp.timeslots, key=lambda ts: ts.order_key)
 
@@ -547,6 +773,12 @@ def run(inp: SchedulingInput, *, max_attempts: int = SO_LAN_THU,
             rng.shuffle(candidates)
             for slot in candidates:
                 class_id = slot.class_id
+                if state.assigned.get(slot.slot_id) is not None:
+                    continue  # claimed by an earlier atomic block placement this pass
+                if _try_place_block_atomically(class_id, slot, state, role_index, inp.subjects,
+                                                assigned_teacher, day_capacity, config,
+                                                subject_class_allowed_cells, slot_by_coord):
+                    continue
                 pick = _pick_best_scored(class_id, slot, state, role_index, inp.subjects,
                                           assigned_teacher, pu, rng, day_capacity, config,
                                           subject_class_allowed_cells)
@@ -594,6 +826,12 @@ def run(inp: SchedulingInput, *, max_attempts: int = SO_LAN_THU,
             _repair_lone_periods(inp, state, role_index, assigned_teacher, slots_by_class, day_capacity, config,
                                   subject_class_allowed_cells)
             if _has_lone_period(inp, state):
+                done = False
+
+        if done:
+            _repair_unpaired_blocks(inp, state, role_index, assigned_teacher, slot_by_coord, day_capacity, config,
+                                     subject_class_allowed_cells)
+            if _has_unpaired_block(inp, state, role_index):
                 done = False
 
         if done:
