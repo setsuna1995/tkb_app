@@ -185,6 +185,62 @@ def test_kep_second_period_must_be_adjacent():
     assert _feasible(1, ts4, 1, 100, state, role_index) is False
 
 
+def test_block_size_3_allows_extending_either_end_of_the_run():
+    subjects = [Subject(1, "HDTN_CD", ROLE_THUONG), Subject(2, "HDTN", ROLE_HDTN)]
+    role_index = resolve_roles(subjects, hdtn_thematic_week=False)
+    role_index.block_size[1] = 3
+    state = _State(remaining_need={(1, 1): 10}, busy=set())
+
+    ts2 = TimeSlot(1, 2, "S", 2)
+    _put_at(state, Slot(1, 1, ts2), 1, 100, role_index)
+
+    # extend forward (period 3) -- still under cap (2 placed, N=3)
+    ts3 = TimeSlot(2, 2, "S", 3)
+    assert _feasible(1, ts3, 1, 100, state, role_index) is True
+    _put_at(state, Slot(2, 1, ts3), 1, 100, role_index)
+
+    # cap reached (2,3 placed, N=3) -- extending backward (period 1) still allowed,
+    # it completes the block at exactly 3
+    state.occupied[(1, 2, "S", 1)] = True  # satisfy lien-mach for a period-1 placement (always true)
+    ts1 = TimeSlot(3, 2, "S", 1)
+    assert _feasible(1, ts1, 1, 100, state, role_index) is True
+    _put_at(state, Slot(3, 1, ts1), 1, 100, role_index)
+
+    # cap_d=3 reached -- a 4th period the same day is blocked regardless of adjacency
+    state.occupied[(1, 2, "S", 4)] = True
+    ts4 = TimeSlot(4, 2, "S", 4)
+    assert _feasible(1, ts4, 1, 100, state, role_index) is False
+
+
+def test_block_size_3_rejects_non_adjacent_extension():
+    subjects = [Subject(1, "HDTN_CD", ROLE_THUONG), Subject(2, "HDTN", ROLE_HDTN)]
+    role_index = resolve_roles(subjects)
+    role_index.block_size[1] = 3
+    state = _State(remaining_need={(1, 1): 10}, busy=set())
+
+    ts2 = TimeSlot(1, 2, "S", 2)
+    _put_at(state, Slot(1, 1, ts2), 1, 100, role_index)
+    ts3 = TimeSlot(2, 2, "S", 3)
+    _put_at(state, Slot(2, 1, ts3), 1, 100, role_index)
+
+    # period 5 is not adjacent to the (2,3) run -- must be rejected
+    state.occupied[(1, 2, "S", 4)] = True
+    ts5 = TimeSlot(3, 2, "S", 5)
+    assert _feasible(1, ts5, 1, 100, state, role_index) is False
+
+
+def test_block_size_defaults_to_one_when_absent():
+    subjects = [Subject(1, "Toan", ROLE_THUONG), Subject(2, "HDTN", ROLE_HDTN)]
+    role_index = resolve_roles(subjects)
+    assert role_index.block_size == {}
+    state = _State(remaining_need={(1, 1): 10}, busy=set())
+    ts1 = TimeSlot(1, 2, "S", 1)
+    _put_at(state, Slot(1, 1, ts1), 1, 100, role_index)
+    state.occupied[(1, 2, "S", 2)] = True
+    ts2 = TimeSlot(2, 2, "S", 2)
+    assert _feasible(1, ts2, 1, 100, state, role_index) is False
+
+
 def test_extra_kep_ids_makes_normal_subject_require_adjacency_this_run_only():
     # Toan (ROLE_THUONG, không phải KEP cố định) nhưng được đánh dấu extra_kep_ids={1} cho lần
     # chạy này -- phải xử sự y hệt 1 môn KEP thật (cap_d=2, tiết thứ 2 phải liền kề cùng buổi).

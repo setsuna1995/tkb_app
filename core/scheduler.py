@@ -113,12 +113,14 @@ def _feasible(class_id: int, ts: TimeSlot, subject_id: int, teacher_id: int,
         if not state.occupied.get((class_id, ts.weekday, ts.session, ts.period - 1), False):
             return False
     positions = state.placed[(class_id, subject_id, ts.weekday)]
-    cap_d = 2 if subject_id in role_index.kep_ids else 1
+    cap_d = role_index.block_size.get(subject_id, 1)
     if len(positions) >= cap_d:
         return False
-    if len(positions) == 1:
-        p_session, p_period = positions[0]
-        if p_session != ts.session or abs(p_period - ts.period) != 1:
+    if positions:
+        if any(p_session != ts.session for p_session, _p_period in positions):
+            return False
+        periods = sorted(p_period for _p_session, p_period in positions)
+        if ts.period not in (periods[0] - 1, periods[-1] + 1):
             return False
     if subject_id in role_index.heavy_ids:
         window = config.max_heavy_consecutive + 1
