@@ -979,22 +979,25 @@ def test_shl_pinned_last_morning_period_2buoi():
 
 def test_hdtn_thematic_week_forms_one_block_and_skips_chao_co_shl_pins():
     # Thematic week HDTN: all 3 periods flow through block-aware greedy (no chào cờ/SHL pins).
-    # Simpler case: just 1 class, HDTN only (3 periods), plenty of slots to make placement easy.
+    # Uses Toan (1 period) + HDTN (3 periods). HDTN forms 3-period contiguous block on a
+    # single weekday, proving both pins were skipped: those pins anchor HDTN to Monday
+    # period 1 (chào cờ) and Fri/Sat last period (SHL) — different non-adjacent weekdays
+    # that would make a single 3-period contiguous block impossible.
     classes = [ClassRoom(1, "6A")]
-    subjects = [Subject(1, "HDTN", ROLE_HDTN)]
-    teachers = [Teacher(1, "GVCN", is_gvcn=True)]
-    need = {(1, 1): 3}
-    assigned_teacher = {(1, 1): 1}
-    timeslots = _make_timeslots(morning=4, afternoon=0, weekdays=(2, 3, 4, 5, 6, 7))
+    subjects = [Subject(1, "Toan", ROLE_THUONG), Subject(2, "HDTN", ROLE_HDTN)]
+    teachers = [Teacher(1, "GVToan"), Teacher(2, "GVCN", is_gvcn=True)]
+    need = {(1, 1): 1, (2, 1): 3}
+    assigned_teacher = {(1, 1): 1, (2, 1): 2}
+    timeslots = _make_timeslots(morning=5, afternoon=0, weekdays=(2, 3, 4, 5, 6, 7))
     inp = _build_input(classes, subjects, teachers, need, assigned_teacher, timeslots,
-                        seed=1, hdtn_thematic_week=True)
+                        seed=3, hdtn_thematic_week=True)
 
-    result = sched.run(inp, max_attempts=1000, target_successes=1)
+    result = sched.run(inp, max_attempts=6000, target_successes=5)
     assert result.success is True
 
     placed = defaultdict(list)
     for slot in inp.slots:
-        if result.assignment.get(slot.slot_id) == 1:  # HDTN is subject_id 1
+        if result.assignment.get(slot.slot_id) == 2:  # HDTN is subject_id 2
             placed[slot.ts.weekday].append(slot.ts.period)
     # All 3 periods land on a single weekday, contiguous -- this alone proves the
     # chào cờ (Monday period 1) and SHL (Friday/Saturday last period) pins were
