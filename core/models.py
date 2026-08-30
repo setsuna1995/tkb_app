@@ -116,6 +116,8 @@ class SchedulingInput:
     timeslots: list         # list[TimeSlot]
     seed: int = 0            # 0 = random each run
     extra_kep_ids: frozenset = field(default_factory=frozenset)  # subject_id cần xếp kép CHỈ tuần này
+    hdtn_thematic_week: bool = False   # True = tuần chuyên đề CHỈ tuần này (R2, spec 2026-08-30):
+                                        # HDTN dồn 3 tiết liền kề, bỏ ghim chào cờ + SHL
     config: SchedulingConfig = field(default_factory=SchedulingConfig)
     subject_class_allowed_cells: dict = field(default_factory=dict)  # (subject_id, class_id) -> frozenset[(weekday, session)]
 

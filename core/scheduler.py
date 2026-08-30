@@ -643,7 +643,7 @@ def _assign_off_slots(teacher_ids: set, teachers_by_id: dict, rng: random.Random
 
 def run(inp: SchedulingInput, *, max_attempts: int = SO_LAN_THU,
         target_successes: int = SO_PA_TOT, lock_threshold: int = NGUONG_KHOA) -> ScheduleResult:
-    role_index = resolve_roles(inp.subjects, inp.extra_kep_ids)
+    role_index = resolve_roles(inp.subjects, inp.extra_kep_ids, inp.hdtn_thematic_week)
     config = inp.config
     subject_class_allowed_cells = inp.subject_class_allowed_cells
     assigned_teacher = _build_effective_assigned_teacher(inp)
@@ -678,6 +678,13 @@ def run(inp: SchedulingInput, *, max_attempts: int = SO_LAN_THU,
         target = shl_target_slot.get(cls.class_id)
         if homeroom_teacher is not None and target is not None:
             gvcn_shl_cell[homeroom_teacher] = (target.ts.weekday, target.ts.session)
+
+    if inp.hdtn_thematic_week:
+        # Tuần chuyên đề (R2): không có ô SHL cố định nào bị giữ chỗ, nên (1) đừng
+        # cấm HDTN đặt vào "ngày SHL" (không còn ngày đó nữa), và (2) đừng cấm GVCN
+        # chọn ô cuối sáng T6/T7 làm buổi nghỉ (không còn gì đặc biệt ở đó nữa).
+        shl_days = set()
+        gvcn_shl_cell = {}
 
     need_cls = defaultdict(int)
     for (subj_id, cls_id), n in inp.need.items():
@@ -741,32 +748,36 @@ def run(inp: SchedulingInput, *, max_attempts: int = SO_LAN_THU,
 
         done = True
 
-        # Pin Monday-session-S-period-1 to HDTN (chào cờ) for every class, if quota remains.
-        for slot in inp.slots:
-            if (slot.ts.weekday == config.chao_co_weekday and slot.ts.session == "S"
-                    and slot.ts.period == config.chao_co_period):
-                key = (role_index.hdtn_id, slot.class_id)
-                if state.remaining_need.get(key, 0) > 0:
-                    teacher_id = assigned_teacher.get(key)
-                    if teacher_id is not None and _feasible(slot.class_id, slot.ts, role_index.hdtn_id,
-                                                              teacher_id, state, role_index, day_capacity, config,
-                                                              subject_class_allowed_cells):
-                        _put_at(state, slot, role_index.hdtn_id, teacher_id, role_index)
-                        state.pinned[slot.slot_id] = True
+        # Pin Monday-session-S-period-1 to HDTN (chào cờ) for every class, if quota
+        # remains -- skipped entirely during a tuần chuyên đề (R2): HDTN's periods
+        # all flow through the general block-aware greedy fill instead (N=3).
+        if not inp.hdtn_thematic_week:
+            for slot in inp.slots:
+                if (slot.ts.weekday == config.chao_co_weekday and slot.ts.session == "S"
+                        and slot.ts.period == config.chao_co_period):
+                    key = (role_index.hdtn_id, slot.class_id)
+                    if state.remaining_need.get(key, 0) > 0:
+                        teacher_id = assigned_teacher.get(key)
+                        if teacher_id is not None and _feasible(slot.class_id, slot.ts, role_index.hdtn_id,
+                                                                  teacher_id, state, role_index, day_capacity,
+                                                                  config, subject_class_allowed_cells):
+                            _put_at(state, slot, role_index.hdtn_id, teacher_id, role_index)
+                            state.pinned[slot.slot_id] = True
 
         # Giữ chỗ ô SHL (tiết cuối sáng T6/T7) + giữ lại 1 tiết HDTN cho nó: greedy
         # sẽ bỏ qua ô này (đã ≠ None) và không tiêu tiết HDTN cuối vào chỗ khác. Tiết
         # HDTN thứ 3 (chủ đề) vẫn do greedy xếp ở ngày khác (state.shl_days chặn ngày SHL).
         reserved_shl = []
-        for cid in classes_with_shl_target:
-            key = (role_index.hdtn_id, cid)
-            if state.remaining_need.get(key, 0) > 0:
-                target = shl_target_slot[cid]
-                state.assigned[target.slot_id] = -1
-                state.rem_slot_count[cid] -= 1
-                state.remaining_need[key] -= 1
-                state.rem_need_count[cid] -= 1
-                reserved_shl.append((cid, target))
+        if not inp.hdtn_thematic_week:
+            for cid in classes_with_shl_target:
+                key = (role_index.hdtn_id, cid)
+                if state.remaining_need.get(key, 0) > 0:
+                    target = shl_target_slot[cid]
+                    state.assigned[target.slot_id] = -1
+                    state.rem_slot_count[cid] -= 1
+                    state.remaining_need[key] -= 1
+                    state.rem_need_count[cid] -= 1
+                    reserved_shl.append((cid, target))
 
         for ts in order:
             candidates = [s for s in slots_by_ts[ts.ts_id] if state.assigned.get(s.slot_id) is None]
