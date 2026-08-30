@@ -67,6 +67,34 @@ def test_gdtc_avoid_period_configurable():
     assert _feasible(1, ts5, 1, 100, state, role_index, config=config) is True
 
 
+def test_heavy_subjects_morning_only_off_by_default_allows_afternoon():
+    subjects = [Subject(1, "Toan", ROLE_NANG), Subject(2, "HDTN", ROLE_HDTN)]
+    role_index = resolve_roles(subjects)
+    state = _State(remaining_need={(1, 1): 10}, busy=set())
+    ts_afternoon = TimeSlot(1, 2, "C", 1)
+    assert _feasible(1, ts_afternoon, 1, 100, state, role_index) is True
+
+
+def test_heavy_subjects_morning_only_rejects_afternoon_when_on():
+    subjects = [Subject(1, "Toan", ROLE_NANG), Subject(2, "HDTN", ROLE_HDTN)]
+    role_index = resolve_roles(subjects)
+    state = _State(remaining_need={(1, 1): 10}, busy=set())
+    config = SchedulingConfig(heavy_subjects_morning_only=True)
+    ts_afternoon = TimeSlot(1, 2, "C", 1)
+    assert _feasible(1, ts_afternoon, 1, 100, state, role_index, config=config) is False
+    ts_morning = TimeSlot(2, 2, "S", 1)
+    assert _feasible(1, ts_morning, 1, 100, state, role_index, config=config) is True
+
+
+def test_heavy_subjects_morning_only_does_not_restrict_non_heavy_subjects():
+    subjects = [Subject(1, "Nhac", ROLE_THUONG), Subject(2, "HDTN", ROLE_HDTN)]
+    role_index = resolve_roles(subjects)
+    state = _State(remaining_need={(1, 1): 10}, busy=set())
+    config = SchedulingConfig(heavy_subjects_morning_only=True)
+    ts_afternoon = TimeSlot(1, 2, "C", 1)
+    assert _feasible(1, ts_afternoon, 1, 100, state, role_index, config=config) is True
+
+
 def test_max_periods_per_session_configurable():
     subjects = [Subject(1, "Toan", ROLE_THUONG), Subject(2, "HDTN", ROLE_HDTN)]
     role_index = resolve_roles(subjects)

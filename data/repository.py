@@ -657,6 +657,7 @@ def get_scheduling_config(conn: sqlite3.Connection) -> SchedulingConfig:
             _parse_id_set(afternoon_preferred_raw) if afternoon_preferred_raw
             else default.afternoon_preferred_subject_ids
         ),
+        heavy_subjects_morning_only=bool(int(get_meta(conn, "sched_heavy_subjects_morning_only") or 0)),
     )
 
 
@@ -671,6 +672,7 @@ def set_scheduling_config(conn: sqlite3.Connection, config: SchedulingConfig) ->
     set_meta(conn, "sched_reserved_off_weekdays_chieu", _format_weekday_tuple(config.reserved_off_weekdays_chieu))
     set_meta(conn, "sched_heavy_subject_priority_periods", str(config.heavy_subject_priority_periods))
     set_meta(conn, "sched_afternoon_preferred_subject_ids", _format_id_set(config.afternoon_preferred_subject_ids))
+    set_meta(conn, "sched_heavy_subjects_morning_only", str(int(config.heavy_subjects_morning_only)))
 
 
 # ---------------------------------------------------------------------------

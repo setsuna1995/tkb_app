@@ -106,6 +106,8 @@ def _feasible(class_id: int, ts: TimeSlot, subject_id: int, teacher_id: int,
         return False
     if subject_id == role_index.gdtc_id and ts.period == config.gdtc_avoid_period:
         return False
+    if config.heavy_subjects_morning_only and subject_id in role_index.heavy_ids and ts.session == "C":
+        return False
     cap_today = day_capacity.get((class_id, ts.weekday), CAP_TIET_NGAY) if day_capacity else CAP_TIET_NGAY
     if state.day_count[(class_id, ts.weekday)] >= cap_today:
         return False
