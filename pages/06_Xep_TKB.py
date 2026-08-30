@@ -2,7 +2,7 @@ import pandas as pd
 import streamlit as st
 
 from core import scheduler as sched
-from core.models import ROLE_KEP, ROLE_NANG_KEP, WEEKDAY_NAMES, WEEKDAYS
+from core.models import ROLE_HDTN, ROLE_KEP, ROLE_NANG_KEP, WEEKDAY_NAMES, WEEKDAYS
 from core.validation import compute_quota_diff, find_teacher_conflicts
 from data import repository as repo
 from ui_common import get_conn, require_auth, require_school, sidebar_backup_export, sidebar_school_switcher
@@ -38,7 +38,7 @@ if over:
     )
     proceed_anyway = st.checkbox("Vẫn tiếp tục xếp dù vượt định mức")
 
-extra_kep_options = [s.name for s in subjects if s.role_code not in (ROLE_KEP, ROLE_NANG_KEP)]
+extra_kep_options = [s.name for s in subjects if s.role_code not in (ROLE_KEP, ROLE_NANG_KEP, ROLE_HDTN)]
 extra_kep_names = st.multiselect(
     "Môn cần xếp 2 tiết liền kề (kép) CHỈ cho tuần này",
     extra_kep_options,
@@ -46,8 +46,14 @@ extra_kep_names = st.multiselect(
 )
 extra_kep_ids = frozenset(s.subject_id for s in subjects if s.name in extra_kep_names)
 
+hdtn_thematic_week = st.checkbox(
+    "Tuần này tổ chức chuyên đề (HDTN dồn 3 tiết liền kề toàn trường, bỏ ghim chào cờ + SHL)",
+    help="Áp dụng cho toàn trường, chỉ lần chạy xếp TKB này -- không đổi vĩnh viễn.",
+)
+
 if st.button("🚀 Chạy xếp TKB", disabled=bool(over) and not proceed_anyway):
-    inp = repo.build_scheduling_input(conn, parity=parity, seed=seed, extra_kep_ids=extra_kep_ids)
+    inp = repo.build_scheduling_input(conn, parity=parity, seed=seed, extra_kep_ids=extra_kep_ids,
+                                       hdtn_thematic_week=hdtn_thematic_week)
     with st.spinner("Đang xếp thời khóa biểu..."):
         result = sched.run(inp)
     st.session_state["last_result"] = result
@@ -150,6 +156,10 @@ with st.expander("📅 Xếp nhiều tuần cùng lúc", expanded=False):
         key="batch_extra_kep_select",
     )
     batch_extra_kep_ids = frozenset(s.subject_id for s in subjects if s.name in batch_extra_kep_names)
+    batch_hdtn_thematic_week = st.checkbox(
+        "Các tuần này tổ chức chuyên đề (HDTN dồn 3 tiết liền kề toàn trường, bỏ ghim chào cờ + SHL)",
+        key="batch_hdtn_thematic_week",
+    )
 
     batch_parities = {week_lookup[wn][1] for wn in batch_week_nos}
     batch_proceed_anyway = True
@@ -171,7 +181,9 @@ with st.expander("📅 Xếp nhiều tuần cùng lúc", expanded=False):
         batch_results = {}
         for wn in batch_week_nos:
             b_seed, b_parity = week_lookup[wn]
-            b_inp = repo.build_scheduling_input(conn, parity=b_parity, seed=b_seed, extra_kep_ids=batch_extra_kep_ids)
+            b_inp = repo.build_scheduling_input(conn, parity=b_parity, seed=b_seed,
+                                                 extra_kep_ids=batch_extra_kep_ids,
+                                                 hdtn_thematic_week=batch_hdtn_thematic_week)
             with st.spinner(f"Đang xếp Tuần {wn}..."):
                 b_result = sched.run(b_inp)
             batch_results[wn] = (b_seed, b_parity, b_inp, b_result)

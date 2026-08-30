@@ -56,6 +56,13 @@ st.caption(
     "Ưu tiên mềm này thể hiện rõ nhất khi xếp TKB tự động trên tuần TRỐNG (chưa có dữ liệu cũ). "
     "Khi xếp lại đè lên TKB đã có sẵn, cơ chế \"giữ nguyên tiết cũ\" luôn được ưu tiên hơn nên hiệu ứng sẽ khó thấy."
 )
+heavy_subjects_morning_only = st.checkbox(
+    "Môn Nặng: bắt buộc xếp buổi sáng (không được xếp chiều)",
+    config.heavy_subjects_morning_only,
+    help="Ràng buộc CỨNG (khác ô ưu tiên phía trên) -- môn không Nặng KHÔNG bị cấm xếp sáng, "
+         "chỉ môn Nặng bị cấm xếp chiều. Có thể khiến thuật toán khó/không tìm được lời giải nếu "
+         "khối tiết sáng/chiều của trường quá chật.",
+)
 
 st.subheader("Buổi/ngày khoá cứng")
 st.caption("Buổi không được chọn làm buổi nghỉ của giáo viên:")
@@ -102,6 +109,7 @@ if st.button("💾 Lưu cấu hình", type="primary"):
         reserved_off_weekdays_chieu=tuple(sorted(reserved_weekdays_selection)),
         heavy_subject_priority_periods=int(heavy_subject_priority_periods),
         afternoon_preferred_subject_ids=frozenset(afternoon_preferred_selection),
+        heavy_subjects_morning_only=bool(heavy_subjects_morning_only),
     )
     repo.set_scheduling_config(conn, new_config)
     st.success("Đã lưu cấu hình xếp lịch.")
