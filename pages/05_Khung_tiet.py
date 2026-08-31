@@ -2,166 +2,148 @@ import pandas as pd
 import streamlit as st
 
 from core import frame as frame_mod
-from core.models import WEEKDAY_NAMES
 from data import repository as repo
 from ui_common import get_conn, require_auth, require_school, sidebar_backup_export, sidebar_fixed_rules, \
     sidebar_school_switcher
-
-
-def _class_quota_total(ppw: dict, class_id: int, parity: str) -> int:
-    return sum(v for (_s, c, p), v in ppw.items() if c == class_id and p == parity)
 
 require_auth()
 school_slug = require_school()
 conn = get_conn(school_slug)
 config = repo.get_scheduling_config(conn)
-st.title("Khung tiết (buổi sáng / chiều)")
+
+st.title("Khung tiết (Cho phép xếp tiết)")
+st.caption(
+    "Đánh dấu các tiết học ĐƯỢC PHÉP xếp thời khóa biểu cho lớp. "
+    "Mặc định các tiết hợp lệ theo khung chuẩn đã được tích sẵn. "
+    "Bạn có thể bỏ tích để cấm thuật toán xếp tiết vào vị trí đó (ví dụ: ngày nghỉ, tiết lệch)."
+)
 
 classes = repo.list_classes(conn)
 if not classes:
-    st.info("Chưa có lớp. Vào trang Khai báo trước.")
+    st.info("Chưa có lớp. Vào trang **Khai báo** trước.")
     st.stop()
 
 class_names = [c.name for c in classes]
 class_by_name = {c.name: c.class_id for c in classes}
-selected = st.multiselect("Áp dụng cho lớp", class_names, default=class_names)
 
-st.subheader("Mẫu có sẵn")
-preset_cols = st.columns(len(frame_mod.PRESETS))
-chosen = None
-preset_display = {"S4_C3": "Sáng 4 + Chiều 3", "S5": "Sáng 5", "S5_C2": "Sáng 5 + Chiều 2", "S4_C4": "Sáng 4 + Chiều 4"}
-for col, (key, (m, a)) in zip(preset_cols, frame_mod.PRESETS.items()):
-    total = frame_mod.total_cells_per_class(m, a, reserved_off_weekdays_chieu=config.reserved_off_weekdays_chieu)
-    if col.button(f"{preset_display.get(key, key)}\n({total} ô/tuần/lớp)", key=f"preset_{key}"):
-        chosen = (m, a)
+col_sel, col_info = st.columns([2, 3])
+with col_sel:
+    selected_class_names = st.multiselect(
+        "Chọn lớp cần thiết lập (có thể chọn nhiều lớp để áp dụng hàng loạt):",
+        options=class_names,
+        default=[class_names[0]],
+        key="khung_selected_classes",
+    )
 
-st.subheader("Tùy chỉnh")
-c1, c2, c3 = st.columns(3)
-custom_m = c1.number_input("Số tiết buổi sáng", 0, 5, 5)
-custom_a = c2.number_input("Số tiết buổi chiều", 0, 5, 0)
-if c3.button("Áp dụng tùy chỉnh", key="apply_custom"):
-    chosen = (custom_m, custom_a)
+if not selected_class_names:
+    st.warning("Vui lòng chọn ít nhất một lớp.")
+    st.stop()
 
-allow_saturday = st.checkbox(
-    "Học bù Thứ 7",
-    help="Học 2 buổi/ngày thì mặc định nghỉ Thứ 7 và Chủ nhật (chỉ học 1 buổi/ngày mới học Thứ 7). "
-    "Tick ô này để tự bật ngoại lệ học bù Thứ 7 khi cần -- không tự động theo định mức.",
-)
+# For the grid display, we load the setup of the *first* selected class.
+# If multiple are selected, we warn that we are showing the first one.
+primary_class_name = selected_class_names[0]
+primary_cid = class_by_name[primary_class_name]
 
-if chosen:
-    morning, afternoon = chosen
-    try:
-        for name in selected:
-            cid = class_by_name[name]
-            # Luôn giữ nguyên ngày lệch tiết đã lưu, kể cả khi khung mới tạm thời không
-            # tương thích -- active_cells() tự bỏ qua override không hợp lệ khi dùng, nên
-            # không cần (và không nên) xoá dữ liệu ở bước ghi này. Nhờ vậy, đổi qua khung
-            # khác rồi đổi lại khung cũ sẽ tự động khôi phục đúng ngày lệch tiết ban đầu.
-            _, _, _, _, cur_short_wd, cur_short_m, cur_short_a = repo.get_frame_template(conn, cid)
-            repo.set_frame_template(conn, cid, morning, afternoon, allow_saturday=allow_saturday,
-                                     short_weekday=cur_short_wd, short_morning_periods=cur_short_m,
-                                     short_afternoon_periods=cur_short_a)
-    except ValueError as e:
-        st.error(str(e))
-    else:
-        _, parity = repo.get_tuan_config(conn)
-        ppw = repo.get_periods_per_week(conn)
-        quota_totals = {class_by_name[name]: _class_quota_total(ppw, class_by_name[name], parity) for name in selected}
-        msg = frame_mod.check_capacity(morning, afternoon, quota_totals, allow_saturday=allow_saturday, reserved_off_weekdays_chieu=config.reserved_off_weekdays_chieu)
-        st.success(f"Đã áp dụng khung Sáng {morning} + Chiều {afternoon} cho {len(selected)} lớp.")
-        st.info(msg)
-        st.rerun()
+all_allowed = repo.get_all_class_allowed_cells(conn)
+primary_allowed = all_allowed.get(primary_cid)
 
-st.subheader("Khung hiện tại theo lớp")
-rows = []
-for c in classes:
-    m, a, ss, allow_sat, short_wd, short_m, short_a = repo.get_frame_template(conn, c.class_id)
-    total = frame_mod.total_cells_per_class(m, a, bool(ss), bool(allow_sat), short_wd, short_m, short_a, reserved_off_weekdays_chieu=config.reserved_off_weekdays_chieu)
-    short_desc = "-"
-    if short_wd:
-        parts = []
-        if short_m is not None:
-            parts.append(f"Sáng {short_m}")
-        if short_a is not None:
-            parts.append(f"Chiều {short_a}")
-        short_desc = f"{WEEKDAY_NAMES.get(short_wd, short_wd)}: {', '.join(parts)}"
-        if not frame_mod.is_short_day_config_valid(m, a, bool(allow_sat), short_wd, short_m, short_a, reserved_off_weekdays_chieu=config.reserved_off_weekdays_chieu):
-            short_desc += " (⚠ tạm ẩn — không hợp lệ với khung hiện tại)"
-    rows.append({
-        "Lớp": c.name, "Sáng": m, "Chiều": a,
-        "Học bù Thứ 7": "Có" if allow_sat else "Không",
-        "Ngày lệch tiết": short_desc,
-        "Tổng ô/tuần": total,
-    })
-st.dataframe(pd.DataFrame(rows), hide_index=True, use_container_width=True)
-
-st.subheader("Ngày lệch tiết")
-st.caption(
-    "Khi định mức tiết/tuần của lớp không chia hết cho khung đồng nhất, hệ thống đề xuất dồn "
-    "toàn bộ phần chênh lệch vào 1 ngày duy nhất (ưu tiên Thứ 7) thay vì để thuật toán xếp lịch "
-    "vô tình để trống rải rác."
-)
-
-_, parity = repo.get_tuan_config(conn)
-ppw = repo.get_periods_per_week(conn)
-suggestions = []
-for c in classes:
-    m, a, ss, allow_sat, short_wd, short_m, short_a = repo.get_frame_template(conn, c.class_id)
-    if frame_mod.is_short_day_config_valid(m, a, bool(allow_sat), short_wd, short_m, short_a, reserved_off_weekdays_chieu=config.reserved_off_weekdays_chieu):
-        continue  # đã có ngày lệch hợp lệ và đang hoạt động -- không đề xuất chồng lên. Nếu ngày
-        # lệch đã lưu đang "tạm ẩn" (không hợp lệ với khung hiện tại), vẫn đề xuất mới bên dưới.
-    quota = _class_quota_total(ppw, c.class_id, parity)
-    suggestion = frame_mod.suggest_short_day(m, a, quota, allow_saturday=bool(allow_sat), reserved_off_weekdays_chieu=config.reserved_off_weekdays_chieu)
-    if suggestion is not None:
-        suggestions.append((c, suggestion))
-
-if suggestions:
-    for c, (short_wd, short_m, short_a) in suggestions:
-        parts = []
-        if short_m is not None:
-            parts.append(f"{short_m} tiết sáng")
-        if short_a is not None:
-            parts.append(f"{short_a} tiết chiều")
-        label = f"Lớp {c.name}: đề xuất {WEEKDAY_NAMES.get(short_wd, short_wd)} chỉ xếp {' + '.join(parts)}"
-        col1, col2 = st.columns([4, 1])
-        col1.write(label)
-        if col2.button("Áp dụng", key=f"apply_short_{c.class_id}"):
-            m, a, ss, allow_sat, _, _, _ = repo.get_frame_template(conn, c.class_id)
-            repo.set_frame_template(
-                conn, c.class_id, m, a, bool(ss), bool(allow_sat),
-                short_weekday=short_wd, short_morning_periods=short_m, short_afternoon_periods=short_a,
-            )
-            st.rerun()
+if primary_allowed is None:
+    # Fallback to current frame_template
+    m, a, ss, allow_sat, short_wd, short_m, short_a = repo.get_frame_template(conn, primary_cid)
+    primary_allowed = set(frame_mod.active_cells(
+        m, a, bool(ss), bool(allow_sat), short_wd, short_m, short_a,
+        reserved_off_weekdays_chieu=config.reserved_off_weekdays_chieu
+    ))
 else:
-    st.caption("Không có lớp nào cần đề xuất ngày lệch tiết (định mức đã khớp khung, hoặc đã cấu hình sẵn).")
+    primary_allowed = set(primary_allowed)
 
-with st.expander("Tuỳ chỉnh / bỏ ngày lệch tiết thủ công"):
-    manual_class = st.selectbox("Lớp", class_names, key="manual_short_class")
-    manual_cid = class_by_name[manual_class]
-    cur_m, cur_a, cur_ss, cur_allow_sat, cur_short_wd, cur_short_m, cur_short_a = repo.get_frame_template(conn, manual_cid)
-    weekday_options = [2, 3, 4, 5, 6, 7]
-    default_idx = weekday_options.index(cur_short_wd) if cur_short_wd in weekday_options else weekday_options.index(7)
-    mc1, mc2, mc3 = st.columns(3)
-    manual_wd = mc1.selectbox("Ngày lệch", weekday_options, index=default_idx,
-                               format_func=lambda w: WEEKDAY_NAMES.get(w, str(w)), key="manual_short_wd")
-    manual_m = mc2.number_input("Tiết sáng ngày lệch", 0, 5, cur_short_m if cur_short_m is not None else cur_m,
-                                 key="manual_short_m")
-    manual_a = mc3.number_input("Tiết chiều ngày lệch", 0, 5, cur_short_a if cur_short_a is not None else cur_a,
-                                 key="manual_short_a")
-    bcol1, bcol2 = st.columns(2)
-    if bcol1.button("Áp dụng ngày lệch tuỳ chỉnh", key="apply_manual_short"):
-        try:
-            repo.set_frame_template(
-                conn, manual_cid, cur_m, cur_a, bool(cur_ss), bool(cur_allow_sat),
-                short_weekday=manual_wd, short_morning_periods=manual_m, short_afternoon_periods=manual_a,
-            )
-        except ValueError as e:
-            st.error(str(e))
-        else:
-            st.rerun()
-    if bcol2.button("Bỏ ngày lệch (về đồng nhất)", key="clear_manual_short"):
-        repo.set_frame_template(conn, manual_cid, cur_m, cur_a, bool(cur_ss), bool(cur_allow_sat))
+with col_info:
+    st.markdown(f"**Lớp hiển thị trên lưới:** `{primary_class_name}`")
+    st.markdown(f"**Số ô cho phép xếp:** `{len(primary_allowed)}` tiết/tuần")
+    if len(selected_class_names) > 1:
+        st.info(f"Đang chọn {len(selected_class_names)} lớp. Khi nhấn Lưu, cấu hình trên lưới sẽ được áp dụng cho toàn bộ các lớp này.")
+
+st.write("---")
+st.subheader("Lưới khung tiết (Cho phép xếp lịch)")
+st.caption("☑️ **Tích chọn ô** = Lớp có thể học. ☐ **Bỏ tích** = Khóa (không được xếp tiết).")
+
+# Build DataFrame for grid
+grid_rows = []
+for sess, sess_label in [("S", "Sáng"), ("C", "Chiều")]:
+    max_p = 5 if sess == "S" else 4
+    for p in range(1, max_p + 1):
+        row_data = {
+            "Buổi": sess_label,
+            "Tiết": f"Tiết {p}",
+        }
+        for wd in range(2, 8):
+            col_name = f"Thứ {wd}"
+            row_data[col_name] = (wd, sess, p) in primary_allowed
+        grid_rows.append(row_data)
+
+df_grid = pd.DataFrame(grid_rows)
+
+column_config = {
+    "Buổi": st.column_config.TextColumn("Buổi", disabled=True, width="small"),
+    "Tiết": st.column_config.TextColumn("Tiết", disabled=True, width="small"),
+}
+for wd in range(2, 8):
+    column_config[f"Thứ {wd}"] = st.column_config.CheckboxColumn(
+        f"Thứ {wd}",
+        help=f"Tích để cho phép xếp tiết vào Thứ {wd}",
+        default=False,
+    )
+
+edited_grid = st.data_editor(
+    df_grid,
+    hide_index=True,
+    use_container_width=True,
+    key=f"editor_khung_grid",
+    column_config=column_config,
+)
+
+btn_col1, btn_col2 = st.columns([2, 4])
+with btn_col1:
+    if st.button("💾 Lưu khung tiết", type="primary", use_container_width=True):
+        new_allowed_cells = set()
+        for _, r in edited_grid.iterrows():
+            sess_code = "S" if r["Buổi"] == "Sáng" else "C"
+            p_code = int(str(r["Tiết"]).replace("Tiết ", "").strip())
+            for wd in range(2, 8):
+                if bool(r.get(f"Thứ {wd}")):
+                    new_allowed_cells.add((wd, sess_code, p_code))
+        
+        for name in selected_class_names:
+            cid = class_by_name[name]
+            repo.set_class_allowed_cells(conn, cid, list(new_allowed_cells))
+        
+        st.success(f"✅ Đã lưu khung tiết ({len(new_allowed_cells)} ô) cho {len(selected_class_names)} lớp!")
         st.rerun()
+
+st.write("---")
+st.subheader("Cấu hình hiện tại toàn trường")
+overview_rows = []
+for c in classes:
+    allowed = all_allowed.get(c.class_id)
+    if allowed is None:
+        # Check fallback
+        m, a, ss, allow_sat, short_wd, short_m, short_a = repo.get_frame_template(conn, c.class_id)
+        cells = set(frame_mod.active_cells(
+            m, a, bool(ss), bool(allow_sat), short_wd, short_m, short_a,
+            reserved_off_weekdays_chieu=config.reserved_off_weekdays_chieu
+        ))
+        status = "Mặc định (Từ công thức cũ)"
+    else:
+        cells = set(allowed)
+        status = "Tùy chỉnh (Từ lưới)"
+    
+    overview_rows.append({
+        "Lớp": c.name,
+        "Số ô cho phép": len(cells),
+        "Trạng thái": status
+    })
+
+st.dataframe(pd.DataFrame(overview_rows), hide_index=True, use_container_width=True)
 
 sidebar_backup_export(conn)
 sidebar_fixed_rules(conn)

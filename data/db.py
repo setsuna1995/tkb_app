@@ -74,6 +74,15 @@ CREATE TABLE IF NOT EXISTS tkb_nhap (
     PRIMARY KEY (class_id, weekday, session, period)
 );
 
+CREATE TABLE IF NOT EXISTS class_allowed_cells (
+    class_id     INTEGER NOT NULL REFERENCES classes(class_id) ON DELETE CASCADE,
+    weekday      INTEGER NOT NULL,
+    session      TEXT NOT NULL,
+    period       INTEGER NOT NULL,
+    PRIMARY KEY (class_id, weekday, session, period)
+);
+
+
 CREATE TABLE IF NOT EXISTS tuan_config (
     id           INTEGER PRIMARY KEY CHECK (id = 1),
     seed         INTEGER NOT NULL DEFAULT 0,

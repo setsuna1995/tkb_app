@@ -104,6 +104,8 @@ class SchedulingConfig:
     afternoon_preferred_subject_ids: frozenset = field(default_factory=frozenset)  # rỗng = tắt
     heavy_subjects_morning_only: bool = False   # True = môn Nặng cấm cứng xếp buổi chiều (R3, spec 2026-08-30)
     morning_only_subject_ids: frozenset = field(default_factory=frozenset)  # rỗng = tắt; các môn bị cấm cứng xếp buổi chiều (bất kể role_code)
+    non_consecutive_subject_ids: frozenset = field(default_factory=frozenset) # rỗng = tắt; các môn cấm xếp liên tiếp các ngày
+
 
 
 @dataclass

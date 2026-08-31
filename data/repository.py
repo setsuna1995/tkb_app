@@ -400,6 +400,36 @@ def get_all_frame_templates(conn: sqlite3.Connection) -> dict:
     }
 
 
+def get_class_allowed_cells(conn: sqlite3.Connection, class_id: int) -> list[tuple[int, str, int]]:
+    rows = conn.execute(
+        "SELECT weekday, session, period FROM class_allowed_cells WHERE class_id=?",
+        (class_id,)
+    ).fetchall()
+    return [(r["weekday"], r["session"], r["period"]) for r in rows]
+
+
+def get_all_class_allowed_cells(conn: sqlite3.Connection) -> dict[int, list[tuple[int, str, int]]]:
+    rows = conn.execute(
+        "SELECT class_id, weekday, session, period FROM class_allowed_cells"
+    ).fetchall()
+    result = {}
+    for r in rows:
+        cid = r["class_id"]
+        if cid not in result:
+            result[cid] = []
+        result[cid].append((r["weekday"], r["session"], r["period"]))
+    return result
+
+
+def set_class_allowed_cells(conn: sqlite3.Connection, class_id: int, cells: list[tuple[int, str, int]]) -> None:
+    conn.execute("DELETE FROM class_allowed_cells WHERE class_id=?", (class_id,))
+    conn.executemany(
+        "INSERT INTO class_allowed_cells (class_id, weekday, session, period) VALUES (?, ?, ?, ?)",
+        [(class_id, wd, s, p) for wd, s, p in cells]
+    )
+    conn.commit()
+
+
 def set_frame_template(conn: sqlite3.Connection, class_id: int, morning_periods: int,
                         afternoon_periods: int, study_sunday: bool = False,
                         allow_saturday: bool = False, short_weekday: int | None = None,
@@ -636,6 +666,7 @@ def get_scheduling_config(conn: sqlite3.Connection) -> SchedulingConfig:
     reserved_raw = get_meta(conn, "sched_reserved_off_weekdays_chieu")
     afternoon_preferred_raw = get_meta(conn, "sched_afternoon_preferred_subject_ids")
     morning_only_raw = get_meta(conn, "sched_morning_only_subject_ids")
+    non_consecutive_raw = get_meta(conn, "sched_non_consecutive_subject_ids")
     return SchedulingConfig(
         gdtc_avoid_period=int(get_meta(conn, "sched_gdtc_avoid_period") or default.gdtc_avoid_period),
         chao_co_weekday=int(get_meta(conn, "sched_chao_co_weekday") or default.chao_co_weekday),
@@ -666,6 +697,10 @@ def get_scheduling_config(conn: sqlite3.Connection) -> SchedulingConfig:
                 if "Toán" in s.name or "Ngữ văn" in s.name or "Văn" in s.name
             ) if conn else default.morning_only_subject_ids
         ),
+        non_consecutive_subject_ids=(
+            _parse_id_set(non_consecutive_raw) if non_consecutive_raw is not None
+            else default.non_consecutive_subject_ids
+        )
     )
 
 
@@ -682,6 +717,7 @@ def set_scheduling_config(conn: sqlite3.Connection, config: SchedulingConfig) ->
     set_meta(conn, "sched_afternoon_preferred_subject_ids", _format_id_set(config.afternoon_preferred_subject_ids))
     set_meta(conn, "sched_heavy_subjects_morning_only", str(int(config.heavy_subjects_morning_only)))
     set_meta(conn, "sched_morning_only_subject_ids", _format_id_set(config.morning_only_subject_ids))
+    set_meta(conn, "sched_non_consecutive_subject_ids", _format_id_set(config.non_consecutive_subject_ids))
 
 
 # ---------------------------------------------------------------------------
@@ -724,23 +760,39 @@ def build_scheduling_input(conn: sqlite3.Connection, parity: str, seed: int = 0,
 
     tkb_nhap = get_tkb_nhap(conn)
     frame_templates = get_all_frame_templates(conn)
+    all_class_allowed_cells = get_all_class_allowed_cells(conn)
 
     slots = []
     used_ts_ids = set()
     slot_id = 0
     for cls in classes:
-        morning, afternoon, study_sunday, allow_saturday, short_weekday, short_morning, short_afternoon = \
-            frame_templates.get(cls.class_id, (5, 3, 0, 0, None, None, None))
-        for (wd, session, period) in frame_mod.active_cells(
-            morning, afternoon, bool(study_sunday), bool(allow_saturday),
-            short_weekday, short_morning, short_afternoon,
-            reserved_off_weekdays_chieu=config.reserved_off_weekdays_chieu,
-        ):
-            ts = ts_by_key[(wd, session, period)]
-            used_ts_ids.add(ts.ts_id)
-            slot_id += 1
-            old_subject = tkb_nhap.get((cls.class_id, wd, session, period))
-            slots.append(Slot(slot_id, cls.class_id, ts, old_subject_id=old_subject))
+        allowed_cells = all_class_allowed_cells.get(cls.class_id)
+        if allowed_cells:
+            # Generate from explicit allowed cells
+            for (wd, session, period) in sorted(allowed_cells):
+                if (wd, session, period) not in ts_by_key:
+                    continue
+                ts = ts_by_key[(wd, session, period)]
+                used_ts_ids.add(ts.ts_id)
+                slot_id += 1
+                old_subject = tkb_nhap.get((cls.class_id, wd, session, period))
+                slots.append(Slot(slot_id, cls.class_id, ts, old_subject_id=old_subject))
+        else:
+            # Fallback to frame_template logic
+            morning, afternoon, study_sunday, allow_saturday, short_weekday, short_morning, short_afternoon = \
+                frame_templates.get(cls.class_id, (5, 3, 0, 0, None, None, None))
+            for (wd, session, period) in frame_mod.active_cells(
+                morning, afternoon, bool(study_sunday), bool(allow_saturday),
+                short_weekday, short_morning, short_afternoon,
+                reserved_off_weekdays_chieu=config.reserved_off_weekdays_chieu,
+            ):
+                if (wd, session, period) not in ts_by_key:
+                    continue
+                ts = ts_by_key[(wd, session, period)]
+                used_ts_ids.add(ts.ts_id)
+                slot_id += 1
+                old_subject = tkb_nhap.get((cls.class_id, wd, session, period))
+                slots.append(Slot(slot_id, cls.class_id, ts, old_subject_id=old_subject))
 
     timeslots = sorted((t for t in all_ts if t.ts_id in used_ts_ids), key=lambda t: t.order_key)
 

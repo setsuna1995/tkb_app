@@ -110,6 +110,18 @@ afternoon_preferred_selection = st.multiselect(
     label_visibility="collapsed",
 )
 
+st.subheader("Môn không xếp liền ngày")
+st.caption(
+    "Các môn học không được xếp vào các ngày liên tiếp cho cùng 1 lớp (ví dụ: Thể dục, nếu xếp vào Thứ 2 thì không được xếp vào Thứ 3)."
+)
+non_consecutive_selection = st.multiselect(
+    "Môn không xếp liền ngày",
+    options=[s.subject_id for s in all_subjects],
+    default=[sid for sid in config.non_consecutive_subject_ids if sid in subject_names],
+    format_func=lambda sid: subject_names.get(sid, str(sid)),
+    label_visibility="collapsed",
+)
+
 if st.button("💾 Lưu cấu hình", type="primary"):
     new_config = SchedulingConfig(
         gdtc_avoid_period=int(gdtc_avoid_period),
@@ -124,6 +136,7 @@ if st.button("💾 Lưu cấu hình", type="primary"):
         afternoon_preferred_subject_ids=frozenset(afternoon_preferred_selection),
         heavy_subjects_morning_only=bool(heavy_subjects_morning_only),
         morning_only_subject_ids=frozenset(morning_only_selection),
+        non_consecutive_subject_ids=frozenset(non_consecutive_selection),
     )
     repo.set_scheduling_config(conn, new_config)
     st.success("Đã lưu cấu hình xếp lịch.")

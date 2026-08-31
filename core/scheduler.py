@@ -119,6 +119,14 @@ def _feasible(class_id: int, ts: TimeSlot, subject_id: int, teacher_id: int,
     morning_only = getattr(config, "morning_only_subject_ids", None)
     if morning_only and subject_id in morning_only and ts.session == "C":
         return False
+    
+    non_consecutive = getattr(config, "non_consecutive_subject_ids", None)
+    if non_consecutive and subject_id in non_consecutive:
+        if ts.weekday > 2 and state.placed.get((class_id, subject_id, ts.weekday - 1)):
+            return False
+        if ts.weekday < 7 and state.placed.get((class_id, subject_id, ts.weekday + 1)):
+            return False
+
     cap_today = day_capacity.get((class_id, ts.weekday), CAP_TIET_NGAY) if day_capacity else CAP_TIET_NGAY
     if state.day_count[(class_id, ts.weekday)] >= cap_today:
         return False
