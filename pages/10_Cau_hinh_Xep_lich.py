@@ -114,11 +114,17 @@ st.subheader("Môn không xếp liền ngày")
 st.caption(
     "Các môn học không được xếp vào các ngày liên tiếp cho cùng 1 lớp (ví dụ: Thể dục, nếu xếp vào Thứ 2 thì không được xếp vào Thứ 3)."
 )
+gdtc_ids = [s.subject_id for s in all_subjects if s.role_code == ROLE_GDTC]
+default_non_consec = [sid for sid in config.non_consecutive_subject_ids if sid in subject_names]
+if not config.non_consecutive_subject_ids and gdtc_ids:
+    default_non_consec = gdtc_ids
+
 non_consecutive_selection = st.multiselect(
     "Môn không xếp liền ngày",
     options=[s.subject_id for s in all_subjects],
-    default=[sid for sid in config.non_consecutive_subject_ids if sid in subject_names],
+    default=default_non_consec,
     format_func=lambda sid: subject_names.get(sid, str(sid)),
+    help="Các môn học không được xếp vào các ngày liên tiếp cho cùng 1 lớp (mặc định Thể dục / GDTC). Có thể thêm bớt môn tùy ý.",
     label_visibility="collapsed",
 )
 
@@ -132,6 +138,34 @@ single_pair_selection = st.multiselect(
     default=[sid for sid in config.single_pair_subject_ids if sid in subject_names],
     format_func=lambda sid: subject_names.get(sid, str(sid)),
     label_visibility="collapsed",
+)
+
+st.subheader("Chất lượng lịch giáo viên")
+st.caption(
+    "Các quy tắc tối ưu hóa chất lượng lịch dạy cho giáo viên, tránh các bất tiện trong phân công giảng dạy."
+)
+c_tg1, c_tg2 = st.columns(2)
+avoid_teacher_gaps = c_tg1.checkbox(
+    "Tránh tiết trống / lủng của GV trong buổi",
+    value=getattr(config, "avoid_teacher_gaps", True),
+    help="Tránh trường hợp GV dạy tiết 1, nghỉ tiết 2-3 rồi mới dạy tiết 4. Các tiết dạy trong buổi sẽ được gom liền mạch.",
+)
+avoid_teacher_lone_periods = c_tg2.checkbox(
+    "Tránh GV đi dạy 1 tiết/ngày hoặc sáng 1 + chiều 1",
+    value=getattr(config, "avoid_teacher_lone_periods", True),
+    help="Tránh việc GV phải đến trường cả ngày chỉ để dạy 1 tiết lẻ, hoặc bị phân tán sáng 1 tiết chiều 1 tiết.",
+)
+balance_afternoon_teachers = st.checkbox(
+    "Cân đối tiết buổi chiều cho GV (tránh để GV nghỉ full chiều)",
+    value=getattr(config, "balance_afternoon_teachers", True),
+    help="Phân bổ tiết chiều công bằng cho các giáo viên dạy các lớp có học buổi chiều, tránh để GV nghỉ toàn bộ các buổi chiều.",
+)
+mandatory_morning_selection = st.multiselect(
+    "Buổi sáng bắt buộc toàn thể GV đi làm / có mặt",
+    options=list(WEEKDAYS),
+    default=list(getattr(config, "mandatory_morning_weekdays", (2, 5, 6))),
+    format_func=lambda w: f"{WEEKDAY_NAMES[w]} Sáng",
+    help="Các buổi sáng này (mặc định Thứ 2, Thứ 5, Thứ 6) toàn thể GV bắt buộc có mặt, cấm chọn làm buổi nghỉ và ưu tiên xếp tiết dạy.",
 )
 
 if st.button("💾 Lưu cấu hình", type="primary"):
@@ -150,10 +184,15 @@ if st.button("💾 Lưu cấu hình", type="primary"):
         morning_only_subject_ids=frozenset(morning_only_selection),
         non_consecutive_subject_ids=frozenset(non_consecutive_selection),
         single_pair_subject_ids=frozenset(single_pair_selection),
+        avoid_teacher_gaps=bool(avoid_teacher_gaps),
+        avoid_teacher_lone_periods=bool(avoid_teacher_lone_periods),
+        balance_afternoon_teachers=bool(balance_afternoon_teachers),
+        mandatory_morning_weekdays=tuple(sorted(mandatory_morning_selection)),
     )
     repo.set_scheduling_config(conn, new_config)
     st.success("Đã lưu cấu hình xếp lịch.")
     st.rerun()
+
 
 st.subheader("Ràng buộc môn/lớp theo buổi cụ thể (tuỳ chọn)")
 st.caption(

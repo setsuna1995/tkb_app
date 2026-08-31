@@ -40,6 +40,12 @@ AFTERNOON_MISMATCH_PENALTY = 30   # điểm phạt khi môn KHÔNG nằm trong c
 BLOCK_COMPLETE_BONUS = 40         # điểm thưởng khi tiếp tục/hoàn thành 1 khối N tiết liền kề (role_index.block_size)
                                   # -- gợi ý hiệu quả, không phải nguồn đúng đắn: _has_unpaired_block +
                                   # best-of-N mới là cơ chế đảm bảo (xem _repair_unpaired_blocks)
+TEACHER_CONSECUTIVE_BONUS = 50   # điểm thưởng khi xếp liền kề tiết GV đang dạy trong cùng buổi
+TEACHER_GAP_PENALTY = 80         # điểm phạt khi xếp tạo lỗ hổng (tiết trống) cho GV trong cùng buổi
+TEACHER_SESSION_PAIR_BONUS = 60  # điểm thưởng khi ghép tiết thứ 2 vào cùng buổi cho GV (tránh lẻ 1 tiết)
+TEACHER_SPLIT_DAY_PENALTY = 60   # điểm phạt khi tạo ngày 1 sáng + 1 chiều
+TEACHER_AFTERNOON_BALANCE_BONUS = 40  # điểm thưởng khi xếp tiết chiều cho GV chưa có tiết chiều nào
+TEACHER_MANDATORY_MORNING_BONUS = 35  # điểm thưởng khi xếp tiết vào các sáng bắt buộc (T2, T5, T6)
 
 # Buổi không được chọn làm buổi nghỉ của GV: sáng Thứ 2/5/6 (hoạt động cố định
 # buổi sáng những ngày này), và chiều Thứ 5/6 (đã bị khoá hẳn khỏi TKB ở
@@ -79,6 +85,9 @@ class _State:
     pinned: dict = field(default_factory=dict)        # slot_id -> bool
     slot_teacher: dict = field(default_factory=dict)  # slot_id -> teacher_id
     shl_days: set = field(default_factory=set)        # {(class_id, weekday)} nơi greedy KHÔNG đặt HDTN (dành cho SHL ghim)
+    teacher_session_periods: dict = field(default_factory=lambda: defaultdict(list))  # (teacher_id, weekday, session) -> list[period]
+    teacher_week_afternoon_count: dict = field(default_factory=lambda: defaultdict(int)) # teacher_id -> count of afternoon periods
+
 
 
 def _build_effective_assigned_teacher(inp: SchedulingInput) -> dict:
@@ -120,8 +129,8 @@ def _feasible(class_id: int, ts: TimeSlot, subject_id: int, teacher_id: int,
     if morning_only and subject_id in morning_only and ts.session == "C":
         return False
     
-    non_consecutive = getattr(config, "non_consecutive_subject_ids", None)
-    if non_consecutive and subject_id in non_consecutive:
+    non_consecutive = getattr(config, "non_consecutive_subject_ids", None) or frozenset()
+    if subject_id in non_consecutive:
         if ts.weekday > 2 and state.placed.get((class_id, subject_id, ts.weekday - 1)):
             return False
         if ts.weekday < 7 and state.placed.get((class_id, subject_id, ts.weekday + 1)):
@@ -170,6 +179,9 @@ def _put_at(state: _State, slot: Slot, subject_id: int, teacher_id: int, role_in
     state.remaining_need[(subject_id, slot.class_id)] -= 1
     state.busy.add((teacher_id, ts.ts_id))
     state.session_count[(teacher_id, ts.weekday, ts.session)] += 1
+    state.teacher_session_periods[(teacher_id, ts.weekday, ts.session)].append(ts.period)
+    if ts.session == "C":
+        state.teacher_week_afternoon_count[teacher_id] += 1
     state.placed[(slot.class_id, subject_id, ts.weekday)].append((ts.session, ts.period))
     state.day_count[(slot.class_id, ts.weekday)] += 1
     state.occupied[(slot.class_id, ts.weekday, ts.session, ts.period)] = True
@@ -187,6 +199,9 @@ def _remove_at(state: _State, slot: Slot, role_index) -> tuple:
     state.remaining_need[(subject_id, slot.class_id)] += 1
     state.busy.discard((teacher_id, ts.ts_id))
     state.session_count[(teacher_id, ts.weekday, ts.session)] -= 1
+    state.teacher_session_periods[(teacher_id, ts.weekday, ts.session)].remove(ts.period)
+    if ts.session == "C":
+        state.teacher_week_afternoon_count[teacher_id] -= 1
     state.placed[(slot.class_id, subject_id, ts.weekday)].remove((ts.session, ts.period))
     state.day_count[(slot.class_id, ts.weekday)] -= 1
     state.occupied[(slot.class_id, ts.weekday, ts.session, ts.period)] = False
@@ -515,6 +530,24 @@ def _try_place_block_atomically(class_id: int, slot: Slot, state: _State, role_i
     return False
 
 
+def _calculate_teacher_gap_penalty(teacher_id: int, weekday: int, session: str, period: int, state: _State) -> int:
+    """Trả về điểm phạt/thưởng khi đặt giáo viên vào tiết này:
+    - Thưởng (trả về số âm) nếu tiết này liền kề với dải tiết hiện có của GV trong buổi.
+    - Phạt (trả về số dương) nếu tiết này tạo ra tiết trống/lủng (không liền kề).
+    - Trả về 0 nếu GV chưa có tiết nào trong buổi này.
+    """
+    p_list = state.teacher_session_periods.get((teacher_id, weekday, session))
+    if not p_list:
+        return 0
+    min_p = min(p_list)
+    max_p = max(p_list)
+    if period in (min_p - 1, max_p + 1):
+        return -TEACHER_CONSECUTIVE_BONUS
+    elif period > max_p + 1 or period < min_p - 1:
+        return TEACHER_GAP_PENALTY
+    return 0
+
+
 def _pick_best_scored(class_id: int, slot: Slot, state: _State, role_index,
                        subjects: list, assigned_teacher: dict, pu: float, rng: random.Random,
                        day_capacity: Optional[dict] = None,
@@ -557,8 +590,12 @@ def _pick_best_scored(class_id: int, slot: Slot, state: _State, role_index,
         score = state.remaining_need[key] * 100 + rng.random()
         if ts.weekday > 2 and state.placed[(class_id, subj.subject_id, ts.weekday - 1)]:
             score -= 50
+            if subj.subject_id == role_index.gdtc_id:
+                score -= 100
         if ts.weekday < 7 and state.placed[(class_id, subj.subject_id, ts.weekday + 1)]:
             score -= 50
+            if subj.subject_id == role_index.gdtc_id:
+                score -= 100
         # cố gắng không để GV trống trọn ngày làm việc: thưởng nhẹ khi GV này chưa
         # có tiết nào trong ngày (cả sáng lẫn chiều). Best-effort, không cưỡng bức.
         if (state.session_count[(teacher_id, ts.weekday, "S")]
@@ -573,6 +610,30 @@ def _pick_best_scored(class_id: int, slot: Slot, state: _State, role_index,
             score -= AFTERNOON_MISMATCH_PENALTY
         if role_index.block_size.get(subj.subject_id, 1) >= 2 and state.placed[(class_id, subj.subject_id, ts.weekday)]:
             score += BLOCK_COMPLETE_BONUS
+
+        # Ràng buộc chất lượng lịch dạy của Giáo viên
+        if getattr(config, "avoid_teacher_gaps", True):
+            gap_penalty = _calculate_teacher_gap_penalty(teacher_id, ts.weekday, ts.session, ts.period, state)
+            score -= gap_penalty
+
+        if getattr(config, "avoid_teacher_lone_periods", True):
+            current_in_session = len(state.teacher_session_periods.get((teacher_id, ts.weekday, ts.session), []))
+            if current_in_session == 1:
+                score += TEACHER_SESSION_PAIR_BONUS
+            if ts.session == "C" and current_in_session == 0:
+                morning_count = len(state.teacher_session_periods.get((teacher_id, ts.weekday, "S"), []))
+                if morning_count == 1:
+                    score -= TEACHER_SPLIT_DAY_PENALTY
+
+        if getattr(config, "balance_afternoon_teachers", True) and ts.session == "C":
+            if state.teacher_week_afternoon_count.get(teacher_id, 0) == 0:
+                score += TEACHER_AFTERNOON_BALANCE_BONUS
+
+        mandatory_mornings = getattr(config, "mandatory_morning_weekdays", (2, 5, 6))
+        if ts.session == "S" and ts.weekday in mandatory_mornings:
+            if len(state.teacher_session_periods.get((teacher_id, ts.weekday, "S"), [])) == 0:
+                score += TEACHER_MANDATORY_MORNING_BONUS
+
         if slot.old_subject_id == subj.subject_id and rng.random() > pu:
             score += 1_000_000
         if score > best_score:
@@ -644,38 +705,21 @@ def _try_swap_repair(class_id: int, slot: Slot, state: _State, role_index,
 def _assign_off_slots(teacher_ids: set, teachers_by_id: dict, rng: random.Random,
                        gvcn_shl_cell: Optional[dict] = None,
                        off_slot_count: int = 1,
-                       forbidden_off_cells: frozenset = FORBIDDEN_OFF_CELLS) -> dict:
+                       forbidden_off_cells: frozenset = FORBIDDEN_OFF_CELLS,
+                       mandatory_morning_weekdays: tuple = (2, 5, 6)) -> dict:
     """Pick each teacher's off-slot(s) for the week: off_slot_count (weekday, session)
     pairs, each on a DIFFERENT weekday when possible (never 2 off-sessions on the
     same day, i.e. never a full day off), drawn from every cell except
-    FORBIDDEN_OFF_CELLS (plus the teacher's own must_monday/is_gvcn exclusions).
-
-    off_slot_count defaults to 1 (a single half-day off/week), and run() always
-    calls this with the default -- every teacher gets exactly 1 buổi nghỉ/tuần,
-    regardless of whether the school runs a 1- or 2-buổi/ngày model.
-
-    A teacher's own off_sessions_override/pinned_full_day_off/pinned_afternoon_off
-    (yêu cầu #3, spec 2026-08-29) override this per teacher: pinned cells are
-    guaranteed off first (a full-day pin is the one sanctioned exception to "never
-    a full day off"), and the remaining effective_count - len(pinned) slots
-    (effective_count = off_sessions_override, falling back to off_slot_count when
-    no override is set) are chosen at random exactly as for any other teacher. A
-    pin that conflicts with forbidden_off_cells/must_monday, or names a weekday
-    outside WEEKDAYS, is dropped silently here (defense in depth) -- the UI must
-    validate this before ever saving such a pin.
-
-    gvcn_shl_cell: teacher_id -> (weekday, session), the cell holding sinh hoạt lớp
-    (tiết cuối buổi sáng: Thứ 6 khi lớp học 2 buổi/ngày, Thứ 7 khi 1 buổi/ngày) for
-    that GVCN's own homeroom class -- only that one (weekday, session) is barred,
-    not the whole day. Defaults to (7, "C") when unknown, e.g. in isolated tests.
+    FORBIDDEN_OFF_CELLS (plus the teacher's own must_monday/is_gvcn exclusions and mandatory_morning_weekdays).
     """
     gvcn_shl_cell = gvcn_shl_cell or {}
     gv_off_slots = {}
+    mandatory_mornings = set(mandatory_morning_weekdays)
     for tid in teacher_ids:
         t = teachers_by_id.get(tid)
         must_monday = t.must_monday if t else False
         is_gvcn = t.is_gvcn if t else False
-        forbidden = set(forbidden_off_cells)
+        forbidden = set(forbidden_off_cells) | {(wd, "S") for wd in mandatory_mornings}
         if must_monday:
             forbidden.add((2, "C"))
         if is_gvcn:
@@ -710,13 +754,58 @@ def _assign_off_slots(teacher_ids: set, teachers_by_id: dict, rng: random.Random
             chosen_weekdays = rng.sample(eligible_weekdays, remaining_count)
             gv_off_slots[tid] = pinned_cells | {(wd, rng.choice(by_weekday[wd])) for wd in chosen_weekdays}
         else:
-            # not enough distinct eligible days -- take as many off-cells as
-            # possible instead of leaving remaining_count unmet (may repeat a
-            # weekday with both sessions as a last resort).
             all_eligible_cells = [(wd, s) for wd in eligible_weekdays for s in by_weekday[wd]]
             picks = rng.sample(all_eligible_cells, min(remaining_count, len(all_eligible_cells)))
             gv_off_slots[tid] = pinned_cells | set(picks)
     return gv_off_slots
+
+
+def _count_teacher_gaps(slots: list[Slot], assigned: dict, slot_teacher: dict) -> int:
+    teacher_sessions = defaultdict(list)
+    for slot in slots:
+        subj = assigned.get(slot.slot_id)
+        if subj not in (None, -1):
+            tid = slot_teacher.get(slot.slot_id)
+            if tid is not None:
+                teacher_sessions[(tid, slot.ts.weekday, slot.ts.session)].append(slot.ts.period)
+    total_gaps = 0
+    for periods in teacher_sessions.values():
+        if len(periods) >= 2:
+            span = max(periods) - min(periods) + 1
+            total_gaps += (span - len(periods))
+    return total_gaps
+
+
+def _count_teacher_lone_days(slots: list[Slot], assigned: dict, slot_teacher: dict) -> int:
+    teacher_days = defaultdict(int)
+    for slot in slots:
+        subj = assigned.get(slot.slot_id)
+        if subj not in (None, -1):
+            tid = slot_teacher.get(slot.slot_id)
+            if tid is not None:
+                teacher_days[(tid, slot.ts.weekday)] += 1
+    return sum(1 for count in teacher_days.values() if count == 1)
+
+
+def _count_teacher_split_sessions(slots: list[Slot], assigned: dict, slot_teacher: dict) -> int:
+    teacher_day_sessions = defaultdict(lambda: defaultdict(int))
+    for slot in slots:
+        subj = assigned.get(slot.slot_id)
+        if subj not in (None, -1):
+            tid = slot_teacher.get(slot.slot_id)
+            if tid is not None:
+                teacher_day_sessions[(tid, slot.ts.weekday)][slot.ts.session] += 1
+    return sum(1 for sess_counts in teacher_day_sessions.values() if sess_counts.get("S", 0) == 1 and sess_counts.get("C", 0) == 1)
+
+
+def _teacher_quality_penalty(slots: list[Slot], assigned: dict, slot_teacher: dict, config: SchedulingConfig) -> int:
+    penalty = 0
+    if getattr(config, "avoid_teacher_gaps", True):
+        penalty += _count_teacher_gaps(slots, assigned, slot_teacher) * 100
+    if getattr(config, "avoid_teacher_lone_periods", True):
+        penalty += _count_teacher_lone_days(slots, assigned, slot_teacher) * 80
+        penalty += _count_teacher_split_sessions(slots, assigned, slot_teacher) * 70
+    return penalty
 
 
 def run(inp: SchedulingInput, *, max_attempts: int = SO_LAN_THU,
@@ -758,9 +847,6 @@ def run(inp: SchedulingInput, *, max_attempts: int = SO_LAN_THU,
             gvcn_shl_cell[homeroom_teacher] = (target.ts.weekday, target.ts.session)
 
     if inp.hdtn_thematic_week:
-        # Tuần chuyên đề (R2): không có ô SHL cố định nào bị giữ chỗ, nên (1) đừng
-        # cấm HDTN đặt vào "ngày SHL" (không còn ngày đó nữa), và (2) đừng cấm GVCN
-        # chọn ô cuối sáng T6/T7 làm buổi nghỉ (không còn gì đặc biệt ở đó nữa).
         shl_days = set()
         gvcn_shl_cell = {}
 
@@ -781,10 +867,6 @@ def run(inp: SchedulingInput, *, max_attempts: int = SO_LAN_THU,
 
     base_order = sorted(inp.timeslots, key=lambda ts: ts.order_key)
 
-    # Group by (weekday, session) so shuffling can reorder *which session* gets
-    # visited first without ever reordering periods *within* a session -- period
-    # 1 must stay decided before period 2, or the "no lone period" check below
-    # can't reason about it correctly (see _has_lone_period's docstring).
     base_groups = []
     for ts in base_order:
         key = (ts.weekday, ts.session)
@@ -796,6 +878,7 @@ def run(inp: SchedulingInput, *, max_attempts: int = SO_LAN_THU,
 
     best_assignment = None
     best_changed = None
+    best_quality_score = None
     successes = 0
     attempts_tried = 0
 
@@ -814,6 +897,7 @@ def run(inp: SchedulingInput, *, max_attempts: int = SO_LAN_THU,
             all_teacher_ids, teachers_by_id, rng, gvcn_shl_cell,
             off_slot_count=config.teacher_off_sessions_per_week,
             forbidden_off_cells=config.forbidden_off_cells,
+            mandatory_morning_weekdays=getattr(config, "mandatory_morning_weekdays", (2, 5, 6)),
         )
         state.shl_days = shl_days
 
@@ -826,9 +910,6 @@ def run(inp: SchedulingInput, *, max_attempts: int = SO_LAN_THU,
 
         done = True
 
-        # Pin Monday-session-S-period-1 to HDTN (chào cờ) for every class, if quota
-        # remains -- skipped entirely during a tuần chuyên đề (R2): HDTN's periods
-        # all flow through the general block-aware greedy fill instead (N=3).
         if not inp.hdtn_thematic_week:
             for slot in inp.slots:
                 if (slot.ts.weekday == config.chao_co_weekday and slot.ts.session == "S"
@@ -842,9 +923,6 @@ def run(inp: SchedulingInput, *, max_attempts: int = SO_LAN_THU,
                             _put_at(state, slot, role_index.hdtn_id, teacher_id, role_index)
                             state.pinned[slot.slot_id] = True
 
-        # Giữ chỗ ô SHL (tiết cuối sáng T6/T7) + giữ lại 1 tiết HDTN cho nó: greedy
-        # sẽ bỏ qua ô này (đã ≠ None) và không tiêu tiết HDTN cuối vào chỗ khác. Tiết
-        # HDTN thứ 3 (chủ đề) vẫn do greedy xếp ở ngày khác (state.shl_days chặn ngày SHL).
         reserved_shl = []
         if not inp.hdtn_thematic_week:
             for cid in classes_with_shl_target:
@@ -863,7 +941,7 @@ def run(inp: SchedulingInput, *, max_attempts: int = SO_LAN_THU,
             for slot in candidates:
                 class_id = slot.class_id
                 if state.assigned.get(slot.slot_id) is not None:
-                    continue  # defensive: candidates was already filtered on this same condition when built; atomic claims never touch a slot already in this list
+                    continue
                 if _try_place_block_atomically(class_id, slot, state, role_index, inp.subjects,
                                                 assigned_teacher, day_capacity, config,
                                                 subject_class_allowed_cells, slot_by_coord):
@@ -871,9 +949,6 @@ def run(inp: SchedulingInput, *, max_attempts: int = SO_LAN_THU,
                 pick = _pick_best_scored(class_id, slot, state, role_index, inp.subjects,
                                           assigned_teacher, pu, rng, day_capacity, config,
                                           subject_class_allowed_cells)
-                # order groups (weekday, session) together with period ascending
-                # (see base_groups), so period 1 is always decided before period 2:
-                # never cheaply leave period 2 empty right after filling period 1.
                 would_strand_lone_period = (
                     ts.period == 2 and state.occupied.get((class_id, ts.weekday, ts.session, 1), False)
                 )
@@ -892,9 +967,6 @@ def run(inp: SchedulingInput, *, max_attempts: int = SO_LAN_THU,
             if not done:
                 break
 
-        # Đặt SHL vào ô đã giữ: lúc này các tiết sáng trước nó đã được lấp nên
-        # _feasible (liền mạch) mới pass. Không pass => sáng ngày SHL chưa đủ tiết
-        # => bỏ lượt, best-of-N thử lại (khung trường thật luôn đầy nên rất ổn định).
         if done:
             for cid, target in reserved_shl:
                 key = (role_index.hdtn_id, cid)
@@ -931,8 +1003,11 @@ def run(inp: SchedulingInput, *, max_attempts: int = SO_LAN_THU,
                     final = None
                 if final != slot.old_subject_id:
                     cells_changed += 1
+            teacher_penalty = _teacher_quality_penalty(inp.slots, state.assigned, state.slot_teacher, config)
+            solution_score = (teacher_penalty, cells_changed)
             successes += 1
-            if best_changed is None or cells_changed < best_changed:
+            if best_quality_score is None or solution_score < best_quality_score:
+                best_quality_score = solution_score
                 best_changed = cells_changed
                 best_assignment = dict(state.assigned)
             if successes >= target_successes:
@@ -958,3 +1033,4 @@ def run(inp: SchedulingInput, *, max_attempts: int = SO_LAN_THU,
         attempts_tried=attempts_tried,
         successes_found=successes,
     )
+

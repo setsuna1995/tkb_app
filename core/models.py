@@ -106,6 +106,10 @@ class SchedulingConfig:
     morning_only_subject_ids: frozenset = field(default_factory=frozenset)  # rỗng = tắt; các môn bị cấm cứng xếp buổi chiều (bất kể role_code)
     non_consecutive_subject_ids: frozenset = field(default_factory=frozenset) # rỗng = tắt; các môn cấm xếp liên tiếp các ngày
     single_pair_subject_ids: frozenset = field(default_factory=frozenset) # rỗng = tắt; các môn bắt buộc có đúng 1 cặp xếp liền nhau (vd: Văn 4 tiết -> 1 cặp 2 tiết liền, 2 tiết đơn lẻ)
+    avoid_teacher_gaps: bool = True  # Tránh tiết trống/lủng của GV trong buổi (không để dạy tiết 1 nghỉ 2-3 mới dạy 4)
+    avoid_teacher_lone_periods: bool = True  # Tránh GV chỉ có 1 tiết/ngày hoặc sáng 1 tiết + chiều 1 tiết
+    balance_afternoon_teachers: bool = True  # Cân đối buổi chiều, tránh GV nghỉ full chiều khi dạy lớp có tiết chiều
+    mandatory_morning_weekdays: tuple = (2, 5, 6)  # Các sáng bắt buộc toàn thể GV có mặt/đi làm
 
 
 

@@ -668,6 +668,10 @@ def get_scheduling_config(conn: sqlite3.Connection) -> SchedulingConfig:
     morning_only_raw = get_meta(conn, "sched_morning_only_subject_ids")
     non_consecutive_raw = get_meta(conn, "sched_non_consecutive_subject_ids")
     single_pair_raw = get_meta(conn, "sched_single_pair_subject_ids")
+    avoid_teacher_gaps_raw = get_meta(conn, "sched_avoid_teacher_gaps")
+    avoid_teacher_lone_periods_raw = get_meta(conn, "sched_avoid_teacher_lone_periods")
+    balance_afternoon_teachers_raw = get_meta(conn, "sched_balance_afternoon_teachers")
+    mandatory_mornings_raw = get_meta(conn, "sched_mandatory_morning_weekdays")
     return SchedulingConfig(
         gdtc_avoid_period=int(get_meta(conn, "sched_gdtc_avoid_period") or default.gdtc_avoid_period),
         chao_co_weekday=int(get_meta(conn, "sched_chao_co_weekday") or default.chao_co_weekday),
@@ -705,7 +709,23 @@ def get_scheduling_config(conn: sqlite3.Connection) -> SchedulingConfig:
         single_pair_subject_ids=(
             _parse_id_set(single_pair_raw) if single_pair_raw is not None
             else default.single_pair_subject_ids
-        )
+        ),
+        avoid_teacher_gaps=(
+            bool(int(avoid_teacher_gaps_raw)) if avoid_teacher_gaps_raw is not None
+            else default.avoid_teacher_gaps
+        ),
+        avoid_teacher_lone_periods=(
+            bool(int(avoid_teacher_lone_periods_raw)) if avoid_teacher_lone_periods_raw is not None
+            else default.avoid_teacher_lone_periods
+        ),
+        balance_afternoon_teachers=(
+            bool(int(balance_afternoon_teachers_raw)) if balance_afternoon_teachers_raw is not None
+            else default.balance_afternoon_teachers
+        ),
+        mandatory_morning_weekdays=(
+            _parse_weekday_tuple(mandatory_mornings_raw) if mandatory_mornings_raw is not None
+            else default.mandatory_morning_weekdays
+        ),
     )
 
 
@@ -724,6 +744,11 @@ def set_scheduling_config(conn: sqlite3.Connection, config: SchedulingConfig) ->
     set_meta(conn, "sched_morning_only_subject_ids", _format_id_set(config.morning_only_subject_ids))
     set_meta(conn, "sched_non_consecutive_subject_ids", _format_id_set(config.non_consecutive_subject_ids))
     set_meta(conn, "sched_single_pair_subject_ids", _format_id_set(config.single_pair_subject_ids))
+    set_meta(conn, "sched_avoid_teacher_gaps", str(int(config.avoid_teacher_gaps)))
+    set_meta(conn, "sched_avoid_teacher_lone_periods", str(int(config.avoid_teacher_lone_periods)))
+    set_meta(conn, "sched_balance_afternoon_teachers", str(int(config.balance_afternoon_teachers)))
+    set_meta(conn, "sched_mandatory_morning_weekdays", _format_weekday_tuple(config.mandatory_morning_weekdays))
+
 
 
 # ---------------------------------------------------------------------------

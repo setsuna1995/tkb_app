@@ -49,6 +49,17 @@ def sidebar_fixed_rules(conn) -> None:
         configurable_rules.append(
             "Buổi chiều được ưu tiên (không bắt buộc) cho một số môn đã chọn ở trang Cấu hình xếp lịch"
         )
+    if config.avoid_teacher_gaps:
+        configurable_rules.append("Tránh tiết trống / lủng của giáo viên trong buổi")
+    if config.avoid_teacher_lone_periods:
+        configurable_rules.append("Tránh giáo viên đi dạy 1 tiết/ngày hoặc sáng 1 + chiều 1")
+    if config.balance_afternoon_teachers:
+        configurable_rules.append("Cân đối tiết buổi chiều cho GV (tránh nghỉ full chiều)")
+    if getattr(config, "mandatory_morning_weekdays", None):
+        configurable_rules.append(
+            "Buổi sáng bắt buộc toàn thể GV đi làm: "
+            + ", ".join(f"Thứ {wd}" for wd in config.mandatory_morning_weekdays)
+        )
     subject_class_rules = repo.list_subject_class_rules(conn)
     if subject_class_rules:
         configurable_rules.append(
