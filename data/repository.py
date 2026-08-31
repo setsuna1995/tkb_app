@@ -660,8 +660,11 @@ def get_scheduling_config(conn: sqlite3.Connection) -> SchedulingConfig:
         ),
         heavy_subjects_morning_only=bool(int(get_meta(conn, "sched_heavy_subjects_morning_only") or 0)),
         morning_only_subject_ids=(
-            _parse_id_set(morning_only_raw) if morning_only_raw
-            else default.morning_only_subject_ids
+            _parse_id_set(morning_only_raw) if morning_only_raw is not None
+            else frozenset(
+                s.subject_id for s in list_subjects(conn)
+                if "Toán" in s.name or "Ngữ văn" in s.name or "Văn" in s.name
+            ) if conn else default.morning_only_subject_ids
         ),
     )
 
