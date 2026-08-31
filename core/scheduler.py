@@ -129,6 +129,10 @@ def _feasible(class_id: int, ts: TimeSlot, subject_id: int, teacher_id: int,
     cap_d = role_index.block_size.get(subject_id, 1)
     if len(positions) >= cap_d:
         return False
+    if getattr(role_index, "single_pair_ids", None) and subject_id in role_index.single_pair_ids and len(positions) == 1:
+        other_pair_days = [wd for wd in WEEKDAYS if wd != ts.weekday and len(state.placed[(class_id, subject_id, wd)]) >= 2]
+        if other_pair_days:
+            return False
     if positions:
         if any(p_session != ts.session for p_session, _p_period in positions):
             return False
@@ -340,16 +344,26 @@ def _merge_one_block_period(class_id: int, subject_id: int, wd_from: int, wd_to:
     return False
 
 
-def _block_partial_state(state: _State, class_id: int, subject_id: int, block_n: int) -> tuple:
+def _block_partial_state(state: _State, class_id: int, subject_id: int, block_n: int,
+                        is_single_pair: bool = False) -> tuple:
     """Shared by _repair_unpaired_blocks and _has_unpaired_block so the two can
     never silently disagree on what counts as an excess partial day. Returns
     (total_placed, allowed_partial_days, partial_days) for one (class, block subject).
     """
     total_placed = sum(len(state.placed[(class_id, subject_id, wd)]) for wd in WEEKDAYS)
-    allowed_partial_days = 1 if total_placed % block_n else 0
-    partial_days = [wd for wd in WEEKDAYS
-                     if 0 < len(state.placed[(class_id, subject_id, wd)]) < block_n]
-    return total_placed, allowed_partial_days, partial_days
+    if is_single_pair:
+        pair_days = [wd for wd in WEEKDAYS if len(state.placed[(class_id, subject_id, wd)]) >= block_n]
+        partial_days = [wd for wd in WEEKDAYS if len(state.placed[(class_id, subject_id, wd)]) == 1]
+        if len(pair_days) >= 1:
+            allowed_partial_days = max(0, total_placed - 2)
+        else:
+            allowed_partial_days = max(0, total_placed - 2) - 1
+        return total_placed, allowed_partial_days, partial_days
+    else:
+        allowed_partial_days = 1 if total_placed % block_n else 0
+        partial_days = [wd for wd in WEEKDAYS
+                         if 0 < len(state.placed[(class_id, subject_id, wd)]) < block_n]
+        return total_placed, allowed_partial_days, partial_days
 
 
 def _repair_unpaired_blocks(inp: SchedulingInput, state: _State, role_index,
@@ -370,8 +384,9 @@ def _repair_unpaired_blocks(inp: SchedulingInput, state: _State, role_index,
         for subject_id, block_n in role_index.block_size.items():
             if block_n < 2:
                 continue
+            is_single_pair = bool(getattr(role_index, "single_pair_ids", None) and subject_id in role_index.single_pair_ids)
             total_placed, allowed_partial_days, partial_days = _block_partial_state(
-                state, class_id, subject_id, block_n)
+                state, class_id, subject_id, block_n, is_single_pair=is_single_pair)
             if total_placed == 0:
                 continue
             max_iterations = len(WEEKDAYS) * block_n
@@ -394,7 +409,8 @@ def _repair_unpaired_blocks(inp: SchedulingInput, state: _State, role_index,
                         break
                 if not merged:
                     break
-                _total, _allowed, partial_days = _block_partial_state(state, class_id, subject_id, block_n)
+                _total, _allowed, partial_days = _block_partial_state(
+                    state, class_id, subject_id, block_n, is_single_pair=is_single_pair)
 
 
 def _has_unpaired_block(inp: SchedulingInput, state: _State, role_index) -> bool:
@@ -406,8 +422,9 @@ def _has_unpaired_block(inp: SchedulingInput, state: _State, role_index) -> bool
         for subject_id, block_n in role_index.block_size.items():
             if block_n < 2:
                 continue
+            is_single_pair = bool(getattr(role_index, "single_pair_ids", None) and subject_id in role_index.single_pair_ids)
             total_placed, allowed_partial_days, partial_days = _block_partial_state(
-                state, class_id, subject_id, block_n)
+                state, class_id, subject_id, block_n, is_single_pair=is_single_pair)
             if total_placed == 0:
                 continue
             if len(partial_days) > allowed_partial_days:
@@ -439,6 +456,9 @@ def _try_place_block_atomically(class_id: int, slot: Slot, state: _State, role_i
         block_n = role_index.block_size.get(subj.subject_id, 1)
         if block_n < 2:
             continue
+        if getattr(role_index, "single_pair_ids", None) and subj.subject_id in role_index.single_pair_ids:
+            if any(len(state.placed[(class_id, subj.subject_id, wd)]) >= 2 for wd in WEEKDAYS):
+                continue
         key = (subj.subject_id, class_id)
         remaining = state.remaining_need.get(key, 0)
         if remaining < block_n:
