@@ -62,27 +62,7 @@ def test_real_data_schedules_successfully_with_hdtn_thematic_week(conn, parity):
     assert conflicts == [], f"teacher double-booked: {conflicts}"
 
 
-@pytest.mark.parametrize("parity", [
-    "L",
-    pytest.param("C", marks=pytest.mark.xfail(
-        reason=(
-            "Known architecture-level gap, not yet fixed: R1 (mandatory kép "
-            "block-pairing) x R3 (heavy_subjects_morning_only) is too tight for "
-            "this fixture's parity-C data. Confirmed deterministic 0/6000 (and "
-            "0/15000 in extended repro), independently reproduced by the "
-            "controller. Isolated to R1's mandatory block-pairing validation as "
-            "a contributing factor -- disabling _has_unpaired_block makes this "
-            "same scenario solvable in 709/6000 attempts. R3 defaults to False "
-            "(off) and is unaffected by this for any school that hasn't opted "
-            "in, so this does not block the branch this test shipped on; a "
-            "school enabling R3 on data shaped like parity C here would hit "
-            "this. See task-4-report.md's 'Final review fixes' section for the "
-            "full investigation. strict=True: remove this mark once fixed, "
-            "don't leave it xfailing forever."
-        ),
-        strict=True,
-    )),
-])
+@pytest.mark.parametrize("parity", ["L", "C"])
 def test_real_data_schedules_successfully_with_heavy_subjects_morning_only(conn, parity):
     # R3 at real-data scale: never exercised against the actual sample_school.xlsm
     # fixture before this test (review finding I2). The design doc's own capacity
