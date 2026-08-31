@@ -54,7 +54,11 @@ FAILURE_MESSAGE = (
     "(3) định mức SoTiet vượt khả năng khung tiết;\n"
     "(4) cấu hình nghỉ riêng của 1 GV quá chặt (off_sessions_override cao kết hợp "
     "ghim buổi/ngày nghỉ cố định) khiến các lớp GV đó dạy không đủ ô còn trống để xếp;\n"
-    "(5) luật gán môn/lớp theo buổi (trang Cấu hình xếp lịch) quá chặt so với số tiết/tuần cần xếp."
+    "(5) luật gán môn/lớp theo buổi (trang Cấu hình xếp lịch) quá chặt so với số tiết/tuần cần xếp;\n"
+    "(6) môn Kép bắt buộc ghép đủ thành khối liền kề (chỉ được dư đúng 1 tiết lẻ/tuần "
+    "nếu số tiết là số lẻ) -- dữ liệu quá chật khiến thuật toán không ghép được hết dù đã thử lại nhiều lần;\n"
+    "(7) bật \"Môn Nặng bắt buộc xếp buổi sáng\" khiến buổi sáng quá tải, nhất là khi kết hợp "
+    "với yêu cầu ghép khối môn Kép ở (6)."
 )
 
 
@@ -241,6 +245,13 @@ def _merge_one_block_period(class_id: int, subject_id: int, wd_from: int, wd_to:
     re-homed at the vacated source cell (or left as slack -1, or the whole merge is
     rolled back to its original state). Returns False, with state fully restored,
     if no adjacent target cell works.
+
+    Vacating `source` is only ever accepted if it doesn't strand a mid-session
+    gap (BAT_LIEN_MACH) -- source_has_later_content below guards that -- and only
+    when source can be refilled with something else or safely marked slack;
+    otherwise the whole merge attempt rolls back rather than leaving source in a
+    state nothing downstream re-validates (_has_lone_period already ran by the
+    time this function executes).
     """
     from_positions = state.placed[(class_id, subject_id, wd_from)]
     to_positions = state.placed[(class_id, subject_id, wd_to)]
@@ -251,6 +262,10 @@ def _merge_one_block_period(class_id: int, subject_id: int, wd_from: int, wd_to:
     to_periods = sorted(p_period for _p_session, p_period in to_positions)
     source = slot_by_coord[(class_id, wd_from, session_from, period_from)]
     teacher_id = assigned_teacher[(subject_id, class_id)]
+    source_has_later_content = any(
+        state.occupied.get((class_id, wd_from, session_from, p), False)
+        for p in range(period_from + 1, frame_mod.MAX_PERIODS_PER_SESSION + 1)
+    )
 
     for target_period in (to_periods[-1] + 1, to_periods[0] - 1):
         target = slot_by_coord.get((class_id, wd_to, session_to, target_period))
@@ -269,7 +284,26 @@ def _merge_one_block_period(class_id: int, subject_id: int, wd_from: int, wd_to:
                       subject_class_allowed_cells):
             _put_at(state, target, subject_id, teacher_id, role_index)
             if displaced_subject is None:
-                return True
+                # source is now vacant with nothing to put back into it -- only
+                # accept this if we can refill it with something else, or (when
+                # nothing else needs it) safely leave it as slack; a gap-unsafe or
+                # unfillable source means rolling back this whole merge attempt.
+                pick = _pick_best_simple(class_id, source, state, role_index, subjects, assigned_teacher,
+                                          day_capacity, config, subject_class_allowed_cells)
+                if pick is not None:
+                    _put_at(state, source, pick[0], pick[1], role_index)
+                    return True
+                if (not source_has_later_content
+                        and state.rem_slot_count[class_id] > state.rem_need_count[class_id]):
+                    state.assigned[source.slot_id] = -1
+                    state.rem_slot_count[class_id] -= 1
+                    return True
+                _remove_at(state, target, role_index)
+                if was_slack:
+                    state.assigned[target.slot_id] = -1
+                    state.rem_slot_count[class_id] -= 1
+                _put_at(state, source, subject_id, teacher_id, role_index)
+                return False
             if _feasible(class_id, source.ts, displaced_subject, displaced_teacher, state, role_index,
                           day_capacity, config, subject_class_allowed_cells):
                 _put_at(state, source, displaced_subject, displaced_teacher, role_index)
@@ -279,14 +313,15 @@ def _merge_one_block_period(class_id: int, subject_id: int, wd_from: int, wd_to:
             if pick is not None:
                 _put_at(state, source, pick[0], pick[1], role_index)
                 return True
-            if state.rem_slot_count[class_id] > state.rem_need_count[class_id]:
+            # same gap-safety guard as the "displaced_subject is None" branch above --
+            # marking source as slack is only safe when it's the trailing edge of its
+            # session (see source_has_later_content docstring note).
+            if not source_has_later_content and state.rem_slot_count[class_id] > state.rem_need_count[class_id]:
                 state.assigned[source.slot_id] = -1
                 state.rem_slot_count[class_id] -= 1
                 return True
-            # no refill found and no slack -- roll back this whole merge attempt
-            # (displaced_subject is guaranteed not None here -- the was_slack case
-            # always returns True above via the "displaced_subject is None" branch,
-            # so was_slack and "reached this line" are mutually exclusive)
+            # no refill found and no slack (or source_has_later_content forbids
+            # slack) -- roll back this whole merge attempt
             _remove_at(state, target, role_index)
             _put_at(state, source, subject_id, teacher_id, role_index)
             _put_at(state, target, displaced_subject, displaced_teacher, role_index)
@@ -301,6 +336,18 @@ def _merge_one_block_period(class_id: int, subject_id: int, wd_from: int, wd_to:
     return False
 
 
+def _block_partial_state(state: _State, class_id: int, subject_id: int, block_n: int) -> tuple:
+    """Shared by _repair_unpaired_blocks and _has_unpaired_block so the two can
+    never silently disagree on what counts as an excess partial day. Returns
+    (total_placed, allowed_partial_days, partial_days) for one (class, block subject).
+    """
+    total_placed = sum(len(state.placed[(class_id, subject_id, wd)]) for wd in WEEKDAYS)
+    allowed_partial_days = 1 if total_placed % block_n else 0
+    partial_days = [wd for wd in WEEKDAYS
+                     if 0 < len(state.placed[(class_id, subject_id, wd)]) < block_n]
+    return total_placed, allowed_partial_days, partial_days
+
+
 def _repair_unpaired_blocks(inp: SchedulingInput, state: _State, role_index,
                              assigned_teacher: dict, slot_by_coord: dict,
                              day_capacity: Optional[dict], config: Optional[SchedulingConfig] = None,
@@ -308,22 +355,25 @@ def _repair_unpaired_blocks(inp: SchedulingInput, state: _State, role_index,
     """Best-effort: for every (class, block subject) with more partial (0 < count <
     N) days than the weekly total allows (at most one, and only when the total
     isn't a multiple of N), merge two partial days into a fuller one via
-    _merge_one_block_period until no more excess remains or no merge succeeds.
-    _has_unpaired_block is the authoritative check run afterwards in case a merge
-    isn't found here.
+    _merge_one_block_period until no more excess remains, no merge succeeds, or
+    the iteration cap is hit (bounds a possible merge-cycle between two days
+    trading a period back and forth through a shared adjacent slack cell -- see
+    the fix history in task-4-report.md for a reproduced case). _has_unpaired_block
+    is the authoritative check run afterwards in case a merge isn't found here.
     """
     for cls in inp.classes:
         class_id = cls.class_id
         for subject_id, block_n in role_index.block_size.items():
             if block_n < 2:
                 continue
-            total_placed = sum(len(state.placed[(class_id, subject_id, wd)]) for wd in WEEKDAYS)
+            total_placed, allowed_partial_days, partial_days = _block_partial_state(
+                state, class_id, subject_id, block_n)
             if total_placed == 0:
                 continue
-            allowed_partial_days = 1 if total_placed % block_n else 0
-            partial_days = [wd for wd in WEEKDAYS
-                             if 0 < len(state.placed[(class_id, subject_id, wd)]) < block_n]
-            while len(partial_days) > allowed_partial_days:
+            max_iterations = len(WEEKDAYS) * block_n
+            iterations = 0
+            while len(partial_days) > allowed_partial_days and iterations < max_iterations:
+                iterations += 1
                 merged = False
                 for wd_a in partial_days:
                     for wd_b in partial_days:
@@ -340,8 +390,7 @@ def _repair_unpaired_blocks(inp: SchedulingInput, state: _State, role_index,
                         break
                 if not merged:
                     break
-                partial_days = [wd for wd in WEEKDAYS
-                                 if 0 < len(state.placed[(class_id, subject_id, wd)]) < block_n]
+                _total, _allowed, partial_days = _block_partial_state(state, class_id, subject_id, block_n)
 
 
 def _has_unpaired_block(inp: SchedulingInput, state: _State, role_index) -> bool:
@@ -353,14 +402,11 @@ def _has_unpaired_block(inp: SchedulingInput, state: _State, role_index) -> bool
         for subject_id, block_n in role_index.block_size.items():
             if block_n < 2:
                 continue
-            total_placed = sum(len(state.placed[(class_id, subject_id, wd)]) for wd in WEEKDAYS)
+            total_placed, allowed_partial_days, partial_days = _block_partial_state(
+                state, class_id, subject_id, block_n)
             if total_placed == 0:
                 continue
-            allowed_partial_days = 1 if total_placed % block_n else 0
-            partial_days = sum(
-                1 for wd in WEEKDAYS if 0 < len(state.placed[(class_id, subject_id, wd)]) < block_n
-            )
-            if partial_days > allowed_partial_days:
+            if len(partial_days) > allowed_partial_days:
                 return True
     return False
 
@@ -785,7 +831,7 @@ def run(inp: SchedulingInput, *, max_attempts: int = SO_LAN_THU,
             for slot in candidates:
                 class_id = slot.class_id
                 if state.assigned.get(slot.slot_id) is not None:
-                    continue  # claimed by an earlier atomic block placement this pass
+                    continue  # defensive: candidates was already filtered on this same condition when built; atomic claims never touch a slot already in this list
                 if _try_place_block_atomically(class_id, slot, state, role_index, inp.subjects,
                                                 assigned_teacher, day_capacity, config,
                                                 subject_class_allowed_cells, slot_by_coord):

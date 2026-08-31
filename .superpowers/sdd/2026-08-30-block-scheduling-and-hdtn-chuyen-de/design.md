@@ -228,14 +228,37 @@ that could start a *fresh* N-period block at this exact slot (enough
 `remaining_need` for a full block — not just the eventual single leftover — and
 no placement yet today), it atomically claims the whole forward window (this
 slot plus the next N-1) only if every slot in it is currently free and
-individually `_feasible`; otherwise it fully rolls back and falls through to
-the unchanged single-slot path. This prevents a block from ever being *started*
-unless it can be *completed* in the same action — the guarantee post-hoc repair
-could not provide — while leaving `_repair_unpaired_blocks`/`_has_unpaired_block`
-in place as a backstop for whatever a still-competing block subject or
-constraint interaction leaves behind. See the implementation notes in the
-plan's Task 4 (`.superpowers/sdd/2026-08-30-block-scheduling-and-hdtn-chuyen-de-plan/2026-08-30-block-scheduling-and-hdtn-chuyen-de-plan.md`)
+individually `_feasible`; otherwise it fully rolls back. This prevents a block
+from ever being *started* unless it can be *completed* in the same action —
+the guarantee post-hoc repair could not provide — while leaving
+`_repair_unpaired_blocks`/`_has_unpaired_block` in place as a backstop for
+whatever a still-competing block subject or constraint interaction leaves
+behind. See the implementation notes in the plan's Task 4
+(`.superpowers/sdd/2026-08-30-block-scheduling-and-hdtn-chuyen-de-plan/2026-08-30-block-scheduling-and-hdtn-chuyen-de-plan.md`)
 and its ledger for the exact code and the controller's ruling.
+
+Two follow-up fixes closed a gap the atomic mechanism alone left open (root
+cause, evidence, and instrumentation in task-4-report.md's "Round 3" section —
+this superseded an earlier version of this paragraph that said the atomic
+mechanism "falls through to the unchanged single-slot path" on failure; that's
+no longer accurate after fix (1) below):
+1. **`_pick_best_scored` is no longer unchanged on the atomic-decline path.**
+   It's called at exactly one call site — immediately after
+   `_try_place_block_atomically` declines, for the same slot — so any candidate
+   that would have been eligible for a fresh atomic block start (enough
+   `remaining_need` for a full block, no placement yet today) is provably one
+   atomic just tried and failed to complete a window for. `_pick_best_scored`
+   now excludes exactly these candidates, so it can never place one of them as
+   a lone single doomed to strand — the single-slot scorer no longer
+   re-introduces the fragmentation the atomic mechanism exists to prevent.
+2. **`_merge_one_block_period` reclaims adjacent slack instead of skipping
+   it.** The repair pass's merge step used to `continue` past any adjacent
+   target cell marked `-1` (intentionally-empty slack) rather than using it —
+   on real data (need « available capacity), the cell needed to complete a
+   merge is very often exactly that kind of slack, so this was a significant,
+   silently-self-defeating gap. It now reclaims `-1` cells the same way
+   `_repair_lone_periods` already does elsewhere in this file, with matching
+   rollback bookkeeping on every path that doesn't end in success.
 
 ### 5.5 R2 — skipping chào cờ/SHL pins for a thematic week
 

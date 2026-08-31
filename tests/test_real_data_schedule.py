@@ -3,6 +3,7 @@ import os
 import pytest
 
 from core import scheduler as sched
+from core.models import SchedulingConfig
 from core.validation import compute_quota_diff, find_teacher_conflicts
 from data import db, repository as repo
 from io_excel.importer import import_xlsm
@@ -41,3 +42,62 @@ def test_real_data_schedules_successfully(conn, parity):
 
     print(f"\n[{parity}] attempts={result.attempts_tried} successes={result.successes_found} "
           f"cells_changed={result.cells_changed}/{result.cells_total}")
+
+
+@pytest.mark.parametrize("parity", ["C", "L"])
+def test_real_data_schedules_successfully_with_hdtn_thematic_week(conn, parity):
+    # R2 at real-data scale: never exercised against the actual sample_school.xlsm
+    # fixture before this test (review finding I2) -- hdtn_thematic_week=True skips
+    # the chào cờ/SHL pins and routes HDTN's periods through the general
+    # block_size-aware greedy/atomic/repair machinery like any other block subject.
+    inp = repo.build_scheduling_input(conn, parity=parity, seed=2026, hdtn_thematic_week=True)
+    result = sched.run(inp)
+
+    print(f"\n[{parity}, hdtn_thematic_week=True] attempts={result.attempts_tried} "
+          f"successes={result.successes_found} cells_changed={result.cells_changed}/{result.cells_total}")
+
+    assert result.success is True, result.failure_reason
+
+    conflicts = find_teacher_conflicts(inp.slots, result.assignment, inp.assigned_teacher)
+    assert conflicts == [], f"teacher double-booked: {conflicts}"
+
+
+@pytest.mark.parametrize("parity", [
+    "L",
+    pytest.param("C", marks=pytest.mark.xfail(
+        reason=(
+            "Known architecture-level gap, not yet fixed: R1 (mandatory kép "
+            "block-pairing) x R3 (heavy_subjects_morning_only) is too tight for "
+            "this fixture's parity-C data. Confirmed deterministic 0/6000 (and "
+            "0/15000 in extended repro), independently reproduced by the "
+            "controller. Isolated to R1's mandatory block-pairing validation as "
+            "a contributing factor -- disabling _has_unpaired_block makes this "
+            "same scenario solvable in 709/6000 attempts. R3 defaults to False "
+            "(off) and is unaffected by this for any school that hasn't opted "
+            "in, so this does not block the branch this test shipped on; a "
+            "school enabling R3 on data shaped like parity C here would hit "
+            "this. See task-4-report.md's 'Final review fixes' section for the "
+            "full investigation. strict=True: remove this mark once fixed, "
+            "don't leave it xfailing forever."
+        ),
+        strict=True,
+    )),
+])
+def test_real_data_schedules_successfully_with_heavy_subjects_morning_only(conn, parity):
+    # R3 at real-data scale: never exercised against the actual sample_school.xlsm
+    # fixture before this test (review finding I2). The design doc's own capacity
+    # analysis (design.md §4) found the heavy/morning split is nearly exact-fit
+    # with almost no slack, so this is a plausible place for a similar wall to R1's.
+    # Parity "L" passes; parity "C" is a known, documented xfail -- see the marks
+    # above for the investigation summary.
+    repo.set_scheduling_config(conn, SchedulingConfig(heavy_subjects_morning_only=True))
+    inp = repo.build_scheduling_input(conn, parity=parity, seed=2026)
+    result = sched.run(inp)
+
+    print(f"\n[{parity}, heavy_subjects_morning_only=True] attempts={result.attempts_tried} "
+          f"successes={result.successes_found} cells_changed={result.cells_changed}/{result.cells_total}")
+
+    assert result.success is True, result.failure_reason
+
+    conflicts = find_teacher_conflicts(inp.slots, result.assignment, inp.assigned_teacher)
+    assert conflicts == [], f"teacher double-booked: {conflicts}"

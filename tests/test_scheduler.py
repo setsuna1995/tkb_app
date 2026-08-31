@@ -1,5 +1,6 @@
 import os
 import random
+import threading
 from collections import defaultdict
 
 from core import frame
@@ -805,6 +806,14 @@ def test_merge_one_block_period_merges_two_lone_days_into_a_pair():
                         {(1, 1): 2, (2, 1): 3}, {(1, 1): 100, (2, 1): 101}, timeslots)
     slot_by_coord = _slot_by_coord(inp.slots)
     state = _State(remaining_need={(1, 1): 0, (2, 1): 0}, busy=set())
+    # rem_need_count/rem_slot_count must be seeded with the class's real totals
+    # (mirroring how run() itself seeds them) -- _merge_one_block_period's "safe
+    # to mark source as slack" check compares these two counters, so leaving them
+    # at their defaultdict(int) default of 0 (then going negative-but-equal after
+    # _put_at) makes that comparison spuriously false regardless of whether
+    # marking source as slack is actually safe.
+    state.rem_need_count[1] = 5   # total need for class 1: (1,1)=2 + (2,1)=3
+    state.rem_slot_count[1] = 30  # total slots for class 1: 6 weekdays x 5 periods
     mon_slot = slot_by_coord[(1, 2, "S", 1)]
     tue_slot = slot_by_coord[(1, 3, "S", 3)]
     _put_at(state, mon_slot, 1, 100, role_index)
@@ -833,6 +842,11 @@ def test_merge_one_block_period_reclaims_adjacent_slack_cell():
                         {(1, 1): 2, (2, 1): 3}, {(1, 1): 100, (2, 1): 101}, timeslots)
     slot_by_coord = _slot_by_coord(inp.slots)
     state = _State(remaining_need={(1, 1): 0, (2, 1): 0}, busy=set())
+    # rem_need_count/rem_slot_count must be seeded with the class's real totals --
+    # see the comment in test_merge_one_block_period_merges_two_lone_days_into_a_pair
+    # above for why.
+    state.rem_need_count[1] = 5   # total need for class 1: (1,1)=2 + (2,1)=3
+    state.rem_slot_count[1] = 30  # total slots for class 1: 6 weekdays x 5 periods
     mon_slot = slot_by_coord[(1, 2, "S", 1)]
     tue_slot = slot_by_coord[(1, 3, "S", 1)]
     tue_slack_slot = slot_by_coord[(1, 3, "S", 2)]
@@ -844,7 +858,10 @@ def test_merge_one_block_period_reclaims_adjacent_slack_cell():
     ok = sched._merge_one_block_period(1, 1, 2, 3, state, role_index, subjects,
                                         {(1, 1): 100, (2, 1): 101}, slot_by_coord, None, None, None)
     assert ok is True
-    assert state.assigned.get(mon_slot.slot_id) is None
+    # day A's vacated slot is explicitly marked -1 (slack), not left as a bare
+    # None -- safe here since it's the trailing edge of Monday's session (nothing
+    # placed after period 1 that day) and there's slot budget to spare.
+    assert state.assigned.get(mon_slot.slot_id) == -1
     assert state.placed[(1, 1, 2)] == []
     assert state.assigned[tue_slack_slot.slot_id] == 1
     positions = sorted(state.placed[(1, 1, 3)])
@@ -862,6 +879,11 @@ def test_repair_unpaired_blocks_resolves_three_lone_hdtn_days_into_one_block():
     inp = _build_input(classes, subjects, teachers, need, assigned_teacher, timeslots)
     slot_by_coord = _slot_by_coord(inp.slots)
     state = _State(remaining_need={(1, 1): 0, (2, 1): 0}, busy=set())
+    # rem_need_count/rem_slot_count must be seeded with the class's real totals --
+    # see the comment in test_merge_one_block_period_merges_two_lone_days_into_a_pair
+    # above for why.
+    state.rem_need_count[1] = 5   # total need for class 1: (1,1)=2 + (2,1)=3
+    state.rem_slot_count[1] = 30  # total slots for class 1: 6 weekdays x 5 periods
     # Real slots from slot_by_coord, not hand-fabricated ones -- see the comment
     # in test_merge_one_block_period_merges_two_lone_days_into_a_pair above for why.
     for wd, period in ((2, 1), (3, 1), (4, 1)):
@@ -871,6 +893,120 @@ def test_repair_unpaired_blocks_resolves_three_lone_hdtn_days_into_one_block():
     sched._repair_unpaired_blocks(inp, state, role_index, assigned_teacher, slot_by_coord, None, None, None)
 
     assert sched._has_unpaired_block(inp, state, role_index) is False
+
+
+def test_repair_unpaired_blocks_terminates_on_a_merge_cycle():
+    # Reviewer-reproduced infinite loop: N=3 (only reachable via hdtn_thematic_week
+    # =True), a 2-period morning, HDTN split as {Mon: p1,p2} + {Tue: p1} with
+    # (Tue, p2) = -1. Before the fix, _merge_one_block_period kept successfully
+    # "resolving" one day into the other and back through that shared adjacent
+    # slack cell, forever -- the while loop in _repair_unpaired_blocks had no
+    # iteration bound and no monotonic-progress guarantee. Run in a background
+    # thread with a wall-clock timeout so a regression here fails this test
+    # instead of hanging the whole suite.
+    classes = [ClassRoom(1, "6A")]
+    subjects = [Subject(1, "Toan", ROLE_THUONG), Subject(2, "HDTN", ROLE_HDTN)]
+    role_index = resolve_roles(subjects, hdtn_thematic_week=True)
+    assert role_index.block_size[2] == 3
+    teachers = [Teacher(1, "GVToan"), Teacher(2, "GVCN")]
+    need = {(1, 1): 1, (2, 1): 3}
+    assigned_teacher = {(1, 1): 1, (2, 1): 2}
+    timeslots = _make_timeslots(morning=2, afternoon=0, weekdays=(2, 3))
+    inp = _build_input(classes, subjects, teachers, need, assigned_teacher, timeslots)
+    slot_by_coord = _slot_by_coord(inp.slots)
+    state = _State(remaining_need={(1, 1): 0, (2, 1): 0}, busy=set())
+    mon1 = slot_by_coord[(1, 2, "S", 1)]
+    mon2 = slot_by_coord[(1, 2, "S", 2)]
+    tue1 = slot_by_coord[(1, 3, "S", 1)]
+    tue2 = slot_by_coord[(1, 3, "S", 2)]
+    _put_at(state, mon1, 2, assigned_teacher[(2, 1)], role_index)
+    _put_at(state, mon2, 2, assigned_teacher[(2, 1)], role_index)
+    _put_at(state, tue1, 2, assigned_teacher[(2, 1)], role_index)
+    state.assigned[tue2.slot_id] = -1
+    state.rem_slot_count[1] -= 1
+    assert sched._has_unpaired_block(inp, state, role_index) is True
+
+    finished = threading.Event()
+
+    def run_repair():
+        sched._repair_unpaired_blocks(inp, state, role_index, assigned_teacher, slot_by_coord, None, None, None)
+        finished.set()
+
+    t = threading.Thread(target=run_repair, daemon=True)
+    t.start()
+    t.join(timeout=5)
+    assert finished.is_set(), "_repair_unpaired_blocks did not return within 5s -- infinite loop regression"
+    # genuinely unresolvable with only 2 periods/morning for a 3-period block --
+    # repair should give up (bounded), not silently claim success.
+    assert sched._has_unpaired_block(inp, state, role_index) is True
+
+
+def test_merge_one_block_period_never_strands_a_mid_session_gap():
+    # Reviewer-reproduced: a merge that vacates `source` when there's nothing to
+    # displace at the target must not leave a bare-None/gap hole in the middle of
+    # a day's real content. Monday: A at p1, X (kep) at p2, B at p3 -- X's p2 has
+    # "later content" (B at p3), so vacating it is only safe if it can be refilled;
+    # here nothing can refill it, so the whole merge must roll back rather than
+    # leave Monday p1=A, p2=empty, p3=B (a BAT_LIEN_MACH violation).
+    classes = [ClassRoom(1, "6A")]
+    subjects = [
+        Subject(1, "X_kep", ROLE_KEP),
+        Subject(2, "A", ROLE_THUONG),
+        Subject(3, "B", ROLE_THUONG),
+        Subject(4, "HDTN", ROLE_HDTN),
+    ]
+    role_index = resolve_roles(subjects)
+    teachers = [Teacher(1, "GVX"), Teacher(2, "GVA"), Teacher(3, "GVB"), Teacher(4, "GVCN")]
+    need = {(1, 1): 2, (2, 1): 1, (3, 1): 1, (4, 1): 1}
+    assigned_teacher = {(1, 1): 1, (2, 1): 2, (3, 1): 3, (4, 1): 4}
+    # weekday 4 (Wednesday) is intentionally left completely untouched below -- it's
+    # real, genuine slack (not merely an inflated fake number), so this test proves
+    # source_has_later_content is what blocks the "mark source as slack" fallback,
+    # not merely "no slack budget available" (a weaker, less specific claim).
+    timeslots = _make_timeslots(morning=3, afternoon=0, weekdays=(2, 3, 4))
+    inp = _build_input(classes, subjects, teachers, need, assigned_teacher, timeslots)
+    slot_by_coord = _slot_by_coord(inp.slots)
+    state = _State(remaining_need={(1, 1): 0, (2, 1): 0, (3, 1): 0, (4, 1): 0}, busy=set())
+    state.rem_need_count[1] = 5   # total need for class 1: 2+1+1+1
+    state.rem_slot_count[1] = 9   # total slots for class 1: 3 weekdays x 3 periods
+    mon1 = slot_by_coord[(1, 2, "S", 1)]  # A
+    mon2 = slot_by_coord[(1, 2, "S", 2)]  # X (source -- has later content at p3)
+    mon3 = slot_by_coord[(1, 2, "S", 3)]  # B
+    tue1 = slot_by_coord[(1, 3, "S", 1)]  # X
+    tue2 = slot_by_coord[(1, 3, "S", 2)]  # slack
+    tue3 = slot_by_coord[(1, 3, "S", 3)]  # slack
+    _put_at(state, mon1, 2, assigned_teacher[(2, 1)], role_index)
+    _put_at(state, mon2, 1, assigned_teacher[(1, 1)], role_index)
+    _put_at(state, mon3, 3, assigned_teacher[(3, 1)], role_index)
+    _put_at(state, tue1, 1, assigned_teacher[(1, 1)], role_index)
+    state.assigned[tue2.slot_id] = -1
+    state.rem_slot_count[1] -= 1
+    state.assigned[tue3.slot_id] = -1
+    state.rem_slot_count[1] -= 1
+
+    ok = sched._merge_one_block_period(1, 1, 2, 3, state, role_index, subjects,
+                                        assigned_teacher, slot_by_coord, None, None, None)
+    assert ok is False
+    # state fully restored -- no gap, nothing changed.
+    assert state.assigned[mon1.slot_id] == 2
+    assert state.assigned[mon2.slot_id] == 1
+    assert state.assigned[mon3.slot_id] == 3
+    # generic invariant check: for every (class, weekday, session) actually used
+    # in this input, the real (non-None, non--1) content must form a contiguous
+    # prefix -- no bare None between two real periods.
+    for cls in inp.classes:
+        by_key = defaultdict(dict)
+        for slot in inp.slots:
+            if slot.class_id == cls.class_id:
+                by_key[(slot.ts.weekday, slot.ts.session)][slot.ts.period] = state.assigned.get(slot.slot_id)
+        for (wd, session), periods in by_key.items():
+            real_periods = [p for p, v in periods.items() if v not in (None, -1)]
+            if not real_periods:
+                continue
+            for p in range(min(real_periods), max(real_periods) + 1):
+                assert periods.get(p) is not None, (
+                    f"gap at class={cls.class_id} weekday={wd} session={session} period={p}"
+                )
 
 
 def test_extra_kep_ids_forces_adjacency_in_full_run():
