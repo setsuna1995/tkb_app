@@ -66,10 +66,11 @@ heavy_subjects_morning_only = st.checkbox(
 
 all_subjects_for_morning = repo.list_subjects(conn)
 morning_only_subject_names = {s.subject_id: s.name for s in all_subjects_for_morning}
+saved_morning_only_ids = getattr(config, "morning_only_subject_ids", frozenset())
 morning_only_selection = st.multiselect(
     "Môn bắt buộc xếp buổi sáng (cấm chiều) — chọn từng môn cụ thể",
     options=[s.subject_id for s in all_subjects_for_morning],
-    default=[sid for sid in config.morning_only_subject_ids if sid in morning_only_subject_names],
+    default=[sid for sid in saved_morning_only_ids if sid in morning_only_subject_names],
     format_func=lambda sid: morning_only_subject_names.get(sid, str(sid)),
     help="Ràng buộc CỨNG -- các môn được chọn sẽ KHÔNG BAO GIỜ xếp vào buổi chiều, "
          "bất kể vai trò (Nặng/Kép/Thường). Có thể khiến thuật toán khó tìm lời giải "
