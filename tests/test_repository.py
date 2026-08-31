@@ -47,6 +47,14 @@ def test_set_then_get_scheduling_config_round_trips_heavy_subjects_morning_only(
     assert repo.get_scheduling_config(conn).heavy_subjects_morning_only is True
 
 
+def test_set_then_get_scheduling_config_round_trips_morning_only_subject_ids(conn):
+    custom = SchedulingConfig(morning_only_subject_ids=frozenset({1, 2, 4, 7}))
+    repo.set_scheduling_config(conn, custom)
+    loaded = repo.get_scheduling_config(conn)
+    assert loaded == custom
+    assert loaded.morning_only_subject_ids == frozenset({1, 2, 4, 7})
+
+
 def test_upsert_and_list_teacher_round_trips_off_override_and_pins(conn):
     tid = repo.upsert_teacher(
         conn, "GV The duc", role="", must_monday=False, is_gvcn=False,

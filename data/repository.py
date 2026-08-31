@@ -635,6 +635,7 @@ def get_scheduling_config(conn: sqlite3.Connection) -> SchedulingConfig:
     forbidden_raw = get_meta(conn, "sched_forbidden_off_cells")
     reserved_raw = get_meta(conn, "sched_reserved_off_weekdays_chieu")
     afternoon_preferred_raw = get_meta(conn, "sched_afternoon_preferred_subject_ids")
+    morning_only_raw = get_meta(conn, "sched_morning_only_subject_ids")
     return SchedulingConfig(
         gdtc_avoid_period=int(get_meta(conn, "sched_gdtc_avoid_period") or default.gdtc_avoid_period),
         chao_co_weekday=int(get_meta(conn, "sched_chao_co_weekday") or default.chao_co_weekday),
@@ -658,6 +659,10 @@ def get_scheduling_config(conn: sqlite3.Connection) -> SchedulingConfig:
             else default.afternoon_preferred_subject_ids
         ),
         heavy_subjects_morning_only=bool(int(get_meta(conn, "sched_heavy_subjects_morning_only") or 0)),
+        morning_only_subject_ids=(
+            _parse_id_set(morning_only_raw) if morning_only_raw
+            else default.morning_only_subject_ids
+        ),
     )
 
 
@@ -673,6 +678,7 @@ def set_scheduling_config(conn: sqlite3.Connection, config: SchedulingConfig) ->
     set_meta(conn, "sched_heavy_subject_priority_periods", str(config.heavy_subject_priority_periods))
     set_meta(conn, "sched_afternoon_preferred_subject_ids", _format_id_set(config.afternoon_preferred_subject_ids))
     set_meta(conn, "sched_heavy_subjects_morning_only", str(int(config.heavy_subjects_morning_only)))
+    set_meta(conn, "sched_morning_only_subject_ids", _format_id_set(config.morning_only_subject_ids))
 
 
 # ---------------------------------------------------------------------------

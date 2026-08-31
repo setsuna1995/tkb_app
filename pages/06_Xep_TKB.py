@@ -38,7 +38,7 @@ if over:
     )
     proceed_anyway = st.checkbox("Vẫn tiếp tục xếp dù vượt định mức")
 
-extra_kep_options = [s.name for s in subjects if s.role_code not in (ROLE_KEP, ROLE_NANG_KEP, ROLE_HDTN)]
+extra_kep_options = [s.name for s in subjects if s.role_code != ROLE_HDTN]
 extra_kep_names = st.multiselect(
     "Môn cần xếp 2 tiết liền kề (kép) CHỈ cho tuần này",
     extra_kep_options,

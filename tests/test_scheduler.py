@@ -96,6 +96,30 @@ def test_heavy_subjects_morning_only_does_not_restrict_non_heavy_subjects():
     assert _feasible(1, ts_afternoon, 1, 100, state, role_index, config=config) is True
 
 
+def test_morning_only_subject_ids_rejects_afternoon():
+    subjects = [
+        Subject(1, "Toan", ROLE_THUONG),
+        Subject(2, "Van", ROLE_THUONG),
+        Subject(3, "Nhac", ROLE_THUONG),
+        Subject(4, "HDTN", ROLE_HDTN),
+    ]
+    role_index = resolve_roles(subjects)
+    state = _State(remaining_need={(1, 1): 10, (2, 1): 10, (3, 1): 10}, busy=set())
+    config = SchedulingConfig(morning_only_subject_ids=frozenset({1, 2}))
+
+    ts_afternoon = TimeSlot(1, 2, "C", 1)
+    ts_morning = TimeSlot(2, 2, "S", 1)
+
+    # Subjects in morning_only_subject_ids are rejected in afternoon, allowed in morning
+    assert _feasible(1, ts_afternoon, 1, 100, state, role_index, config=config) is False
+    assert _feasible(1, ts_morning, 1, 100, state, role_index, config=config) is True
+    assert _feasible(1, ts_afternoon, 2, 100, state, role_index, config=config) is False
+    assert _feasible(1, ts_morning, 2, 100, state, role_index, config=config) is True
+
+    # Subject not in morning_only_subject_ids is allowed in afternoon
+    assert _feasible(1, ts_afternoon, 3, 100, state, role_index, config=config) is True
+
+
 def test_max_periods_per_session_configurable():
     subjects = [Subject(1, "Toan", ROLE_THUONG), Subject(2, "HDTN", ROLE_HDTN)]
     role_index = resolve_roles(subjects)
@@ -1131,6 +1155,31 @@ def test_full_run_all_three_rules_combined():
     (_wd, periods), = placed_hdtn.items()
     periods = sorted(periods)
     assert periods == [periods[0], periods[0] + 1, periods[0] + 2]
+
+
+def test_full_run_with_morning_only_subject_ids():
+    classes = [ClassRoom(1, "6A")]
+    subjects = [
+        Subject(1, "Toan", ROLE_THUONG, 1),
+        Subject(2, "Van", ROLE_THUONG, 2),
+        Subject(3, "Nhac", ROLE_THUONG, 3),
+        Subject(4, "HDTN", ROLE_HDTN, 4),
+    ]
+    teachers = [Teacher(1, "GVToan"), Teacher(2, "GVVan"), Teacher(3, "GVNhac"), Teacher(4, "GVCN", is_gvcn=True)]
+    need = {(1, 1): 4, (2, 1): 4, (3, 1): 2, (4, 1): 3}
+    assigned_teacher = {(1, 1): 1, (2, 1): 2, (3, 1): 3, (4, 1): 4}
+    timeslots = _make_timeslots(morning=4, afternoon=3, weekdays=(2, 3, 4, 5, 6))
+    inp = _build_input(classes, subjects, teachers, need, assigned_teacher, timeslots, seed=42)
+    # Both Toan (1) and Van (2) are ROLE_THUONG, but morning_only_subject_ids forces them to morning
+    inp.config = SchedulingConfig(morning_only_subject_ids=frozenset({1, 2}))
+
+    result = sched.run(inp, max_attempts=1000, target_successes=3)
+    assert result.success is True
+
+    for slot in inp.slots:
+        assigned = result.assignment.get(slot.slot_id)
+        if assigned in (1, 2):
+            assert slot.ts.session == "S", f"Subject {assigned} placed in afternoon: {slot.ts}"
 
 
 def _subject_at(inp, result, class_id, wd, session, period):

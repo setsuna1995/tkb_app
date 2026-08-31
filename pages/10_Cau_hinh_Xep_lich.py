@@ -64,6 +64,18 @@ heavy_subjects_morning_only = st.checkbox(
          "khối tiết sáng/chiều của trường quá chật.",
 )
 
+all_subjects_for_morning = repo.list_subjects(conn)
+morning_only_subject_names = {s.subject_id: s.name for s in all_subjects_for_morning}
+morning_only_selection = st.multiselect(
+    "Môn bắt buộc xếp buổi sáng (cấm chiều) — chọn từng môn cụ thể",
+    options=[s.subject_id for s in all_subjects_for_morning],
+    default=[sid for sid in config.morning_only_subject_ids if sid in morning_only_subject_names],
+    format_func=lambda sid: morning_only_subject_names.get(sid, str(sid)),
+    help="Ràng buộc CỨNG -- các môn được chọn sẽ KHÔNG BAO GIỜ xếp vào buổi chiều, "
+         "bất kể vai trò (Nặng/Kép/Thường). Có thể khiến thuật toán khó tìm lời giải "
+         "nếu quá nhiều môn bị cấm chiều.",
+)
+
 st.subheader("Buổi/ngày khoá cứng")
 st.caption("Buổi không được chọn làm buổi nghỉ của giáo viên:")
 forbidden_selection = st.multiselect(
@@ -110,6 +122,7 @@ if st.button("💾 Lưu cấu hình", type="primary"):
         heavy_subject_priority_periods=int(heavy_subject_priority_periods),
         afternoon_preferred_subject_ids=frozenset(afternoon_preferred_selection),
         heavy_subjects_morning_only=bool(heavy_subjects_morning_only),
+        morning_only_subject_ids=frozenset(morning_only_selection),
     )
     repo.set_scheduling_config(conn, new_config)
     st.success("Đã lưu cấu hình xếp lịch.")

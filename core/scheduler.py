@@ -58,7 +58,8 @@ FAILURE_MESSAGE = (
     "(6) môn Kép bắt buộc ghép đủ thành khối liền kề (chỉ được dư đúng 1 tiết lẻ/tuần "
     "nếu số tiết là số lẻ) -- dữ liệu quá chật khiến thuật toán không ghép được hết dù đã thử lại nhiều lần;\n"
     "(7) bật \"Môn Nặng bắt buộc xếp buổi sáng\" khiến buổi sáng quá tải, nhất là khi kết hợp "
-    "với yêu cầu ghép khối môn Kép ở (6)."
+    "với yêu cầu ghép khối môn Kép ở (6);\n"
+    "(8) danh sách \"Môn bắt buộc xếp buổi sáng\" chứa quá nhiều môn khiến buổi sáng quá tải."
 )
 
 
@@ -114,6 +115,8 @@ def _feasible(class_id: int, ts: TimeSlot, subject_id: int, teacher_id: int,
     if subject_id == role_index.gdtc_id and ts.period == config.gdtc_avoid_period:
         return False
     if config.heavy_subjects_morning_only and subject_id in role_index.heavy_ids and ts.session == "C":
+        return False
+    if subject_id in config.morning_only_subject_ids and ts.session == "C":
         return False
     cap_today = day_capacity.get((class_id, ts.weekday), CAP_TIET_NGAY) if day_capacity else CAP_TIET_NGAY
     if state.day_count[(class_id, ts.weekday)] >= cap_today:

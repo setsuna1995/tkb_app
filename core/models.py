@@ -102,6 +102,7 @@ class SchedulingConfig:
     heavy_subject_priority_periods: int = 0   # 0 = tắt; số tiết đầu buổi sáng được cộng điểm ưu tiên môn "Nặng"
     afternoon_preferred_subject_ids: frozenset = field(default_factory=frozenset)  # rỗng = tắt
     heavy_subjects_morning_only: bool = False   # True = môn Nặng cấm cứng xếp buổi chiều (R3, spec 2026-08-30)
+    morning_only_subject_ids: frozenset = field(default_factory=frozenset)  # rỗng = tắt; các môn bị cấm cứng xếp buổi chiều (bất kể role_code)
 
 
 @dataclass
