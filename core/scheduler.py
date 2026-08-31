@@ -721,7 +721,7 @@ def _assign_off_slots(teacher_ids: set, teachers_by_id: dict, rng: random.Random
 
 def run(inp: SchedulingInput, *, max_attempts: int = SO_LAN_THU,
         target_successes: int = SO_PA_TOT, lock_threshold: int = NGUONG_KHOA) -> ScheduleResult:
-    role_index = resolve_roles(inp.subjects, inp.extra_kep_ids, inp.hdtn_thematic_week)
+    role_index = resolve_roles(inp.subjects, inp.extra_kep_ids, inp.hdtn_thematic_week, inp.config.single_pair_subject_ids)
     config = inp.config
     subject_class_allowed_cells = inp.subject_class_allowed_cells
     assigned_teacher = _build_effective_assigned_teacher(inp)

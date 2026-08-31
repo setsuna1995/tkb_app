@@ -11,7 +11,8 @@ class MissingHDTNError(Exception):
 
 
 def resolve_roles(subjects: list, extra_kep_ids: frozenset = frozenset(),
-                   hdtn_thematic_week: bool = False) -> RoleIndex:
+                   hdtn_thematic_week: bool = False,
+                   single_pair_subject_ids: frozenset = frozenset()) -> RoleIndex:
     """extra_kep_ids: subject_id cần xếp "kép" (2 tiết liền kề cùng buổi) CHỈ cho lần chạy này,
     không phải thuộc tính cố định của môn (role_code) -- dùng khi 1 tuần cụ thể cần thêm môn
     khác ngoài các môn đã cố định KEP/NANG_KEP cũng xếp liền kề (vd Toán/KHTN tuần kiểm tra).
@@ -35,11 +36,12 @@ def resolve_roles(subjects: list, extra_kep_ids: frozenset = frozenset(),
             "Không tìm thấy môn có MÃ = 5 (HDTN). Hãy điền số 5 vào cột MÃ VAI TRÒ "
             "tại dòng 'Hoạt động trải nghiệm, hướng nghiệp'."
         )
-    # Ngữ văn: nếu không chọn thành kép toàn bộ (không nằm trong kep_ids), thì xếp đúng 1 cặp 2 tiết/tuần
-    for s in subjects:
-        if ("Ngữ văn" in s.name or s.name == "Văn") and s.subject_id not in idx.kep_ids:
-            idx.single_pair_ids.add(s.subject_id)
-            idx.block_size[s.subject_id] = 2
+        
+    for subject_id in single_pair_subject_ids:
+        if subject_id not in idx.kep_ids:
+            idx.single_pair_ids.add(subject_id)
+            idx.block_size[subject_id] = 2
+
 
     # Môn kép (cố định hoặc "chỉ tuần này") cần khối 2 tiết liền kề. "Tuần chuyên đề"
     # (spec 2026-08-30) ghi đè HDTN riêng thành khối 3 -- không cộng dồn với kep_ids.

@@ -122,6 +122,18 @@ non_consecutive_selection = st.multiselect(
     label_visibility="collapsed",
 )
 
+st.subheader("Môn xếp 1 cặp liền tiết (còn lại lẻ)")
+st.caption(
+    "Các môn học bắt buộc phải có đúng 1 cặp 2 tiết liền nhau trong tuần, các tiết còn lại (nếu có) sẽ xếp đơn lẻ. (Thường áp dụng cho môn Ngữ văn)."
+)
+single_pair_selection = st.multiselect(
+    "Môn xếp 1 cặp liền tiết",
+    options=[s.subject_id for s in all_subjects],
+    default=[sid for sid in config.single_pair_subject_ids if sid in subject_names],
+    format_func=lambda sid: subject_names.get(sid, str(sid)),
+    label_visibility="collapsed",
+)
+
 if st.button("💾 Lưu cấu hình", type="primary"):
     new_config = SchedulingConfig(
         gdtc_avoid_period=int(gdtc_avoid_period),
@@ -137,6 +149,7 @@ if st.button("💾 Lưu cấu hình", type="primary"):
         heavy_subjects_morning_only=bool(heavy_subjects_morning_only),
         morning_only_subject_ids=frozenset(morning_only_selection),
         non_consecutive_subject_ids=frozenset(non_consecutive_selection),
+        single_pair_subject_ids=frozenset(single_pair_selection),
     )
     repo.set_scheduling_config(conn, new_config)
     st.success("Đã lưu cấu hình xếp lịch.")

@@ -105,6 +105,7 @@ class SchedulingConfig:
     heavy_subjects_morning_only: bool = False   # True = môn Nặng cấm cứng xếp buổi chiều (R3, spec 2026-08-30)
     morning_only_subject_ids: frozenset = field(default_factory=frozenset)  # rỗng = tắt; các môn bị cấm cứng xếp buổi chiều (bất kể role_code)
     non_consecutive_subject_ids: frozenset = field(default_factory=frozenset) # rỗng = tắt; các môn cấm xếp liên tiếp các ngày
+    single_pair_subject_ids: frozenset = field(default_factory=frozenset) # rỗng = tắt; các môn bắt buộc có đúng 1 cặp xếp liền nhau (vd: Văn 4 tiết -> 1 cặp 2 tiết liền, 2 tiết đơn lẻ)
 
 
 

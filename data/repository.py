@@ -667,6 +667,7 @@ def get_scheduling_config(conn: sqlite3.Connection) -> SchedulingConfig:
     afternoon_preferred_raw = get_meta(conn, "sched_afternoon_preferred_subject_ids")
     morning_only_raw = get_meta(conn, "sched_morning_only_subject_ids")
     non_consecutive_raw = get_meta(conn, "sched_non_consecutive_subject_ids")
+    single_pair_raw = get_meta(conn, "sched_single_pair_subject_ids")
     return SchedulingConfig(
         gdtc_avoid_period=int(get_meta(conn, "sched_gdtc_avoid_period") or default.gdtc_avoid_period),
         chao_co_weekday=int(get_meta(conn, "sched_chao_co_weekday") or default.chao_co_weekday),
@@ -700,6 +701,10 @@ def get_scheduling_config(conn: sqlite3.Connection) -> SchedulingConfig:
         non_consecutive_subject_ids=(
             _parse_id_set(non_consecutive_raw) if non_consecutive_raw is not None
             else default.non_consecutive_subject_ids
+        ),
+        single_pair_subject_ids=(
+            _parse_id_set(single_pair_raw) if single_pair_raw is not None
+            else default.single_pair_subject_ids
         )
     )
 
@@ -718,6 +723,7 @@ def set_scheduling_config(conn: sqlite3.Connection, config: SchedulingConfig) ->
     set_meta(conn, "sched_heavy_subjects_morning_only", str(int(config.heavy_subjects_morning_only)))
     set_meta(conn, "sched_morning_only_subject_ids", _format_id_set(config.morning_only_subject_ids))
     set_meta(conn, "sched_non_consecutive_subject_ids", _format_id_set(config.non_consecutive_subject_ids))
+    set_meta(conn, "sched_single_pair_subject_ids", _format_id_set(config.single_pair_subject_ids))
 
 
 # ---------------------------------------------------------------------------
