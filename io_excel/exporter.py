@@ -88,7 +88,7 @@ def _autofit_sheet(ws, min_width: int = 8, max_width: int = 40, col_padding: int
 
 
 def _fill_result_sheets(ws_raw, ws_tkb, ws_gv, cells, classes, frame_templates, assignments,
-                         teacher_names, subject_names) -> None:
+                         teacher_names, subject_names, all_class_allowed_cells) -> None:
     """Điền dữ liệu 1 tuần (1 parity) vào bộ 3 sheet TKB_Mon (chỉ tên môn)/TKB (môn+GV)/TKB_GV
     (theo GV, tô đỏ trùng lịch) đã cho."""
     # find teacher double-bookings (same teacher, same weekday+session+period, across classes)
@@ -107,10 +107,16 @@ def _fill_result_sheets(ws_raw, ws_tkb, ws_gv, cells, classes, frame_templates, 
 
         row_idx = 2
         for class_idx, cls in enumerate(classes):
-            # morning/afternoon ở đây là số tiết CHUẨN (chưa trừ ngày lệch) -- dùng để sinh đủ
-            # hàng cho mọi tiết có thể xuất hiện trong tuần, kể cả những ngày không phải ngày lệch.
             morning, afternoon, _study_sunday, _allow_saturday, _short_wd, _short_m, _short_a = \
                 frame_templates.get(cls.class_id, (5, 3, 0, 0, None, None, None))
+            
+            allowed_cells = all_class_allowed_cells.get(cls.class_id)
+            if allowed_cells:
+                morning_periods = [p for wd, s, p in allowed_cells if s == "S"]
+                afternoon_periods = [p for wd, s, p in allowed_cells if s == "C"]
+                morning = max(morning_periods) if morning_periods else 0
+                afternoon = max(afternoon_periods) if afternoon_periods else 0
+                
             sessions = [("S", p) for p in range(1, morning + 1)] + [("C", p) for p in range(1, afternoon + 1)]
             band_style = white_style if class_idx % 2 == 0 else gray_style
             for session, period in sessions:
@@ -144,6 +150,7 @@ def export_xlsx(conn, run_id=None) -> bytes:
     subject_names = {s.subject_id: s.name for s in subjects}
     assignments = repo.get_assignments(conn)
     frame_templates = repo.get_all_frame_templates(conn)
+    all_class_allowed_cells = repo.get_all_class_allowed_cells(conn)
 
     if run_id is not None:
         cells = repo.get_tkb_result(conn, run_id)
@@ -170,7 +177,7 @@ def export_xlsx(conn, run_id=None) -> bytes:
             del wb[name]
 
     _fill_result_sheets(ws_raw, ws_tkb, ws_gv, cells, classes, frame_templates, assignments,
-                         teacher_names, subject_names)
+                         teacher_names, subject_names, all_class_allowed_cells)
     for ws in (ws_raw, ws_tkb, ws_gv):
         _autofit_sheet(ws)
 
@@ -198,6 +205,7 @@ def export_xlsx_both_parities(conn) -> tuple:
     subject_names = {s.subject_id: s.name for s in subjects}
     assignments = repo.get_assignments(conn)
     frame_templates = repo.get_all_frame_templates(conn)
+    all_class_allowed_cells = repo.get_all_class_allowed_cells(conn)
 
     warnings = []
     parity_cells = {}
@@ -235,7 +243,7 @@ def export_xlsx_both_parities(conn) -> tuple:
             new_ws.freeze_panes = base_ws.freeze_panes  # copy_worksheet không giữ freeze_panes
             copies[out_name] = new_ws
         _fill_result_sheets(copies["TKB_Mon"], copies["TKB"], copies["TKB_GV"], cells, classes,
-                             frame_templates, assignments, teacher_names, subject_names)
+                             frame_templates, assignments, teacher_names, subject_names, all_class_allowed_cells)
         for ws in copies.values():
             _autofit_sheet(ws)
 
