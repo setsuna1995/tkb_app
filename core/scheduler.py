@@ -40,12 +40,12 @@ AFTERNOON_MISMATCH_PENALTY = 30   # điểm phạt khi môn KHÔNG nằm trong c
 BLOCK_COMPLETE_BONUS = 40         # điểm thưởng khi tiếp tục/hoàn thành 1 khối N tiết liền kề (role_index.block_size)
                                   # -- gợi ý hiệu quả, không phải nguồn đúng đắn: _has_unpaired_block +
                                   # best-of-N mới là cơ chế đảm bảo (xem _repair_unpaired_blocks)
-TEACHER_CONSECUTIVE_BONUS = 50   # điểm thưởng khi xếp liền kề tiết GV đang dạy trong cùng buổi
-TEACHER_GAP_PENALTY = 80         # điểm phạt khi xếp tạo lỗ hổng (tiết trống) cho GV trong cùng buổi
-TEACHER_SESSION_PAIR_BONUS = 60  # điểm thưởng khi ghép tiết thứ 2 vào cùng buổi cho GV (tránh lẻ 1 tiết)
-TEACHER_SPLIT_DAY_PENALTY = 60   # điểm phạt khi tạo ngày 1 sáng + 1 chiều
-TEACHER_AFTERNOON_BALANCE_BONUS = 40  # điểm thưởng khi xếp tiết chiều cho GV chưa có tiết chiều nào
-TEACHER_MANDATORY_MORNING_BONUS = 35  # điểm thưởng khi xếp tiết vào các sáng bắt buộc (T2, T5, T6)
+TEACHER_CONSECUTIVE_BONUS = 150   # điểm thưởng khi xếp liền kề tiết GV đang dạy trong cùng buổi
+TEACHER_GAP_PENALTY = 250         # điểm phạt khi xếp tạo lỗ hổng (tiết trống) cho GV trong cùng buổi
+TEACHER_SESSION_PAIR_BONUS = 150  # điểm thưởng khi ghép tiết thứ 2 vào cùng buổi cho GV (tránh lẻ 1 tiết)
+TEACHER_SPLIT_DAY_PENALTY = 180   # điểm phạt khi tạo ngày 1 sáng + 1 chiều
+TEACHER_AFTERNOON_BALANCE_BONUS = 0  # không ép rải tiết chiều gây lẻ 1 tiết
+TEACHER_MANDATORY_MORNING_BONUS = 40  # điểm thưởng khi xếp tiết vào các sáng bắt buộc (T2, T5, T6)
 
 # Buổi không được chọn làm buổi nghỉ của GV: sáng Thứ 2/5/6 (hoạt động cố định
 # buổi sáng những ngày này), và chiều Thứ 5/6 (đã bị khoá hẳn khỏi TKB ở
@@ -540,8 +540,8 @@ def _try_place_block_atomically(class_id: int, slot: Slot, state: _State, role_i
 
 def _calculate_teacher_gap_penalty(teacher_id: int, weekday: int, session: str, period: int, state: _State) -> int:
     """Trả về điểm phạt/thưởng khi đặt giáo viên vào tiết này:
-    - Thưởng (trả về số âm) nếu tiết này liền kề với dải tiết hiện có của GV trong buổi.
-    - Phạt (trả về số dương) nếu tiết này tạo ra tiết trống/lủng (không liền kề).
+    - Thưởng (trả về số âm) nếu tiết này liền kề hoặc lấp đầy lỗ hổng hiện có của GV trong buổi.
+    - Phạt (trả về số dương tỷ lệ theo khoảng cách) nếu tiết này tạo ra tiết trống/lủng xa.
     - Trả về 0 nếu GV chưa có tiết nào trong buổi này.
     """
     p_list = state.teacher_session_periods.get((teacher_id, weekday, session))
@@ -551,8 +551,14 @@ def _calculate_teacher_gap_penalty(teacher_id: int, weekday: int, session: str, 
     max_p = max(p_list)
     if period in (min_p - 1, max_p + 1):
         return -TEACHER_CONSECUTIVE_BONUS
-    elif period > max_p + 1 or period < min_p - 1:
-        return TEACHER_GAP_PENALTY
+    elif min_p < period < max_p:
+        return -180  # thưởng lấp đầy lỗ hổng ở giữa
+    elif period > max_p + 1:
+        dist = period - (max_p + 1)
+        return TEACHER_GAP_PENALTY * dist
+    elif period < min_p - 1:
+        dist = (min_p - 1) - period
+        return TEACHER_GAP_PENALTY * dist
     return 0
 
 
@@ -790,9 +796,20 @@ def _count_teacher_lone_days(slots: list[Slot], assigned: dict, slot_teacher: di
         subj = assigned.get(slot.slot_id)
         if subj not in (None, -1):
             tid = slot_teacher.get(slot.slot_id)
-            if tid is not None:
+            if tid is not None and tid > 0:
                 teacher_days[(tid, slot.ts.weekday)] += 1
     return sum(1 for count in teacher_days.values() if count == 1)
+
+
+def _count_teacher_lone_sessions(slots: list[Slot], assigned: dict, slot_teacher: dict) -> int:
+    t_sess = defaultdict(int)
+    for slot in slots:
+        subj = assigned.get(slot.slot_id)
+        if subj not in (None, -1):
+            tid = slot_teacher.get(slot.slot_id)
+            if tid is not None and tid > 0:
+                t_sess[(tid, slot.ts.weekday, slot.ts.session)] += 1
+    return sum(1 for count in t_sess.values() if count == 1)
 
 
 def _count_teacher_split_sessions(slots: list[Slot], assigned: dict, slot_teacher: dict) -> int:
@@ -801,18 +818,23 @@ def _count_teacher_split_sessions(slots: list[Slot], assigned: dict, slot_teache
         subj = assigned.get(slot.slot_id)
         if subj not in (None, -1):
             tid = slot_teacher.get(slot.slot_id)
-            if tid is not None:
+            if tid is not None and tid > 0:
                 teacher_day_sessions[(tid, slot.ts.weekday)][slot.ts.session] += 1
-    return sum(1 for sess_counts in teacher_day_sessions.values() if sess_counts.get("S", 0) == 1 and sess_counts.get("C", 0) == 1)
+    return sum(
+        1 for sess_counts in teacher_day_sessions.values()
+        if sess_counts.get("S", 0) > 0 and sess_counts.get("C", 0) > 0
+        and (sess_counts.get("S", 0) == 1 or sess_counts.get("C", 0) == 1)
+    )
 
 
 def _teacher_quality_penalty(slots: list[Slot], assigned: dict, slot_teacher: dict, config: SchedulingConfig) -> int:
     penalty = 0
     if getattr(config, "avoid_teacher_gaps", True):
-        penalty += _count_teacher_gaps(slots, assigned, slot_teacher) * 100
+        penalty += _count_teacher_gaps(slots, assigned, slot_teacher) * 350
     if getattr(config, "avoid_teacher_lone_periods", True):
-        penalty += _count_teacher_lone_days(slots, assigned, slot_teacher) * 80
-        penalty += _count_teacher_split_sessions(slots, assigned, slot_teacher) * 70
+        penalty += _count_teacher_lone_sessions(slots, assigned, slot_teacher) * 180
+        penalty += _count_teacher_split_sessions(slots, assigned, slot_teacher) * 200
+        penalty += _count_teacher_lone_days(slots, assigned, slot_teacher) * 250
     return penalty
 
 
