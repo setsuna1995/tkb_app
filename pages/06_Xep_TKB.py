@@ -23,23 +23,47 @@ if not classes or not subjects:
     st.info("Chưa có lớp/môn. Vào trang Khai báo hoặc Nhập/Xuất Excel trước.")
     st.stop()
 
-seed, parity = repo.get_tuan_config(conn)
-chosen_label = st.radio("Tuần", ["Chẵn", "Lẻ"], index=0 if parity == "C" else 1, horizontal=True)
-chosen_parity = "C" if chosen_label == "Chẵn" else "L"
-if chosen_parity != parity:
-    repo.set_tuan_config(conn, seed, chosen_parity)  # giữ nguyên seed, chỉ đổi tuần
-    st.rerun()
-seed, parity = repo.get_tuan_config(conn)
-st.write(f"Tuần hiện tại: **{'Chẵn' if parity == 'C' else 'Lẻ'}**, seed = {seed or '(ngẫu nhiên mỗi lần chạy)'}")
+c_mode, c_sel = st.columns([1, 2])
+sched_mode = c_mode.radio(
+    "Chế độ xếp",
+    ["📅 Theo tuần cụ thể trong năm (1-35)", "⚖️ Theo tuần Chẵn / Lẻ"],
+    horizontal=True,
+    key="sched_mode_radio",
+)
 
-quota_view = repo.get_teacher_quota_view(conn, parity)
+seed, parity = repo.get_tuan_config(conn)
+
+if sched_mode == "📅 Theo tuần cụ thể trong năm (1-35)":
+    chosen_week = c_sel.selectbox(
+        "Chọn tuần cần xếp:",
+        options=list(range(1, 36)),
+        index=0,
+        format_func=lambda w: f"Tuần {w} ({'Học kỳ I' if w <= 18 else 'Học kỳ II'} — {'Chẵn' if w % 2 == 0 else 'Lẻ'})",
+        key="sched_week_select",
+    )
+    chosen_parity = "C" if chosen_week % 2 == 0 else "L"
+    if chosen_parity != parity:
+        repo.set_tuan_config(conn, seed, chosen_parity)
+        parity = chosen_parity
+    st.write(f"Tuần đang xếp: **Tuần {chosen_week}** ({'Chẵn' if parity == 'C' else 'Lẻ'}), seed = {seed or '(ngẫu nhiên mỗi lần chạy)'}")
+    st.caption(f"🎯 **Định lượng:** Tự động áp dụng phân bổ số tiết theo định mức của **Tuần {chosen_week}**.")
+else:
+    chosen_week = None
+    chosen_label = c_sel.radio("Tuần", ["Chẵn", "Lẻ"], index=0 if parity == "C" else 1, horizontal=True)
+    chosen_parity = "C" if chosen_label == "Chẵn" else "L"
+    if chosen_parity != parity:
+        repo.set_tuan_config(conn, seed, chosen_parity)
+        parity = chosen_parity
+    st.write(f"Tuần hiện tại: **{'Chẵn' if parity == 'C' else 'Lẻ'}**, seed = {seed or '(ngẫu nhiên mỗi lần chạy)'}")
+
+quota_view = repo.get_teacher_quota_view(conn, parity=parity, week_no=chosen_week)
 over = [q for q in quota_view if q["cap"] > 0 and q["over"] > 0]
 proceed_anyway = True
 if over:
     st.warning(
-        "Các GV vượt định mức trung bình 2 tuần (xếp TKB không tự giảm được tải, cần sửa "
+        "Các GV vượt định mức (xếp TKB không tự giảm được tải, cần sửa "
         "Phân công trước nếu muốn):\n"
-        + "\n".join(f"- {q['name']}: TB {q['load_avg']}/{q['cap']} (vượt {q['over']})" for q in over)
+        + "\n".join(f"- {q['name']}: Tải {q['load']}/{q['cap']} (vượt {q['over_current']})" for q in over)
     )
     proceed_anyway = st.checkbox("Vẫn tiếp tục xếp dù vượt định mức")
 
@@ -56,16 +80,20 @@ hdtn_thematic_week = st.checkbox(
     help="Áp dụng cho toàn trường, chỉ lần chạy xếp TKB này -- không đổi vĩnh viễn.",
 )
 
-if st.button("🚀 Chạy xếp TKB", disabled=bool(over) and not proceed_anyway):
-    inp = repo.build_scheduling_input(conn, parity=parity, seed=seed, extra_kep_ids=extra_kep_ids,
-                                       hdtn_thematic_week=hdtn_thematic_week)
+if st.button("🚀 Chạy xếp TKB", disabled=bool(over) and not proceed_anyway, type="primary"):
+    inp = repo.build_scheduling_input(
+        conn, parity=parity, seed=seed, extra_kep_ids=extra_kep_ids,
+        hdtn_thematic_week=hdtn_thematic_week, week_no=chosen_week,
+    )
     with st.spinner("Đang xếp thời khóa biểu..."):
         result = sched.run(inp)
     st.session_state["last_result"] = result
     st.session_state["last_input"] = inp
+    st.session_state["last_scheduled_week"] = chosen_week
 
 result = st.session_state.get("last_result")
 inp = st.session_state.get("last_input")
+scheduled_week = st.session_state.get("last_scheduled_week")
 
 if result is not None:
     if not result.success:
@@ -318,7 +346,11 @@ if result is not None:
                     st.write(f"- {g_info}")
 
         st.subheader("Kiểm tra định mức (thực tế − định mức, kỳ vọng 0)")
-        diff = compute_quota_diff(inp.slots, result.assignment, repo.get_periods_per_week(conn), parity)
+        if scheduled_week is not None:
+            expected_quota = repo.get_periods_for_week(conn, week_no=scheduled_week, parity=parity)
+        else:
+            expected_quota = repo.get_periods_per_week(conn)
+        diff = compute_quota_diff(inp.slots, result.assignment, expected_quota, parity)
         check_rows = []
         for subj in sorted(inp.subjects, key=lambda s: s.sort_order):
             row = {"Môn": subj.name}
@@ -334,39 +366,47 @@ if result is not None:
             hide_index=True, use_container_width=True,
         )
 
-        if st.button("✅ Chấp nhận và lưu làm lịch chính thức"):
+        if st.button("✅ Chấp nhận và lưu làm lịch chính thức", type="primary"):
             cells = {
                 (s.class_id, s.ts.weekday, s.ts.session, s.ts.period): result.assignment.get(s.slot_id)
                 for s in inp.slots
             }
             repo.bulk_replace_tkb_nhap(conn, cells)
-            history = repo.list_seed_history(conn)
-            week_no = history[-1]["week_no"] if history else 1
-            run_id = repo.save_run(conn, week_no, seed, parity, result.cells_changed, result.cells_total,
+            save_week_no = scheduled_week if scheduled_week is not None else 1
+            repo.add_seed_history(conn, save_week_no, seed, parity)
+            run_id = repo.save_run(conn, save_week_no, seed, parity, result.cells_changed, result.cells_total,
                                     True, "OK")
             repo.save_tkb_result(conn, run_id, cells)
-            st.success("Đã lưu làm thời khóa biểu chính thức.")
+            st.success(f"Đã lưu làm thời khóa biểu chính thức cho Tuần {save_week_no}.")
             st.session_state.pop("last_result", None)
             st.session_state.pop("last_input", None)
             st.rerun()
 
 st.write("---")
 with st.expander("📅 Xếp nhiều tuần cùng lúc", expanded=False):
-    history = repo.list_seed_history(conn)
-    week_lookup = {h["week_no"]: (h["seed"], h["parity"]) for h in history}
-    if not week_lookup:
-        cur_seed, cur_parity = repo.get_tuan_config(conn)
-        week_lookup = {1: (cur_seed, cur_parity)}
+    st.caption("Xếp tự động hàng loạt tuần theo đúng định lượng số tiết của từng tuần tương ứng.")
+    
+    preset_choice = st.radio(
+        "Chọn nhanh nhóm tuần:",
+        ["Tùy chọn", "Toàn bộ Học kỳ I (Tuần 1 - 18)", "Toàn bộ Học kỳ II (Tuần 19 - 35)", "Tất cả 35 tuần trong năm"],
+        horizontal=True,
+        key="batch_preset_radio",
+    )
 
-    def _batch_week_label(wn):
-        s, p = week_lookup[wn]
-        return f"Tuần {wn} ({'Chẵn' if p == 'C' else 'Lẻ'}, seed {s})"
+    if preset_choice == "Toàn bộ Học kỳ I (Tuần 1 - 18)":
+        default_batch = list(range(1, 19))
+    elif preset_choice == "Toàn bộ Học kỳ II (Tuần 19 - 35)":
+        default_batch = list(range(19, 36))
+    elif preset_choice == "Tất cả 35 tuần trong năm":
+        default_batch = list(range(1, 36))
+    else:
+        default_batch = [1, 2]
 
     batch_week_nos = st.multiselect(
-        "Chọn các tuần cần xếp",
-        options=sorted(week_lookup),
-        default=sorted(week_lookup)[:1],
-        format_func=_batch_week_label,
+        "Danh sách các tuần cần xếp:",
+        options=list(range(1, 36)),
+        default=default_batch,
+        format_func=lambda wn: f"Tuần {wn} ({'Chẵn' if wn % 2 == 0 else 'Lẻ'})",
         key="batch_week_select",
     )
 
@@ -381,30 +421,21 @@ with st.expander("📅 Xếp nhiều tuần cùng lúc", expanded=False):
         key="batch_hdtn_thematic_week",
     )
 
-    batch_parities = {week_lookup[wn][1] for wn in batch_week_nos}
-    batch_proceed_anyway = True
-    for par in sorted(batch_parities):
-        par_quota = repo.get_teacher_quota_view(conn, par)
-        par_over = [q for q in par_quota if q["cap"] > 0 and q["over"] > 0]
-        if par_over:
-            st.warning(
-                f"Tuần {'Chẵn' if par == 'C' else 'Lẻ'} — Các GV vượt định mức trung bình 2 tuần:\n"
-                + "\n".join(f"- {q['name']}: TB {q['load_avg']}/{q['cap']} (vượt {q['over']})" for q in par_over)
-            )
-            if not st.checkbox(
-                f"Vẫn tiếp tục xếp tuần {'Chẵn' if par == 'C' else 'Lẻ'} dù vượt định mức",
-                key=f"batch_proceed_{par}",
-            ):
-                batch_proceed_anyway = False
-
-    if st.button("🚀 Xếp các tuần đã chọn", disabled=not batch_week_nos or not batch_proceed_anyway):
+    if st.button("🚀 Xếp các tuần đã chọn", disabled=not batch_week_nos, type="primary"):
         batch_results = {}
+        history = repo.list_seed_history(conn)
+        seed_lookup = {h["week_no"]: h["seed"] for h in history}
+        
         for wn in batch_week_nos:
-            b_seed, b_parity = week_lookup[wn]
-            b_inp = repo.build_scheduling_input(conn, parity=b_parity, seed=b_seed,
-                                                 extra_kep_ids=batch_extra_kep_ids,
-                                                 hdtn_thematic_week=batch_hdtn_thematic_week)
-            with st.spinner(f"Đang xếp Tuần {wn}..."):
+            b_parity = "C" if wn % 2 == 0 else "L"
+            b_seed = seed_lookup.get(wn, (seed + wn) if seed else 0)
+            b_inp = repo.build_scheduling_input(
+                conn, parity=b_parity, seed=b_seed,
+                extra_kep_ids=batch_extra_kep_ids,
+                hdtn_thematic_week=batch_hdtn_thematic_week,
+                week_no=wn,
+            )
+            with st.spinner(f"Đang xếp Tuần {wn} (áp dụng định lượng Tuần {wn})..."):
                 b_result = sched.run(b_inp)
             batch_results[wn] = (b_seed, b_parity, b_inp, b_result)
         st.session_state["batch_results"] = batch_results
@@ -449,8 +480,9 @@ with st.expander("📅 Xếp nhiều tuần cùng lúc", expanded=False):
             if b_conflicts:
                 st.error(f"Phát hiện {len(b_conflicts)} trường hợp GV trùng lịch (không nên xảy ra, báo lỗi này).")
 
-            st.caption("Kiểm tra định mức (thực tế − định mức, kỳ vọng 0)")
-            b_diff = compute_quota_diff(b_inp.slots, b_result.assignment, repo.get_periods_per_week(conn), b_parity)
+            st.caption(f"Kiểm tra định mức Tuần {wn} (thực tế − định mức tuần {wn}, kỳ vọng 0)")
+            b_expected_quota = repo.get_periods_for_week(conn, week_no=wn, parity=b_parity)
+            b_diff = compute_quota_diff(b_inp.slots, b_result.assignment, b_expected_quota, b_parity)
             b_check_rows = []
             for subj in sorted(b_inp.subjects, key=lambda s: s.sort_order):
                 row = {"Môn": subj.name}
@@ -462,12 +494,13 @@ with st.expander("📅 Xếp nhiều tuần cùng lúc", expanded=False):
                 hide_index=True, use_container_width=True,
             )
 
-            if st.button(f"✅ Chấp nhận Tuần {wn}", key=f"batch_accept_{wn}"):
+            if st.button(f"✅ Chấp nhận & Lưu Tuần {wn}", key=f"batch_accept_{wn}"):
                 b_cells = {
                     (s.class_id, s.ts.weekday, s.ts.session, s.ts.period): b_result.assignment.get(s.slot_id)
                     for s in b_inp.slots
                 }
                 repo.bulk_replace_tkb_nhap(conn, b_cells)
+                repo.add_seed_history(conn, wn, b_seed, b_parity)
                 b_run_id = repo.save_run(conn, wn, b_seed, b_parity, b_result.cells_changed, b_result.cells_total,
                                           True, "OK")
                 repo.save_tkb_result(conn, b_run_id, b_cells)

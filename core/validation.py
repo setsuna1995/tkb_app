@@ -5,6 +5,7 @@ helper columns).
 from __future__ import annotations
 
 from collections import defaultdict
+from typing import Optional
 
 
 def compute_actual_counts(slots: list, assignment: dict) -> dict:
@@ -16,15 +17,29 @@ def compute_actual_counts(slots: list, assignment: dict) -> dict:
     return counts
 
 
-def compute_quota_diff(slots: list, assignment: dict, periods_per_week: dict, parity: str) -> dict:
-    """Returns (subject_id, class_id) -> actual - quota. Expect all zeros."""
+def compute_quota_diff(slots: list, assignment: dict, periods_per_week: dict, parity: Optional[str] = None) -> dict:
+    """Returns (subject_id, class_id) -> actual - quota. Expect all zeros.
+    Supports either:
+    - 2-tuple dict: (subject_id, class_id) -> periods
+    - 3-tuple dict: (subject_id, class_id, parity) -> periods (requires parity or defaults to 'C')
+    """
     actual = compute_actual_counts(slots, assignment)
-    keys = set(actual.keys()) | {(s_id, c_id) for (s_id, c_id, p) in periods_per_week if p == parity}
-    diff = {}
-    for key in keys:
-        quota = periods_per_week.get((key[0], key[1], parity), 0)
-        diff[key] = actual.get(key, 0) - quota
-    return diff
+    sample_key = next(iter(periods_per_week.keys()), None)
+    if sample_key and len(sample_key) == 2:
+        keys = set(actual.keys()) | set(periods_per_week.keys())
+        diff = {}
+        for key in keys:
+            quota = periods_per_week.get(key, 0)
+            diff[key] = actual.get(key, 0) - quota
+        return diff
+    else:
+        effective_parity = parity or "C"
+        keys = set(actual.keys()) | {(s_id, c_id) for (s_id, c_id, p) in periods_per_week if p == effective_parity}
+        diff = {}
+        for key in keys:
+            quota = periods_per_week.get((key[0], key[1], effective_parity), 0)
+            diff[key] = actual.get(key, 0) - quota
+        return diff
 
 
 def find_teacher_conflicts(slots: list, assignment: dict, assigned_teacher: dict) -> list:

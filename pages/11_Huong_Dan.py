@@ -204,12 +204,14 @@ with st.expander("🚀 Xếp TKB tự động"):
 
 with st.expander("⚖️ Cân bằng tải giáo viên"):
     st.markdown(
-        "Đây là công cụ ĐỀ XUẤT, không đọc TKB đã xếp -- tải của mỗi giáo viên được tính hoàn "
-        "toàn từ **Phân công × Định mức tiết/tuần** (giống nhau dù đã xếp TKB hay chưa). Trang tự "
-        "tính và gợi ý phương án chuyển bớt (môn, lớp) từ giáo viên vượt trần sang giáo viên dưới "
-        "sàn tối thiểu, ưu tiên phương án đổi ít giáo viên nhất.\n\n"
-        "Trang này KHÔNG tự sửa Phân công -- muốn áp dụng gợi ý, phải tự sang trang **Phân công** "
-        "sửa tay theo gợi ý rồi quay lại đây kiểm tra lại."
+        "Đây là công cụ **Đề xuất và Tự động Điều chỉnh Phân công** dựa trên định mức tiết/tuần:\n\n"
+        "1. **Nguyên tắc trọn gói theo Lớp**: Mọi điều chỉnh đều chuyển nguyên vẹn từng **Lớp cho Môn học đó** "
+        "(toàn bộ số tiết cả tuần Chẵn và tuần Lẻ), tuyệt đối không chia cắt lẻ từng tiết nhằm đảm bảo tính đồng bộ hoàn hảo.\n"
+        "2. **Hình thức cân bằng linh hoạt**:\n"
+        "   - **Chuyển 1 lớp (Transfer)**: Chuyển trọn gói 1 lớp từ GV vượt trần sang GV còn dư địa (ưu tiên GV dưới sàn).\n"
+        "   - **Đổi chéo 2 lớp (Class Swap)**: Hoán đổi 2 lớp cùng môn giữa 2 GV khi chênh lệch tải nhỏ (1–2 tiết) mà chuyển 1 lớp nguyên vẹn không khả thi.\n"
+        "3. **Áp dụng 1-click vào Phân công**: Bạn có thể chọn các đề xuất phù hợp và bấm **\"Áp dụng các đề xuất đã chọn\"** "
+        "hoặc **\"Áp dụng TẤT CẢ đề xuất\"** để hệ thống tự động lưu trực tiếp vào cơ sở dữ liệu Phân công chuyên môn mà không cần phải đi sửa tay từng ô."
     )
 
 with st.expander("🕘 Lịch sử tuần"):

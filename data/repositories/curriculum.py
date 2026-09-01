@@ -76,9 +76,62 @@ def set_periods_per_week(conn: sqlite3.Connection, subject_id: int, class_id: in
     conn.commit()
 
 
-def get_teacher_quota_view(conn: sqlite3.Connection, parity: str) -> list:
+def get_weekly_curriculum(conn: sqlite3.Connection, class_id: Optional[int] = None, week_no: Optional[int] = None) -> dict[tuple[int, int, int], int]:
+    query = "SELECT subject_id, class_id, week_no, periods FROM weekly_curriculum WHERE 1=1"
+    params = []
+    if class_id is not None:
+        query += " AND class_id = ?"
+        params.append(class_id)
+    if week_no is not None:
+        query += " AND week_no = ?"
+        params.append(week_no)
+    rows = conn.execute(query, params).fetchall()
+    return {(r["subject_id"], r["class_id"], r["week_no"]): r["periods"] for r in rows}
+
+
+def set_weekly_curriculum(conn: sqlite3.Connection, subject_id: int, class_id: int, week_no: int, periods: int) -> None:
+    conn.execute(
+        "INSERT INTO weekly_curriculum (subject_id, class_id, week_no, periods) VALUES (?, ?, ?, ?) "
+        "ON CONFLICT(subject_id, class_id, week_no) DO UPDATE SET periods=excluded.periods",
+        (subject_id, class_id, week_no, periods),
+    )
+    conn.commit()
+
+
+def bulk_set_weekly_curriculum(conn: sqlite3.Connection, entries: list[tuple[int, int, int, int]]) -> None:
+    conn.executemany(
+        "INSERT INTO weekly_curriculum (subject_id, class_id, week_no, periods) VALUES (?, ?, ?, ?) "
+        "ON CONFLICT(subject_id, class_id, week_no) DO UPDATE SET periods=excluded.periods",
+        entries,
+    )
+    conn.commit()
+
+
+def list_configured_weeks(conn: sqlite3.Connection) -> list[int]:
+    rows = conn.execute("SELECT DISTINCT week_no FROM weekly_curriculum ORDER BY week_no").fetchall()
+    return [r["week_no"] for r in rows]
+
+
+def get_periods_for_week(conn: sqlite3.Connection, week_no: int, parity: Optional[str] = None) -> dict[tuple[int, int], int]:
+    """Returns {(subject_id, class_id): periods} for the specified week_no.
+    If weekly_curriculum has entries for week_no, returns those.
+    Otherwise, gracefully falls back to periods_per_week for the matching parity (even -> 'C', odd -> 'L').
+    """
+    rows = conn.execute(
+        "SELECT subject_id, class_id, periods FROM weekly_curriculum WHERE week_no = ?",
+        (week_no,),
+    ).fetchall()
+    if rows:
+        return {(r["subject_id"], r["class_id"]): r["periods"] for r in rows}
+
+    effective_parity = parity if parity is not None else ("C" if week_no % 2 == 0 else "L")
+    ppw = get_periods_per_week(conn)
+    return {(s, c): p for (s, c, par), p in ppw.items() if par == effective_parity}
+
+
+def get_teacher_quota_view(conn: sqlite3.Connection, parity: str = "C", week_no: Optional[int] = None) -> list:
     """Recreates DinhMuc_GV: cap = trần chuẩn - reduction(role);
-    load = sum(assignments x periods_per_week) cho tuần `parity`.
+    load = sum(assignments x periods_per_week/weekly_curriculum).
     """
     from data.repositories.entities import list_classes, list_subjects
     base_cap = get_base_cap(conn)
@@ -92,7 +145,12 @@ def get_teacher_quota_view(conn: sqlite3.Connection, parity: str) -> list:
     ppw = get_periods_per_week(conn)
     assignments = get_assignments(conn)
 
+    week_periods = None
+    if week_no is not None:
+        week_periods = get_periods_for_week(conn, week_no, parity=parity)
+
     loads_by_parity = {"C": {}, "L": {}}
+    loads_by_week = {}
     teacher_assignments = {}
     for (subject_id, class_id), teacher_id in assignments.items():
         if teacher_id is None:
@@ -101,6 +159,10 @@ def get_teacher_quota_view(conn: sqlite3.Connection, parity: str) -> list:
         l_periods = ppw.get((subject_id, class_id, "L"), 0)
         loads_by_parity["C"][teacher_id] = loads_by_parity["C"].get(teacher_id, 0) + c_periods
         loads_by_parity["L"][teacher_id] = loads_by_parity["L"].get(teacher_id, 0) + l_periods
+        
+        w_period = week_periods.get((subject_id, class_id), 0) if week_periods is not None else (c_periods if parity == "C" else l_periods)
+        loads_by_week[teacher_id] = loads_by_week.get(teacher_id, 0) + w_period
+
         if teacher_id not in teacher_assignments:
             teacher_assignments[teacher_id] = []
         teacher_assignments[teacher_id].append({
@@ -110,6 +172,7 @@ def get_teacher_quota_view(conn: sqlite3.Connection, parity: str) -> list:
             "subject_name": subject_map.get(subject_id, f"Môn #{subject_id}"),
             "periods_chan": c_periods,
             "periods_le": l_periods,
+            "periods_week": w_period,
         })
 
     view = []
@@ -119,7 +182,7 @@ def get_teacher_quota_view(conn: sqlite3.Connection, parity: str) -> list:
         load_c = loads_by_parity["C"].get(t.teacher_id, 0)
         load_l = loads_by_parity["L"].get(t.teacher_id, 0)
         load_avg = (load_c + load_l) / 2
-        load_current = load_c if parity == "C" else load_l
+        load_current = loads_by_week.get(t.teacher_id, load_c if parity == "C" else load_l)
         view.append({
             "teacher_id": t.teacher_id, "name": t.name, "role": t.role,
             "reduction": reduction, "cap": cap, "load": load_current,

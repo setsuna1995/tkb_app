@@ -9,7 +9,7 @@ from data.repositories.constraints import (
     get_all_class_allowed_cells, get_all_frame_templates,
     get_subject_class_allowed_cells, list_unavailability,
 )
-from data.repositories.curriculum import get_assignments, get_periods_per_week
+from data.repositories.curriculum import get_assignments, get_periods_for_week, get_periods_per_week
 from data.repositories.entities import list_classes, list_subjects, list_teachers
 from data.repositories.runs import get_tkb_nhap
 
@@ -33,16 +33,20 @@ def _weekday_matches(row_weekday: str, ts_weekday: int) -> bool:
     return str(ts_weekday) == str(row_weekday)
 
 
-def build_scheduling_input(conn: sqlite3.Connection, parity: str, seed: int = 0,
+def build_scheduling_input(conn: sqlite3.Connection, parity: str = "C", seed: int = 0,
                             extra_kep_ids: frozenset = frozenset(),
-                            hdtn_thematic_week: bool = False) -> SchedulingInput:
+                            hdtn_thematic_week: bool = False,
+                            week_no: Optional[int] = None) -> SchedulingInput:
     classes = list_classes(conn)
     subjects = list_subjects(conn)
     teachers = list_teachers(conn)
     config = get_scheduling_config(conn)
     subject_class_allowed_cells = get_subject_class_allowed_cells(conn)
 
-    need = {(s, c): p for (s, c, par), p in get_periods_per_week(conn).items() if par == parity and p > 0}
+    if week_no is not None:
+        need = {(s, c): p for (s, c), p in get_periods_for_week(conn, week_no=week_no, parity=parity).items() if p > 0}
+    else:
+        need = {(s, c): p for (s, c, par), p in get_periods_per_week(conn).items() if par == parity and p > 0}
     assigned_teacher = {key: tid for key, tid in get_assignments(conn).items() if tid is not None}
 
     all_ts = _canonical_timeslots()

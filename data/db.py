@@ -49,6 +49,14 @@ CREATE TABLE IF NOT EXISTS periods_per_week (
     PRIMARY KEY (subject_id, class_id, parity)
 );
 
+CREATE TABLE IF NOT EXISTS weekly_curriculum (
+    subject_id   INTEGER NOT NULL REFERENCES subjects(subject_id) ON DELETE CASCADE,
+    class_id     INTEGER NOT NULL REFERENCES classes(class_id) ON DELETE CASCADE,
+    week_no      INTEGER NOT NULL CHECK (week_no BETWEEN 1 AND 52),
+    periods      INTEGER NOT NULL DEFAULT 0,
+    PRIMARY KEY (subject_id, class_id, week_no)
+);
+
 CREATE TABLE IF NOT EXISTS teacher_unavailability (
     row_id       INTEGER PRIMARY KEY AUTOINCREMENT,
     teacher_id   INTEGER NOT NULL REFERENCES teachers(teacher_id) ON DELETE CASCADE,

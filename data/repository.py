@@ -18,10 +18,11 @@ from data.repositories.entities import (
 )
 from data.repositories.curriculum import (
     DEFAULT_BASE_CAP, DEFAULT_MIN_FLOOR,
-    get_assignments, get_base_cap, get_min_floor, get_periods_per_week,
-    get_role_reduction, get_teacher_caps, get_teacher_quota_view,
-    set_assignment, set_base_cap, set_min_floor, set_periods_per_week,
-    set_role_reduction,
+    bulk_set_weekly_curriculum, get_assignments, get_base_cap, get_min_floor,
+    get_periods_for_week, get_periods_per_week, get_role_reduction,
+    get_teacher_caps, get_teacher_quota_view, get_weekly_curriculum,
+    list_configured_weeks, set_assignment, set_base_cap, set_min_floor,
+    set_periods_per_week, set_role_reduction, set_weekly_curriculum,
 )
 from data.repositories.constraints import (
     add_unavailability, clear_unavailability, compress_busy_cells,
@@ -58,6 +59,8 @@ __all__ = [
     "get_role_reduction", "set_role_reduction",
     "get_teacher_quota_view", "get_teacher_caps",
     "get_assignments", "set_assignment", "get_periods_per_week", "set_periods_per_week",
+    "get_weekly_curriculum", "set_weekly_curriculum", "bulk_set_weekly_curriculum",
+    "get_periods_for_week", "list_configured_weeks",
     # constraints
     "list_unavailability", "add_unavailability", "clear_unavailability",
     "get_teacher_busy_cells", "compress_busy_cells", "set_teacher_busy_cells",

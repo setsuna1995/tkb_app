@@ -35,10 +35,36 @@ if uploaded is not None and st.button("Nhập dữ liệu"):
         )
         if report.warnings:
             st.warning("\n".join(report.warnings))
-    except Exception as e:
-        st.error(f"Lỗi khi nhập: {e}")
     finally:
         os.remove(tmp_path)
+
+st.divider()
+st.subheader("📥 Nhập Định lượng số tiết 35 tuần năm học")
+st.caption(
+    "Nhập trực tiếp file định lượng số tiết cả năm (như `Định lượng số tiết theo tuần năm học 2026_2027.xlsx`) "
+    "gồm các sheet K6, K7, K8, K9 cho cả Học kỳ I và Học kỳ II."
+)
+c_w1, c_w2 = st.columns([1, 1])
+default_excel_file = "Định lượng số tiết theo tuần năm học 2026_2027.xlsx"
+has_default_file = os.path.exists(default_excel_file)
+if c_w1.button("🚀 Nạp tự động từ file mẫu chuẩn 2026-2027", disabled=not has_default_file):
+    from io_excel.weekly_importer import import_weekly_curriculum_from_excel
+    with st.spinner("Đang nạp dữ liệu..."):
+        try:
+            rep = import_weekly_curriculum_from_excel(conn, default_excel_file)
+            st.success(f"Đã nạp thành công {rep['records_imported']} dòng định mức cho {rep['weeks_count']} tuần ({', '.join(rep['classes_updated'])}).")
+        except Exception as e:
+            st.error(f"Lỗi: {e}")
+
+uploaded_weekly = c_w2.file_uploader("Hoặc tải file định lượng .xlsx", type=["xlsx", "xlsm"], key="upload_weekly_curriculum")
+if uploaded_weekly is not None and c_w2.button("Nạp file định lượng"):
+    from io_excel.weekly_importer import import_weekly_curriculum_from_excel
+    with st.spinner("Đang nạp file..."):
+        try:
+            rep = import_weekly_curriculum_from_excel(conn, uploaded_weekly.getvalue())
+            st.success(f"Đã nạp thành công {rep['records_imported']} dòng định mức cho {rep['weeks_count']} tuần.")
+        except Exception as e:
+            st.error(f"Lỗi: {e}")
 
 st.divider()
 st.subheader("Xuất kết quả ra Excel")
