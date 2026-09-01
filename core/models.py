@@ -49,6 +49,7 @@ class Teacher:
     off_sessions_override: Optional[int] = None    # None = dùng config.teacher_off_sessions_per_week chung
     pinned_full_day_off: Optional[int] = None      # thứ (2-7) ghim nghỉ TRỌN NGÀY -- ngoại lệ "không nghỉ trọn ngày"
     pinned_afternoon_off: Optional[int] = None     # thứ ghim nghỉ 1 buổi CHIỀU cố định
+    reduction_override: Optional[int] = None       # Số tiết giảm trừ tùy chỉnh trực tiếp cho GV (nếu có)
 
 
 @dataclass(frozen=True)

@@ -89,7 +89,7 @@ def get_teacher_quota_view(conn: sqlite3.Connection, parity: str) -> list:
 
     view = []
     for t in teachers:
-        reduction = reductions.get(t.role, 0)
+        reduction = t.reduction_override if t.reduction_override is not None else reductions.get(t.role, 0)
         cap = base_cap - reduction
         load_c = loads_by_parity["C"].get(t.teacher_id, 0)
         load_l = loads_by_parity["L"].get(t.teacher_id, 0)
@@ -109,4 +109,7 @@ def get_teacher_quota_view(conn: sqlite3.Connection, parity: str) -> list:
 def get_teacher_caps(conn: sqlite3.Connection) -> dict:
     base_cap = get_base_cap(conn)
     reductions = get_role_reduction(conn)
-    return {t.teacher_id: base_cap - reductions.get(t.role, 0) for t in list_teachers(conn)}
+    return {
+        t.teacher_id: base_cap - (t.reduction_override if t.reduction_override is not None else reductions.get(t.role, 0))
+        for t in list_teachers(conn)
+    }

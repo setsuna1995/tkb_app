@@ -74,7 +74,7 @@ def _feasible(class_id: int, ts: TimeSlot, subject_id: int, teacher_id: int,
         if ts.period not in (periods[0] - 1, periods[-1] + 1):
             return False
     if subject_id in role_index.heavy_ids:
-        max_heavy_sess = getattr(config, "max_heavy_per_session", 3)
+        max_heavy_sess = max(getattr(config, "max_heavy_per_session", 3), config.max_heavy_consecutive)
         if state.session_heavy_count[(class_id, ts.weekday, ts.session)] >= max_heavy_sess:
             return False
         window = config.max_heavy_consecutive + 1

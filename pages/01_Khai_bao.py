@@ -82,7 +82,7 @@ with tab_teachers:
         df, num_rows="dynamic", key="editor_teachers", hide_index=True,
         column_config={
             "teacher_id": None,
-            "Chức vụ": st.column_config.SelectboxColumn(options=role_options),
+            "Chức vụ": st.column_config.TextColumn(help="Nhập chức vụ / nhiệm vụ (ví dụ: GVCN, Tổ trưởng, Thư ký, TPT...)"),
             "Nghỉ mấy buổi/tuần": st.column_config.NumberColumn(
                 min_value=0, max_value=3, step=1, help="Bỏ trống = dùng mặc định chung của trường",
             ),
