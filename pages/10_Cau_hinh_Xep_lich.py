@@ -1,7 +1,10 @@
 import streamlit as st
 
 from core import frame as frame_mod
-from core.models import ROLE_HDTN, SchedulingConfig, WEEKDAY_NAMES, WEEKDAYS
+from core.models import (
+    ROLE_GDTC, ROLE_HDTN, ROLE_KEP, ROLE_NANG, ROLE_NANG_KEP, ROLE_THUONG,
+    SchedulingConfig, WEEKDAY_NAMES, WEEKDAYS,
+)
 from data import repository as repo
 from ui_common import get_conn, require_auth, require_school, sidebar_backup_export, sidebar_fixed_rules, \
     sidebar_school_switcher
