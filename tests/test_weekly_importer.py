@@ -65,3 +65,13 @@ def test_import_weekly_curriculum_real_excel(school_conn):
     for w in range(28, 36):
         total_w = sum(cur_8a5.get((s.subject_id, c_8a5_id, w), 0) for s in repo.list_subjects(school_conn))
         assert total_w == 30, f"8A5 week {w} has {total_w} periods, expected 30"
+
+    # Verify Cong nghe has 2 periods for 8A5 in HKI weeks 1..9 and periods_per_week
+    s_cn_id = repo.get_subject_by_name(school_conn, "Công nghệ")
+    assert s_cn_id is not None
+    for w in range(1, 10):
+        assert cur_8a5.get((s_cn_id, c_8a5_id, w), 0) == 2, f"8A5 week {w} Cong nghe must be 2 periods"
+
+    ppw = repo.get_periods_per_week(school_conn)
+    assert ppw.get((s_cn_id, c_8a5_id, "C"), 0) == 2, "8A5 Cong nghe Even week must be 2"
+    assert ppw.get((s_cn_id, c_8a5_id, "L"), 0) == 2, "8A5 Cong nghe Odd week must be 2"

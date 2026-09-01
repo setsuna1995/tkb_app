@@ -13,6 +13,7 @@ import openpyxl
 
 from core.models import ROLE_HDTN
 from data import repository as repo
+from io_excel.weekly_importer import _find_grade_from_sheet_name, import_weekly_curriculum_from_excel
 
 
 @dataclass
@@ -69,6 +70,28 @@ def _resolve_frame(per_weekday_s: dict, per_weekday_c: dict) -> tuple:
 def import_xlsm(conn, path: str) -> ImportReport:
     wb = openpyxl.load_workbook(path, data_only=True)
     report = ImportReport()
+
+    has_phancong = "PhanCong" in wb.sheetnames
+    has_weekly = any(_find_grade_from_sheet_name(s) is not None for s in wb.sheetnames)
+
+    if not has_phancong and has_weekly:
+        w_rep = import_weekly_curriculum_from_excel(conn, wb)
+        report.counts = {
+            "classes": len(w_rep.get("classes_updated", [])),
+            "subjects": len(w_rep.get("subjects_mapped", [])),
+            "teachers": 0,
+            "unavailability_rows": 0,
+            "tkb_nhap_cells": 0,
+            "seed_history_rows": 0,
+            "weekly_curriculum_rows": w_rep.get("records_imported", 0),
+        }
+        report.warnings.append(
+            f"Đã nhận diện và nạp thành công định lượng {w_rep['records_imported']} dòng cho {w_rep['weeks_count']} tuần ({', '.join(w_rep['classes_updated'])})."
+        )
+        return report
+
+    if not has_phancong:
+        raise ValueError("File Excel không có sheet 'PhanCong' hoặc định dạng tuần hợp lệ.")
 
     ws_pc = wb["PhanCong"]
     ws_st = wb["SoTiet"]
@@ -278,6 +301,14 @@ def import_xlsm(conn, path: str) -> ImportReport:
             n_seed_history += 1
             row += 1
 
+    n_weekly_rows = 0
+    if has_weekly:
+        w_rep = import_weekly_curriculum_from_excel(conn, wb)
+        n_weekly_rows = w_rep.get("records_imported", 0)
+        report.warnings.append(
+            f"Đã nạp bổ sung định lượng 35 tuần ({n_weekly_rows} bản ghi)."
+        )
+
     report.counts = {
         "classes": n_classes,
         "subjects": n_subjects,
@@ -285,5 +316,6 @@ def import_xlsm(conn, path: str) -> ImportReport:
         "unavailability_rows": n_unavailability,
         "tkb_nhap_cells": len(cells),
         "seed_history_rows": n_seed_history,
+        "weekly_curriculum_rows": n_weekly_rows,
     }
     return report

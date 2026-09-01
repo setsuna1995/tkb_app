@@ -12,7 +12,37 @@ import sqlite3
 from typing import BinaryIO, Optional, Union
 import openpyxl
 
+from core.models import ROLE_GDTC, ROLE_HDTN, ROLE_NANG, ROLE_NANG_KEP, ROLE_THUONG
 from data import repository as repo
+
+# Standard subjects template when importing into fresh database
+STANDARD_SUBJECTS = [
+    ("Toán học", ROLE_NANG_KEP, 0),
+    ("Ngữ văn", ROLE_NANG_KEP, 1),
+    ("Ngoại ngữ", ROLE_NANG, 2),
+    ("Khoa học tự nhiên (Vật lý)", ROLE_THUONG, 3),
+    ("Khoa học tự nhiên (Hóa học)", ROLE_THUONG, 4),
+    ("Khoa học tự nhiên (Sinh học)", ROLE_THUONG, 5),
+    ("Lịch sử và Địa Lý (Lịch sử)", ROLE_THUONG, 6),
+    ("Lịch sử và Địa Lý (Địa lý)", ROLE_THUONG, 7),
+    ("GDCD", ROLE_THUONG, 8),
+    ("Công nghệ", ROLE_THUONG, 9),
+    ("Tin học", ROLE_THUONG, 10),
+    ("Giáo dục thể chất", ROLE_GDTC, 11),
+    ("Nội dung giáo dục của địa phương", ROLE_THUONG, 12),
+    ("Hoạt động trải nghiệm, hướng nghiệp", ROLE_HDTN, 13),
+    ("Nghệ thuật (Âm nhạc)", ROLE_THUONG, 14),
+    ("Nghệ thuật (Mỹ thuật)", ROLE_THUONG, 15),
+    ("Chào cờ", ROLE_THUONG, 16),
+    ("Sinh hoạt lớp", ROLE_THUONG, 17),
+]
+
+DEFAULT_GRADE_CLASSES = {
+    6: ["6A5", "6A6"],
+    7: ["7A4", "7A5"],
+    8: ["8A5", "8A6"],
+    9: ["9A5", "9A6"],
+}
 
 
 def map_subject_name(mon: Optional[str], phan_mon: Optional[str] = None) -> Optional[str]:
@@ -74,31 +104,53 @@ def _find_grade_from_sheet_name(sheet_name: str) -> Optional[int]:
 
 def import_weekly_curriculum_from_excel(
     conn: sqlite3.Connection,
-    file_source: Union[str, bytes, BinaryIO],
+    file_source: Union[str, bytes, BinaryIO, openpyxl.Workbook],
 ) -> dict:
     """Parses Excel workbook and stores full-year weekly periods for all classes."""
-    if isinstance(file_source, (bytes, bytearray)):
+    if isinstance(file_source, openpyxl.Workbook):
+        wb = file_source
+    elif isinstance(file_source, (bytes, bytearray)):
         wb = openpyxl.load_workbook(io.BytesIO(file_source), data_only=True)
     elif hasattr(file_source, "read"):
         wb = openpyxl.load_workbook(file_source, data_only=True)
     else:
         wb = openpyxl.load_workbook(str(file_source), data_only=True)
 
-    db_classes = repo.list_classes(conn)
+    # Ensure standard subjects exist if subjects table is empty
     db_subjects = repo.list_subjects(conn)
+    if not db_subjects:
+        for sname, role_code, sorder in STANDARD_SUBJECTS:
+            repo.upsert_subject(conn, sname, role_code=role_code, sort_order=sorder)
+        db_subjects = repo.list_subjects(conn)
+
     subj_name_to_id = {s.name: s.subject_id for s in db_subjects}
 
-    # Map classes by grade (e.g. 6A5 -> grade 6)
+    # Ensure standard classes exist if classes table is empty or missing grades
+    db_classes = repo.list_classes(conn)
     grade_to_classes: dict[int, list] = {6: [], 7: [], 8: [], 9: []}
     for c in db_classes:
-        # Match grade from leading digit or default
         m = re.match(r"^(\d+)", c.name)
         if m:
             g = int(m.group(1))
             if g in grade_to_classes:
                 grade_to_classes[g].append(c)
-        else:
-            grade_to_classes[6].append(c)
+
+    # Auto-provision classes for any empty grade
+    sort_idx = len(db_classes)
+    for g, def_names in DEFAULT_GRADE_CLASSES.items():
+        if not grade_to_classes[g]:
+            for cname in def_names:
+                repo.upsert_class(conn, cname, sort_order=sort_idx)
+                sort_idx += 1
+    
+    db_classes = repo.list_classes(conn)
+    grade_to_classes = {6: [], 7: [], 8: [], 9: []}
+    for c in db_classes:
+        m = re.match(r"^(\d+)", c.name)
+        if m:
+            g = int(m.group(1))
+            if g in grade_to_classes:
+                grade_to_classes[g].append(c)
 
     all_parsed_entries = []
     classes_updated = set()
@@ -160,8 +212,13 @@ def import_weekly_curriculum_from_excel(
                 last_mon = str(c2).strip()
 
             canonical_name = map_subject_name(last_mon, c3)
-            if not canonical_name or canonical_name not in subj_name_to_id:
+            if not canonical_name:
                 continue
+
+            if canonical_name not in subj_name_to_id:
+                # Dynamically create subject if missing
+                sid = repo.upsert_subject(conn, canonical_name, role_code=ROLE_NONE, sort_order=len(subj_name_to_id))
+                subj_name_to_id[canonical_name] = sid
 
             subj_id = subj_name_to_id[canonical_name]
             subjects_mapped.add(canonical_name)
@@ -180,24 +237,38 @@ def import_weekly_curriculum_from_excel(
     if all_parsed_entries:
         repo.bulk_set_weekly_curriculum(conn, all_parsed_entries)
 
-        # Synchronize periods_per_week (Chẵn/Lẻ) using representative weeks
-        # E.g. Even week (week 2 or 4) -> 'C', Odd week (week 1 or 3) -> 'L'
+        # Synchronize periods_per_week (Chẵn/Lẻ)
+        # We use Week 1 for Odd ('L') and Week 2 for Even ('C') representative of Semester 1
+        # so that subjects like Công nghệ (Khối 8, 9) accurately reflect 2 periods in HKI!
+        parsed_dict = {(s_id, c_id, w): p for s_id, c_id, w, p in all_parsed_entries}
         for cls in db_classes:
             for subj in db_subjects:
-                even_periods = []
-                odd_periods = []
-                for s_id, c_id, w, p in all_parsed_entries:
-                    if s_id == subj.subject_id and c_id == cls.class_id:
-                        if w % 2 == 0:
-                            even_periods.append(p)
-                        else:
-                            odd_periods.append(p)
-                if even_periods:
-                    avg_c = round(sum(even_periods) / len(even_periods))
-                    repo.set_periods_per_week(conn, subj.subject_id, cls.class_id, "C", avg_c)
-                if odd_periods:
-                    avg_l = round(sum(odd_periods) / len(odd_periods))
-                    repo.set_periods_per_week(conn, subj.subject_id, cls.class_id, "L", avg_l)
+                # Find odd week period (prefer week 1, 3, 5...)
+                val_l = None
+                for w in [1, 3, 5, 7, 9]:
+                    if (subj.subject_id, cls.class_id, w) in parsed_dict:
+                        val_l = parsed_dict[(subj.subject_id, cls.class_id, w)]
+                        break
+                if val_l is None:
+                    odd_vals = [p for (s, c, w), p in parsed_dict.items() if s == subj.subject_id and c == cls.class_id and w % 2 != 0]
+                    if odd_vals:
+                        val_l = odd_vals[0]
+
+                # Find even week period (prefer week 2, 4, 6, 8...)
+                val_c = None
+                for w in [2, 4, 6, 8]:
+                    if (subj.subject_id, cls.class_id, w) in parsed_dict:
+                        val_c = parsed_dict[(subj.subject_id, cls.class_id, w)]
+                        break
+                if val_c is None:
+                    even_vals = [p for (s, c, w), p in parsed_dict.items() if s == subj.subject_id and c == cls.class_id and w % 2 == 0]
+                    if even_vals:
+                        val_c = even_vals[0]
+
+                if val_l is not None:
+                    repo.set_periods_per_week(conn, subj.subject_id, cls.class_id, "L", int(val_l))
+                if val_c is not None:
+                    repo.set_periods_per_week(conn, subj.subject_id, cls.class_id, "C", int(val_c))
 
     return {
         "records_imported": len(all_parsed_entries),
