@@ -23,6 +23,9 @@ def _feasible(class_id: int, ts: TimeSlot, subject_id: int, teacher_id: int,
         return False
     if state.session_count[(teacher_id, ts.weekday, ts.session)] >= config.max_periods_per_session:
         return False
+    max_teacher_day = getattr(config, "max_teacher_periods_per_day", 5)
+    if state.teacher_day_count[(teacher_id, ts.weekday)] >= max_teacher_day:
+        return False
     if BAT_NGHI_1_BUOI and (ts.weekday, ts.session) in state.gv_off_slots.get(teacher_id, ()):
         return False
     if subject_id == role_index.gdtc_id:
@@ -35,6 +38,8 @@ def _feasible(class_id: int, ts: TimeSlot, subject_id: int, teacher_id: int,
         if ts.period == config.gdtc_avoid_period:
             return False
     if getattr(config, "heavy_subjects_morning_only", False) and subject_id in role_index.heavy_ids and ts.session == "C":
+        return False
+    if getattr(config, "avoid_heavy_afternoon_period3", True) and subject_id in role_index.heavy_ids and ts.session == "C" and ts.period == 3:
         return False
     morning_only = getattr(config, "morning_only_subject_ids", None)
     if morning_only and subject_id in morning_only and ts.session == "C":
@@ -69,6 +74,9 @@ def _feasible(class_id: int, ts: TimeSlot, subject_id: int, teacher_id: int,
         if ts.period not in (periods[0] - 1, periods[-1] + 1):
             return False
     if subject_id in role_index.heavy_ids:
+        max_heavy_sess = getattr(config, "max_heavy_per_session", 3)
+        if state.session_heavy_count[(class_id, ts.weekday, ts.session)] >= max_heavy_sess:
+            return False
         window = config.max_heavy_consecutive + 1
         last_start = frame_mod.MAX_PERIODS_PER_SESSION - config.max_heavy_consecutive
         for w in range(1, last_start + 1):

@@ -27,6 +27,7 @@ def _put_at(state: _State, slot: Slot, subject_id: int, teacher_id: int, role_in
     state.remaining_need[(subject_id, slot.class_id)] -= 1
     state.busy.add((teacher_id, ts.ts_id))
     state.session_count[(teacher_id, ts.weekday, ts.session)] += 1
+    state.teacher_day_count[(teacher_id, ts.weekday)] += 1
     state.teacher_session_periods[(teacher_id, ts.weekday, ts.session)].append(ts.period)
     if ts.session == "C":
         state.teacher_week_afternoon_count[teacher_id] += 1
@@ -35,6 +36,7 @@ def _put_at(state: _State, slot: Slot, subject_id: int, teacher_id: int, role_in
     state.occupied[(slot.class_id, ts.weekday, ts.session, ts.period)] = True
     if subject_id in role_index.heavy_ids:
         state.heavy_at[(slot.class_id, ts.weekday, ts.session, ts.period)] = True
+        state.session_heavy_count[(slot.class_id, ts.weekday, ts.session)] += 1
     state.rem_need_count[slot.class_id] -= 1
     state.rem_slot_count[slot.class_id] -= 1
 
@@ -47,6 +49,7 @@ def _remove_at(state: _State, slot: Slot, role_index) -> Tuple[int, int]:
     state.remaining_need[(subject_id, slot.class_id)] += 1
     state.busy.discard((teacher_id, ts.ts_id))
     state.session_count[(teacher_id, ts.weekday, ts.session)] -= 1
+    state.teacher_day_count[(teacher_id, ts.weekday)] -= 1
     state.teacher_session_periods[(teacher_id, ts.weekday, ts.session)].remove(ts.period)
     if ts.session == "C":
         state.teacher_week_afternoon_count[teacher_id] -= 1
@@ -55,6 +58,7 @@ def _remove_at(state: _State, slot: Slot, role_index) -> Tuple[int, int]:
     state.occupied[(slot.class_id, ts.weekday, ts.session, ts.period)] = False
     if subject_id in role_index.heavy_ids:
         state.heavy_at[(slot.class_id, ts.weekday, ts.session, ts.period)] = False
+        state.session_heavy_count[(slot.class_id, ts.weekday, ts.session)] -= 1
     state.rem_need_count[slot.class_id] += 1
     state.rem_slot_count[slot.class_id] += 1
     return subject_id, teacher_id

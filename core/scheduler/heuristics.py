@@ -88,6 +88,22 @@ def _pick_best_scored(class_id: int, slot: Slot, state: _State, role_index,
             gap_penalty = _calculate_teacher_gap_penalty(teacher_id, ts.weekday, ts.session, ts.period, state)
             score -= gap_penalty
 
+        if subj.subject_id == role_index.hdtn_id and getattr(config, "hdtn_period2_afternoon", True):
+            if ts.session == "C":
+                score += 150
+            else:
+                score -= 150
+
+        if getattr(config, "avoid_teacher_4_consecutive_morning", True) and ts.session == "S":
+            morning_p = len(state.teacher_session_periods.get((teacher_id, ts.weekday, "S"), []))
+            if morning_p >= 3:
+                teacher_tot = sum(
+                    rem for (s, c), rem in state.remaining_need.items()
+                    if assigned_teacher.get((s, c)) == teacher_id
+                )
+                if teacher_tot <= 20:
+                    score -= 220
+
         if getattr(config, "avoid_teacher_lone_periods", True):
             current_in_session = len(state.teacher_session_periods.get((teacher_id, ts.weekday, ts.session), []))
             if current_in_session == 1:

@@ -113,6 +113,12 @@ class SchedulingConfig:
     balance_afternoon_teachers: bool = True  # Cân đối buổi chiều, tránh GV nghỉ full chiều khi dạy lớp có tiết chiều
     mandatory_morning_weekdays: tuple = (2, 5, 6)  # Các sáng bắt buộc toàn thể GV có mặt/đi làm
     avoid_gdtc_consecutive_days: bool = True  # GDTC của 1 lớp không xếp ở 2 hôm liền kề
+    max_teacher_periods_per_day: int = 5  # Tiêu chí II.2: Mỗi GV không quá tải vượt 5 tiết/ngày
+    max_heavy_per_session: int = 3  # Tiêu chí I.2 & II.13: Tối đa 3 tiết môn nặng trong 1 buổi của 1 lớp
+    hdtn_period2_afternoon: bool = True  # Tiêu chí II.6: Tiết 2 HĐTN xếp vào buổi chiều cho các lớp có học chiều
+    avoid_heavy_afternoon_period3: bool = True  # Tiêu chí II.15: Hạn chế môn nặng tiết 3 chiều
+    avoid_teacher_4_consecutive_morning: bool = True  # Tiêu chí II.14: Hạn chế GV dạy 4 tiết sáng liên tục nếu tải <= 20
+    min_weekly_periods_for_lone_penalty: int = 0  # Tiêu chí II.4: 0 = áp dụng phạt lẻ cho tất cả; > 0 = miễn trừ GV có tải < ngưỡng này
 
 
 

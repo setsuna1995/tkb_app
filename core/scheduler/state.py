@@ -23,3 +23,5 @@ class _State:
     shl_days: set = field(default_factory=set)        # {(class_id, weekday)} nơi greedy KHÔNG đặt HDTN (dành cho SHL ghim)
     teacher_session_periods: dict = field(default_factory=lambda: defaultdict(list))  # (teacher_id, weekday, session) -> list[period]
     teacher_week_afternoon_count: dict = field(default_factory=lambda: defaultdict(int)) # teacher_id -> count of afternoon periods
+    teacher_day_count: dict = field(default_factory=lambda: defaultdict(int)) # (teacher_id, weekday) -> total periods taught that day
+    session_heavy_count: dict = field(default_factory=lambda: defaultdict(int)) # (class_id, weekday, session) -> count of heavy periods

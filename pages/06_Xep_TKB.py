@@ -4,10 +4,10 @@ import streamlit as st
 from core import scheduler as sched
 from core.models import ROLE_GDTC, ROLE_HDTN, ROLE_KEP, ROLE_NANG, ROLE_NANG_KEP, WEEKDAY_NAMES, WEEKDAYS
 from core.validation import (
-    compute_quota_diff, find_consecutive_subject_days, find_invalid_gdtc_periods,
-    find_max_heavy_violations, find_morning_only_violations, find_single_pair_violations,
-    find_subject_class_rule_violations, find_teacher_conflicts, find_teacher_gaps,
-    find_teacher_unavailability_violations,
+    compute_quota_diff, find_consecutive_subject_days, find_heavy_afternoon_period3_violations,
+    find_invalid_gdtc_periods, find_max_heavy_violations, find_morning_only_violations,
+    find_single_pair_violations, find_subject_class_rule_violations, find_teacher_conflicts,
+    find_teacher_day_cap_violations, find_teacher_gaps, find_teacher_unavailability_violations,
 )
 from data import repository as repo
 from ui_common import get_conn, require_auth, require_school, sidebar_backup_export, sidebar_school_switcher
@@ -287,6 +287,22 @@ if result is not None:
             pair_violations = find_single_pair_violations(inp.slots, result.assignment, single_pair_ids)
             if pair_violations:
                 st.error(f"❌ Phát hiện {len(pair_violations)} trường hợp môn 1 cặp liền tiết bị phân bổ sai quy tắc.")
+
+        # Kiểm tra trần tiết dạy/ngày của Giáo viên (Tiêu chí II.2)
+        max_teacher_day = getattr(inp.config, "max_teacher_periods_per_day", 5)
+        day_cap_violations = find_teacher_day_cap_violations(inp.slots, result.assignment, inp.assigned_teacher, max_teacher_day)
+        if day_cap_violations:
+            teacher_map = {t.teacher_id: t.name for t in inp.teachers}
+            st.error(f"❌ Phát hiện {len(day_cap_violations)} trường hợp GV dạy vượt quá {max_teacher_day} tiết/ngày:")
+            for tid, wd, count in day_cap_violations:
+                tname = teacher_map.get(tid, f"GV #{tid}")
+                st.write(f"- {tname}: {WEEKDAY_NAMES[wd]} dạy {count} tiết (vượt trần {max_teacher_day})")
+
+        # Kiểm tra môn Nặng vào tiết 3 chiều (Tiêu chí II.15)
+        if getattr(inp.config, "avoid_heavy_afternoon_period3", True) and heavy_subject_ids:
+            heavy_p3_violations = find_heavy_afternoon_period3_violations(inp.slots, result.assignment, heavy_subject_ids)
+            if heavy_p3_violations:
+                st.error(f"❌ Phát hiện {len(heavy_p3_violations)} tiết môn Nặng bị xếp vào tiết 3 buổi chiều.")
 
         # Đánh giá chất lượng lịch dạy của Giáo viên
         teacher_gaps = find_teacher_gaps(inp.slots, result.assignment, inp.assigned_teacher)

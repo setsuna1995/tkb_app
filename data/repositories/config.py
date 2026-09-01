@@ -181,6 +181,27 @@ def get_scheduling_config(conn: sqlite3.Connection) -> SchedulingConfig:
             bool(int(avoid_gdtc_consecutive_raw)) if avoid_gdtc_consecutive_raw is not None
             else default.avoid_gdtc_consecutive_days
         ),
+        max_teacher_periods_per_day=int(
+            get_meta(conn, "sched_max_teacher_periods_per_day") or default.max_teacher_periods_per_day
+        ),
+        max_heavy_per_session=int(
+            get_meta(conn, "sched_max_heavy_per_session") or default.max_heavy_per_session
+        ),
+        hdtn_period2_afternoon=(
+            bool(int(get_meta(conn, "sched_hdtn_period2_afternoon"))) if get_meta(conn, "sched_hdtn_period2_afternoon") is not None
+            else default.hdtn_period2_afternoon
+        ),
+        avoid_heavy_afternoon_period3=(
+            bool(int(get_meta(conn, "sched_avoid_heavy_afternoon_period3"))) if get_meta(conn, "sched_avoid_heavy_afternoon_period3") is not None
+            else default.avoid_heavy_afternoon_period3
+        ),
+        avoid_teacher_4_consecutive_morning=(
+            bool(int(get_meta(conn, "sched_avoid_teacher_4_consecutive_morning"))) if get_meta(conn, "sched_avoid_teacher_4_consecutive_morning") is not None
+            else default.avoid_teacher_4_consecutive_morning
+        ),
+        min_weekly_periods_for_lone_penalty=int(
+            get_meta(conn, "sched_min_weekly_periods_for_lone_penalty") or default.min_weekly_periods_for_lone_penalty
+        ),
     )
 
 
@@ -206,3 +227,9 @@ def set_scheduling_config(conn: sqlite3.Connection, config: SchedulingConfig) ->
     set_meta(conn, "sched_balance_afternoon_teachers", str(int(config.balance_afternoon_teachers)))
     set_meta(conn, "sched_mandatory_morning_weekdays", _format_weekday_tuple(config.mandatory_morning_weekdays))
     set_meta(conn, "sched_avoid_gdtc_consecutive_days", str(int(config.avoid_gdtc_consecutive_days)))
+    set_meta(conn, "sched_max_teacher_periods_per_day", str(config.max_teacher_periods_per_day))
+    set_meta(conn, "sched_max_heavy_per_session", str(config.max_heavy_per_session))
+    set_meta(conn, "sched_hdtn_period2_afternoon", str(int(config.hdtn_period2_afternoon)))
+    set_meta(conn, "sched_avoid_heavy_afternoon_period3", str(int(config.avoid_heavy_afternoon_period3)))
+    set_meta(conn, "sched_avoid_teacher_4_consecutive_morning", str(int(config.avoid_teacher_4_consecutive_morning)))
+    set_meta(conn, "sched_min_weekly_periods_for_lone_penalty", str(config.min_weekly_periods_for_lone_penalty))

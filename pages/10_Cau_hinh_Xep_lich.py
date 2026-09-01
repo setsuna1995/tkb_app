@@ -183,6 +183,46 @@ avoid_gdtc_consecutive = st.checkbox(
     help="Ràng buộc CỨNG: GDTC của 1 lớp không bao giờ được xếp vào 2 ngày liền kề trong tuần.",
 )
 
+st.subheader("Tiêu chuẩn BGD & Tiêu chí HĐSP Nhà Trường")
+st.caption(
+    "Các ràng buộc sư phạm chuẩn GDPT 2018 và 15 tiêu chí của Hội đồng Sư phạm nhằm đảm bảo sức khỏe học sinh và tối ưu lịch công tác giáo viên."
+)
+c_hdsp1, c_hdsp2 = st.columns(2)
+max_teacher_periods_per_day = c_hdsp1.number_input(
+    "Mỗi GV: tối đa mấy tiết/ngày (cả ngày sáng+chiều)", 1, 10,
+    getattr(config, "max_teacher_periods_per_day", 5),
+    help="Tiêu chí II.2: Đảm bảo mỗi GV không bị quá tải vượt quá số tiết này trong một ngày.",
+)
+max_heavy_per_session = c_hdsp2.number_input(
+    "Tối đa mấy tiết môn Nặng/buổi cho 1 lớp", 1, max_p,
+    getattr(config, "max_heavy_per_session", 3),
+    help="Tiêu chuẩn I.2 & Tiêu chí II.13: Tránh dồn dập các môn nặng (Toán, Văn, KHTN...) quá tải trong 1 buổi học.",
+)
+
+c_hdsp3, c_hdsp4 = st.columns(2)
+hdtn_period2_afternoon = c_hdsp3.checkbox(
+    "Tiết 2 HĐTN (chủ đề) xếp vào buổi chiều",
+    value=getattr(config, "hdtn_period2_afternoon", True),
+    help="Tiêu chí II.6: HĐTN có 3 tiết: Tiết 1 sáng T2 (Chào cờ), Tiết 3 cuối T6 (SHL), Tiết 2 xếp vào buổi chiều cho các lớp có học chiều.",
+)
+avoid_heavy_afternoon_period3 = c_hdsp4.checkbox(
+    "Hạn chế / cấm môn Nặng vào tiết 3 buổi chiều",
+    value=getattr(config, "avoid_heavy_afternoon_period3", True),
+    help="Tiêu chí II.15: Tiết cuối buổi chiều học sinh mệt mỏi khó tiếp thu kiến thức tư duy cao.",
+)
+
+c_hdsp5, c_hdsp6 = st.columns(2)
+avoid_teacher_4_consecutive_morning = c_hdsp5.checkbox(
+    "Hạn chế GV dạy 4 tiết sáng liên tục (nếu tải <= 20 tiết/tuần)",
+    value=getattr(config, "avoid_teacher_4_consecutive_morning", True),
+    help="Tiêu chí II.14: Giảm tải áp lực cho GV, trừ những GV có số tiết thực dạy > 20 tiết/tuần.",
+)
+min_weekly_periods_for_lone_penalty = c_hdsp6.number_input(
+    "Ngưỡng tiết/tuần áp dụng phạt lẻ tiết GV (0 = phạt toàn bộ, 15 = miễn trừ GV <15 tiết)",
+    0, 30, getattr(config, "min_weekly_periods_for_lone_penalty", 0),
+    help="Tiêu chí II.4: Hạn chế tối đa GV dạy 1 tiết/buổi hoặc 1 tiết/ngày, nhưng miễn trừ cho GV ít tiết (< 15 tiết/tuần).",
+)
+
 # --- Kiểm tra cảnh báo xung đột cấu hình ---
 effective_morning_only = set(morning_only_selection)
 if heavy_subjects_morning_only:
@@ -216,6 +256,12 @@ if st.button("💾 Lưu cấu hình", type="primary"):
         balance_afternoon_teachers=bool(balance_afternoon_teachers),
         mandatory_morning_weekdays=tuple(sorted(mandatory_morning_selection)),
         avoid_gdtc_consecutive_days=bool(avoid_gdtc_consecutive),
+        max_teacher_periods_per_day=int(max_teacher_periods_per_day),
+        max_heavy_per_session=int(max_heavy_per_session),
+        hdtn_period2_afternoon=bool(hdtn_period2_afternoon),
+        avoid_heavy_afternoon_period3=bool(avoid_heavy_afternoon_period3),
+        avoid_teacher_4_consecutive_morning=bool(avoid_teacher_4_consecutive_morning),
+        min_weekly_periods_for_lone_penalty=int(min_weekly_periods_for_lone_penalty),
     )
     repo.set_scheduling_config(conn, new_config)
     st.success("Đã lưu cấu hình xếp lịch.")

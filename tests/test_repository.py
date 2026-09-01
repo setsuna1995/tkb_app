@@ -74,6 +74,25 @@ def test_set_then_get_scheduling_config_round_trips_teacher_quality_fields(conn)
     assert loaded.avoid_gdtc_consecutive_days is False
 
 
+def test_set_then_get_scheduling_config_round_trips_mandatory_criteria_fields(conn):
+    custom = SchedulingConfig(
+        max_teacher_periods_per_day=4,
+        max_heavy_per_session=2,
+        hdtn_period2_afternoon=False,
+        avoid_heavy_afternoon_period3=False,
+        avoid_teacher_4_consecutive_morning=False,
+        min_weekly_periods_for_lone_penalty=18,
+    )
+    repo.set_scheduling_config(conn, custom)
+    loaded = repo.get_scheduling_config(conn)
+    assert loaded.max_teacher_periods_per_day == 4
+    assert loaded.max_heavy_per_session == 2
+    assert loaded.hdtn_period2_afternoon is False
+    assert loaded.avoid_heavy_afternoon_period3 is False
+    assert loaded.avoid_teacher_4_consecutive_morning is False
+    assert loaded.min_weekly_periods_for_lone_penalty == 18
+
+
 
 def test_upsert_and_list_teacher_round_trips_off_override_and_pins(conn):
     tid = repo.upsert_teacher(

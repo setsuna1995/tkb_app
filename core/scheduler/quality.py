@@ -21,26 +21,30 @@ def _count_teacher_gaps(slots: list[Slot], assigned: dict, slot_teacher: dict) -
     return total_gaps
 
 
-def _count_teacher_lone_days(slots: list[Slot], assigned: dict, slot_teacher: dict) -> int:
+def _count_teacher_lone_days(slots: list[Slot], assigned: dict, slot_teacher: dict, min_weekly_periods: int = 0) -> int:
     teacher_days = defaultdict(int)
+    teacher_totals = defaultdict(int)
     for slot in slots:
         subj = assigned.get(slot.slot_id)
         if subj not in (None, -1):
             tid = slot_teacher.get(slot.slot_id)
             if tid is not None and tid > 0:
                 teacher_days[(tid, slot.ts.weekday)] += 1
-    return sum(1 for count in teacher_days.values() if count == 1)
+                teacher_totals[tid] += 1
+    return sum(1 for (tid, wd), count in teacher_days.items() if count == 1 and teacher_totals[tid] >= min_weekly_periods)
 
 
-def _count_teacher_lone_sessions(slots: list[Slot], assigned: dict, slot_teacher: dict) -> int:
+def _count_teacher_lone_sessions(slots: list[Slot], assigned: dict, slot_teacher: dict, min_weekly_periods: int = 0) -> int:
     t_sess = defaultdict(int)
+    teacher_totals = defaultdict(int)
     for slot in slots:
         subj = assigned.get(slot.slot_id)
         if subj not in (None, -1):
             tid = slot_teacher.get(slot.slot_id)
             if tid is not None and tid > 0:
                 t_sess[(tid, slot.ts.weekday, slot.ts.session)] += 1
-    return sum(1 for count in t_sess.values() if count == 1)
+                teacher_totals[tid] += 1
+    return sum(1 for (tid, wd, sess), count in t_sess.items() if count == 1 and teacher_totals[tid] >= min_weekly_periods)
 
 
 def _count_teacher_split_sessions(slots: list[Slot], assigned: dict, slot_teacher: dict) -> int:
@@ -56,6 +60,24 @@ def _count_teacher_split_sessions(slots: list[Slot], assigned: dict, slot_teache
         if sess_counts.get("S", 0) > 0 and sess_counts.get("C", 0) > 0
         and (sess_counts.get("S", 0) == 1 or sess_counts.get("C", 0) == 1)
     )
+
+
+def _count_teacher_4_consecutive_mornings(slots: list[Slot], assigned: dict, slot_teacher: dict, max_load_for_penalty: int = 20) -> int:
+    t_morn_periods = defaultdict(list)
+    teacher_totals = defaultdict(int)
+    for slot in slots:
+        subj = assigned.get(slot.slot_id)
+        if subj not in (None, -1):
+            tid = slot_teacher.get(slot.slot_id)
+            if tid is not None and tid > 0:
+                teacher_totals[tid] += 1
+                if slot.ts.session == "S":
+                    t_morn_periods[(tid, slot.ts.weekday)].append(slot.ts.period)
+    count_4 = 0
+    for (tid, wd), periods in t_morn_periods.items():
+        if len(periods) >= 4 and teacher_totals[tid] <= max_load_for_penalty:
+            count_4 += 1
+    return count_4
 
 
 def _count_teacher_missing_mandatory_mornings(slots: list[Slot], assigned: dict, slot_teacher: dict, mandatory_mornings: tuple = (2, 5, 6)) -> int:
@@ -106,12 +128,15 @@ def _count_teacher_missing_afternoon_duty(slots: list[Slot], assigned: dict, slo
 def _teacher_quality_penalty(slots: list[Slot], assigned: dict, slot_teacher: dict, config: SchedulingConfig) -> int:
     penalty = 0
     mand_morns = getattr(config, "mandatory_morning_weekdays", (2, 5, 6))
+    min_lone_load = getattr(config, "min_weekly_periods_for_lone_penalty", 15)
     if getattr(config, "avoid_teacher_gaps", True):
         penalty += _count_teacher_gaps(slots, assigned, slot_teacher) * 350
     if getattr(config, "avoid_teacher_lone_periods", True):
-        penalty += _count_teacher_lone_sessions(slots, assigned, slot_teacher) * 500
+        penalty += _count_teacher_lone_sessions(slots, assigned, slot_teacher, min_weekly_periods=min_lone_load) * 500
         penalty += _count_teacher_split_sessions(slots, assigned, slot_teacher) * 200
-        penalty += _count_teacher_lone_days(slots, assigned, slot_teacher) * 250
+        penalty += _count_teacher_lone_days(slots, assigned, slot_teacher, min_weekly_periods=min_lone_load) * 250
+    if getattr(config, "avoid_teacher_4_consecutive_morning", True):
+        penalty += _count_teacher_4_consecutive_mornings(slots, assigned, slot_teacher, max_load_for_penalty=20) * 300
     penalty += _count_teacher_missing_mandatory_mornings(slots, assigned, slot_teacher, mand_morns) * 800
     if getattr(config, "balance_afternoon_teachers", True):
         penalty += _count_teacher_missing_afternoon_duty(slots, assigned, slot_teacher) * 200

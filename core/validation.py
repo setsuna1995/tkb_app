@@ -192,4 +192,31 @@ def find_single_pair_violations(slots: list, assignment: dict, single_pair_ids: 
     return violations
 
 
+def find_teacher_day_cap_violations(slots: list, assignment: dict, assigned_teacher: dict, max_per_day: int = 5) -> list:
+    """Returns [(teacher_id, weekday, total_periods), ...] for any teacher whose total periods
+    taught across both morning and afternoon on a single day exceeds max_per_day."""
+    teacher_day_periods = defaultdict(int)
+    for slot in slots:
+        subject_id = assignment.get(slot.slot_id)
+        if subject_id is not None:
+            teacher_id = assigned_teacher.get((subject_id, slot.class_id))
+            if teacher_id is not None and teacher_id > 0:
+                teacher_day_periods[(teacher_id, slot.ts.weekday)] += 1
 
+    violations = []
+    for (tid, wd), count in teacher_day_periods.items():
+        if count > max_per_day:
+            violations.append((tid, wd, count))
+    return violations
+
+
+def find_heavy_afternoon_period3_violations(slots: list, assignment: dict, heavy_ids: set) -> list:
+    """Returns [(class_id, subject_id, weekday, session, period), ...] for any heavy subject
+    placed at afternoon period 3."""
+    violations = []
+    for slot in slots:
+        subject_id = assignment.get(slot.slot_id)
+        if subject_id is not None and subject_id in heavy_ids:
+            if slot.ts.session == "C" and slot.ts.period == 3:
+                violations.append((slot.class_id, subject_id, slot.ts.weekday, slot.ts.session, slot.ts.period))
+    return violations
