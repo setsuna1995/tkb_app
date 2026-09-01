@@ -141,7 +141,7 @@ def _feasible(class_id: int, ts: TimeSlot, subject_id: int, teacher_id: int,
     if (subject_id in non_consecutive) or (avoid_gdtc and subject_id == role_index.gdtc_id):
         if ts.weekday > 2 and state.placed.get((class_id, subject_id, ts.weekday - 1)):
             return False
-        if ts.weekday < 7 and state.placed.get((class_id, subject_id, ts.weekday + 1)):
+        if ts.weekday < 8 and state.placed.get((class_id, subject_id, ts.weekday + 1)):
             return False
 
     cap_today = day_capacity.get((class_id, ts.weekday), CAP_TIET_NGAY) if day_capacity else CAP_TIET_NGAY
@@ -1033,7 +1033,7 @@ def run(inp: SchedulingInput, *, max_attempts: int = SO_LAN_THU,
                     if wd > 2 and state.placed.get((cid, sid, wd - 1)):
                         done = False
                         break
-                    if wd < 7 and state.placed.get((cid, sid, wd + 1)):
+                    if wd < 8 and state.placed.get((cid, sid, wd + 1)):
                         done = False
                         break
 
