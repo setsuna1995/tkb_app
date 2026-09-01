@@ -131,7 +131,8 @@ def get_periods_for_week(conn: sqlite3.Connection, week_no: int, parity: Optiona
 
 def get_teacher_quota_view(conn: sqlite3.Connection, parity: str = "C", week_no: Optional[int] = None) -> list:
     """Recreates DinhMuc_GV: cap = trần chuẩn - reduction(role);
-    load = sum(assignments x periods_per_week/weekly_curriculum).
+    Calculates detailed 35-week workloads, semester averages (HK1, HK2),
+    full-year averages, peak/lowest weeks, and week-specific loads.
     """
     from data.repositories.entities import list_classes, list_subjects
     base_cap = get_base_cap(conn)
@@ -144,14 +145,23 @@ def get_teacher_quota_view(conn: sqlite3.Connection, parity: str = "C", week_no:
     subject_map = {s.subject_id: s.name for s in subjects}
     ppw = get_periods_per_week(conn)
     assignments = get_assignments(conn)
+    all_weekly = get_weekly_curriculum(conn)
 
-    week_periods = None
-    if week_no is not None:
-        week_periods = get_periods_for_week(conn, week_no, parity=parity)
+    # Pre-calculate period lookup for all 35 weeks for every (s, c)
+    # (s, c, w) -> periods
+    period_cache_35 = {}
+    for (s_id, c_id) in assignments.keys():
+        for w in range(1, 36):
+            if (s_id, c_id, w) in all_weekly:
+                period_cache_35[(s_id, c_id, w)] = all_weekly[(s_id, c_id, w)]
+            else:
+                par = "C" if w % 2 == 0 else "L"
+                period_cache_35[(s_id, c_id, w)] = ppw.get((s_id, c_id, par), 0)
 
     loads_by_parity = {"C": {}, "L": {}}
-    loads_by_week = {}
+    loads_35_by_teacher = {t.teacher_id: {w: 0 for w in range(1, 36)} for t in teachers}
     teacher_assignments = {}
+
     for (subject_id, class_id), teacher_id in assignments.items():
         if teacher_id is None:
             continue
@@ -159,9 +169,17 @@ def get_teacher_quota_view(conn: sqlite3.Connection, parity: str = "C", week_no:
         l_periods = ppw.get((subject_id, class_id, "L"), 0)
         loads_by_parity["C"][teacher_id] = loads_by_parity["C"].get(teacher_id, 0) + c_periods
         loads_by_parity["L"][teacher_id] = loads_by_parity["L"].get(teacher_id, 0) + l_periods
-        
-        w_period = week_periods.get((subject_id, class_id), 0) if week_periods is not None else (c_periods if parity == "C" else l_periods)
-        loads_by_week[teacher_id] = loads_by_week.get(teacher_id, 0) + w_period
+
+        if teacher_id not in loads_35_by_teacher:
+            loads_35_by_teacher[teacher_id] = {w: 0 for w in range(1, 36)}
+
+        asgn_weekly = {}
+        for w in range(1, 36):
+            p_w = period_cache_35.get((subject_id, class_id, w), 0)
+            loads_35_by_teacher[teacher_id][w] += p_w
+            asgn_weekly[w] = p_w
+
+        w_period = asgn_weekly.get(week_no, c_periods if parity == "C" else l_periods) if week_no is not None else (c_periods if parity == "C" else l_periods)
 
         if teacher_id not in teacher_assignments:
             teacher_assignments[teacher_id] = []
@@ -173,6 +191,7 @@ def get_teacher_quota_view(conn: sqlite3.Connection, parity: str = "C", week_no:
             "periods_chan": c_periods,
             "periods_le": l_periods,
             "periods_week": w_period,
+            "weekly_periods": asgn_weekly,
         })
 
     view = []
@@ -181,16 +200,41 @@ def get_teacher_quota_view(conn: sqlite3.Connection, parity: str = "C", week_no:
         cap = base_cap - reduction
         load_c = loads_by_parity["C"].get(t.teacher_id, 0)
         load_l = loads_by_parity["L"].get(t.teacher_id, 0)
-        load_avg = (load_c + load_l) / 2
-        load_current = loads_by_week.get(t.teacher_id, load_c if parity == "C" else load_l)
+        load_avg_legacy = (load_c + load_l) / 2
+
+        t_weekly = loads_35_by_teacher.get(t.teacher_id, {w: 0 for w in range(1, 36)})
+        total_year_periods = sum(t_weekly.values())
+        load_full_year_avg = total_year_periods / 35.0
+        load_hk1_avg = sum(t_weekly[w] for w in range(1, 19)) / 18.0
+        load_hk2_avg = sum(t_weekly[w] for w in range(19, 36)) / 17.0
+
+        max_week = max(t_weekly, key=t_weekly.get) if t_weekly else 1
+        max_load = t_weekly.get(max_week, 0)
+        min_week = min(t_weekly, key=t_weekly.get) if t_weekly else 1
+        min_load = t_weekly.get(min_week, 0)
+
+        load_current = t_weekly.get(week_no, load_c if parity == "C" else load_l) if week_no is not None else (load_c if parity == "C" else load_l)
+
         view.append({
             "teacher_id": t.teacher_id, "name": t.name, "role": t.role,
             "reduction": reduction, "cap": cap, "load": load_current,
-            "load_chan": load_c, "load_le": load_l, "load_avg": load_avg,
-            "over": load_avg - cap,
+            "load_chan": load_c, "load_le": load_l, "load_avg": load_avg_legacy,
+            "load_full_year_avg": load_full_year_avg,
+            "load_hk1_avg": load_hk1_avg,
+            "load_hk2_avg": load_hk2_avg,
+            "weekly_loads": t_weekly,
+            "max_week": max_week,
+            "max_load": max_load,
+            "min_week": min_week,
+            "min_load": min_load,
+            "over": load_avg_legacy - cap,
             "over_current": load_current - cap,
-            "under": min_floor - (load_avg + reduction),
+            "over_hk1": load_hk1_avg - cap,
+            "over_hk2": load_hk2_avg - cap,
+            "over_year": load_full_year_avg - cap,
+            "under": min_floor - (load_avg_legacy + reduction),
             "under_current": min_floor - (load_current + reduction),
+            "under_year": min_floor - (load_full_year_avg + reduction),
             "must_monday": t.must_monday, "is_gvcn": t.is_gvcn,
             "assignments": teacher_assignments.get(t.teacher_id, []),
         })

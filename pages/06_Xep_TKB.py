@@ -57,13 +57,14 @@ else:
     st.write(f"Tuần hiện tại: **{'Chẵn' if parity == 'C' else 'Lẻ'}**, seed = {seed or '(ngẫu nhiên mỗi lần chạy)'}")
 
 quota_view = repo.get_teacher_quota_view(conn, parity=parity, week_no=chosen_week)
-over = [q for q in quota_view if q["cap"] > 0 and q["over"] > 0]
+over = [q for q in quota_view if q["cap"] > 0 and q["over_current"] > 0]
 proceed_anyway = True
 if over:
+    week_label = f"Tuần {chosen_week}" if chosen_week is not None else (f"Tuần {'Chẵn' if parity == 'C' else 'Lẻ'}")
     st.warning(
-        "Các GV vượt định mức (xếp TKB không tự giảm được tải, cần sửa "
+        f"Các GV vượt định mức trong {week_label} (xếp TKB không tự giảm được tải, cần sửa "
         "Phân công trước nếu muốn):\n"
-        + "\n".join(f"- {q['name']}: Tải {q['load']}/{q['cap']} (vượt {q['over_current']})" for q in over)
+        + "\n".join(f"- {q['name']}: Tải {q['load']}/{q['cap']} (vượt +{q['over_current']})" for q in over)
     )
     proceed_anyway = st.checkbox("Vẫn tiếp tục xếp dù vượt định mức")
 
@@ -416,12 +417,23 @@ with st.expander("📅 Xếp nhiều tuần cùng lúc", expanded=False):
         key="batch_extra_kep_select",
     )
     batch_extra_kep_ids = frozenset(s.subject_id for s in subjects if s.name in batch_extra_kep_names)
-    batch_hdtn_thematic_week = st.checkbox(
-        "Các tuần này tổ chức chuyên đề (HDTN dồn 3 tiết liền kề toàn trường, bỏ ghim chào cờ + SHL)",
-        key="batch_hdtn_thematic_week",
-    )
+    batch_over_warnings = []
+    for wn in batch_week_nos:
+        b_par = "C" if wn % 2 == 0 else "L"
+        b_qv = repo.get_teacher_quota_view(conn, parity=b_par, week_no=wn)
+        b_over = [q for q in b_qv if q["cap"] > 0 and q["over_current"] > 0]
+        if b_over:
+            batch_over_warnings.append(
+                f"**Tuần {wn}** ({'Chẵn' if b_par == 'C' else 'Lẻ'}): "
+                + ", ".join(f"{q['name']} ({q['load']}/{q['cap']})" for q in b_over)
+            )
 
-    if st.button("🚀 Xếp các tuần đã chọn", disabled=not batch_week_nos, type="primary"):
+    batch_proceed_anyway = True
+    if batch_over_warnings:
+        st.warning("Các tuần có GV vượt định mức:\n\n" + "\n\n".join(f"- {w}" for w in batch_over_warnings))
+        batch_proceed_anyway = st.checkbox("Vẫn tiếp tục xếp các tuần dù có GV vượt định mức", key="batch_proceed_anyway")
+
+    if st.button("🚀 Xếp các tuần đã chọn", disabled=not batch_week_nos or not batch_proceed_anyway, type="primary"):
         batch_results = {}
         history = repo.list_seed_history(conn)
         seed_lookup = {h["week_no"]: h["seed"] for h in history}
