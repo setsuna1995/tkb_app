@@ -80,20 +80,37 @@ def get_teacher_quota_view(conn: sqlite3.Connection, parity: str) -> list:
     """Recreates DinhMuc_GV: cap = trần chuẩn - reduction(role);
     load = sum(assignments x periods_per_week) cho tuần `parity`.
     """
+    from data.repositories.entities import list_classes, list_subjects
     base_cap = get_base_cap(conn)
     min_floor = get_min_floor(conn)
     reductions = get_role_reduction(conn)
     teachers = list_teachers(conn)
+    classes = list_classes(conn)
+    subjects = list_subjects(conn)
+    class_map = {c.class_id: c.name for c in classes}
+    subject_map = {s.subject_id: s.name for s in subjects}
     ppw = get_periods_per_week(conn)
     assignments = get_assignments(conn)
 
     loads_by_parity = {"C": {}, "L": {}}
+    teacher_assignments = {}
     for (subject_id, class_id), teacher_id in assignments.items():
         if teacher_id is None:
             continue
-        for par in ("C", "L"):
-            periods = ppw.get((subject_id, class_id, par), 0)
-            loads_by_parity[par][teacher_id] = loads_by_parity[par].get(teacher_id, 0) + periods
+        c_periods = ppw.get((subject_id, class_id, "C"), 0)
+        l_periods = ppw.get((subject_id, class_id, "L"), 0)
+        loads_by_parity["C"][teacher_id] = loads_by_parity["C"].get(teacher_id, 0) + c_periods
+        loads_by_parity["L"][teacher_id] = loads_by_parity["L"].get(teacher_id, 0) + l_periods
+        if teacher_id not in teacher_assignments:
+            teacher_assignments[teacher_id] = []
+        teacher_assignments[teacher_id].append({
+            "class_id": class_id,
+            "class_name": class_map.get(class_id, f"Lớp #{class_id}"),
+            "subject_id": subject_id,
+            "subject_name": subject_map.get(subject_id, f"Môn #{subject_id}"),
+            "periods_chan": c_periods,
+            "periods_le": l_periods,
+        })
 
     view = []
     for t in teachers:
@@ -108,8 +125,11 @@ def get_teacher_quota_view(conn: sqlite3.Connection, parity: str) -> list:
             "reduction": reduction, "cap": cap, "load": load_current,
             "load_chan": load_c, "load_le": load_l, "load_avg": load_avg,
             "over": load_avg - cap,
+            "over_current": load_current - cap,
             "under": min_floor - (load_avg + reduction),
+            "under_current": min_floor - (load_current + reduction),
             "must_monday": t.must_monday, "is_gvcn": t.is_gvcn,
+            "assignments": teacher_assignments.get(t.teacher_id, []),
         })
     return view
 

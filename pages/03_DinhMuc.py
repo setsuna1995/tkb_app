@@ -121,23 +121,28 @@ with tab_gv:
 
         gv_rows = []
         for v in view:
+            c_over = round(float(v["load_chan"] - v["cap"]), 1)
+            l_over = round(float(v["load_le"] - v["cap"]), 1)
+            avg_over = round(float(v["over"]), 1)
             gv_rows.append({
                 "teacher_id": v["teacher_id"],
                 "Giáo viên": v["name"],
                 "Chức vụ / Kiêm nhiệm": v["role"] or "",
                 "Giảm trừ (tiết)": int(v["reduction"]),
                 "Trần định mức": int(v["cap"]),
-                "Tải tuần " + ("Chẵn" if cur_parity == "C" else "Lẻ"): int(v["load"]),
+                "Tải tuần Chẵn": int(v["load_chan"]),
+                "Tải tuần Lẻ": int(v["load_le"]),
                 "Tải TB 2 tuần": round(float(v["load_avg"]), 1),
-                "Vượt trần": round(float(v["over"]), 1),
-                "Dưới sàn": round(float(v["under"]), 1),
+                "Lệch tuần Chẵn": f"{'+' if c_over > 0 else ''}{c_over}" if c_over != 0 else "0",
+                "Lệch tuần Lẻ": f"{'+' if l_over > 0 else ''}{l_over}" if l_over != 0 else "0",
+                "Lệch TB 2 tuần": f"{'+' if avg_over > 0 else ''}{avg_over}" if avg_over != 0 else "0",
             })
         gv_df = pd.DataFrame(gv_rows)
 
-        st.markdown("**Bảng phân bổ định mức & giảm trừ theo từng Giáo viên**")
+        st.markdown("**Bảng phân bổ định mức & tải giảng dạy theo từng tuần của Giáo viên**")
         st.caption(
-            "Bạn có thể **chỉnh sửa trực tiếp** cột *Chức vụ / Kiêm nhiệm* và *Giảm trừ (tiết)* cho từng GV, "
-            "sau đó bấm nút **💾 Lưu định mức & giảm trừ GV** phía dưới."
+            "Hệ thống tính tải chính xác theo **định mức số tiết của từng tuần** (khi môn KHTN dồn tiết hoặc chia đều giữa các phân môn). "
+            "Bạn có thể **chỉnh sửa trực tiếp** cột *Chức vụ / Kiêm nhiệm* và *Giảm trừ (tiết)* rồi bấm **💾 Lưu định mức & giảm trừ GV**."
         )
 
         gv_editor_config = {
@@ -151,10 +156,12 @@ with tab_gv:
                 help="Tổng số tiết giảm trừ trực tiếp của GV (Trần định mức = Trần chuẩn − Giảm trừ)"
             ),
             "Trần định mức": st.column_config.NumberColumn(disabled=True, format="%d"),
-            "Tải tuần " + ("Chẵn" if cur_parity == "C" else "Lẻ"): st.column_config.NumberColumn(disabled=True, format="%d"),
+            "Tải tuần Chẵn": st.column_config.NumberColumn(disabled=True, format="%d"),
+            "Tải tuần Lẻ": st.column_config.NumberColumn(disabled=True, format="%d"),
             "Tải TB 2 tuần": st.column_config.NumberColumn(disabled=True, format="%.1f"),
-            "Vượt trần": st.column_config.NumberColumn(disabled=True, format="%.1f"),
-            "Dưới sàn": st.column_config.NumberColumn(disabled=True, format="%.1f"),
+            "Lệch tuần Chẵn": st.column_config.TextColumn(disabled=True, help="Số tiết thừa (+) hoặc thiếu (−) so với định mức ở tuần Chẵn"),
+            "Lệch tuần Lẻ": st.column_config.TextColumn(disabled=True, help="Số tiết thừa (+) hoặc thiếu (−) so với định mức ở tuần Lẻ"),
+            "Lệch TB 2 tuần": st.column_config.TextColumn(disabled=True, help="Số tiết thừa (+) hoặc thiếu (−) so với định mức trung bình 2 tuần"),
         }
 
         edited_gv = st.data_editor(
@@ -180,10 +187,33 @@ with tab_gv:
             st.rerun()
 
         st.caption(
-            f"Trần định mức = {base_cap} − Giảm trừ. Tải = tổng tiết đã phân công (PhanCong × SoTiet). "
-            "Vượt trần / Dưới sàn được xét theo TRUNG BÌNH tải 2 tuần Chẵn và Lẻ. "
-            f"Sàn tối thiểu: (Tải TB + Giảm trừ) phải ≥ {min_floor}."
+            f"Trần định mức = {base_cap} − Giảm trừ. Tải = tổng số tiết dạy thực tế theo từng tuần (Phân công × Số tiết tuần). "
+            f"Sàn tối thiểu cảnh báo: (Tải TB + Giảm trừ) phải ≥ {min_floor}."
         )
+
+        with st.expander("🔬 Chi tiết phân công môn & số tiết theo tuần của từng Giáo viên (KHTN, LS&ĐL, Toán, Văn...)", expanded=False):
+            teacher_choices = [v["name"] for v in view if v.get("assignments")]
+            if not teacher_choices:
+                st.info("Chưa có giáo viên nào được phân công giảng dạy.")
+            else:
+                chosen_t_name = st.selectbox("Chọn Giáo viên để xem chi tiết:", teacher_choices, key="detail_t_select")
+                chosen_v = next((v for v in view if v["name"] == chosen_t_name), None)
+                if chosen_v and chosen_v.get("assignments"):
+                    detail_rows = []
+                    for a in chosen_v["assignments"]:
+                        detail_rows.append({
+                            "Lớp": a["class_name"],
+                            "Môn học": a["subject_name"],
+                            "Tiết tuần Chẵn": a["periods_chan"],
+                            "Tiết tuần Lẻ": a["periods_le"],
+                            "Tiết TB / tuần": (a["periods_chan"] + a["periods_le"]) / 2,
+                        })
+                    st.dataframe(pd.DataFrame(detail_rows), hide_index=True, use_container_width=True)
+                    st.caption(
+                        f"👉 **Tổng kết {chosen_t_name}**: Dạy **{chosen_v['load_chan']}** tiết (tuần Chẵn), "
+                        f"**{chosen_v['load_le']}** tiết (tuần Lẻ) — Trung bình: **{chosen_v['load_avg']:.1f}** tiết/tuần. "
+                        f"Định mức trần: **{chosen_v['cap']}** tiết."
+                    )
 
     with st.expander("Mức giảm trừ mặc định theo tên chức vụ", expanded=False):
         st.caption("Các mức giảm trừ tham chiếu chung cho toàn trường:")
