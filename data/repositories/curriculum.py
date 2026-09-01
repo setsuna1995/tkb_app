@@ -11,7 +11,11 @@ DEFAULT_MIN_FLOOR = 16
 
 
 def get_base_cap(conn: sqlite3.Connection) -> int:
-    return int(get_meta(conn, "base_cap") or DEFAULT_BASE_CAP)
+    val = get_meta(conn, "base_cap")
+    try:
+        return int(val) if val is not None and str(val).strip() != "" else DEFAULT_BASE_CAP
+    except (ValueError, TypeError):
+        return DEFAULT_BASE_CAP
 
 
 def set_base_cap(conn: sqlite3.Connection, value: int) -> None:
@@ -19,7 +23,11 @@ def set_base_cap(conn: sqlite3.Connection, value: int) -> None:
 
 
 def get_min_floor(conn: sqlite3.Connection) -> int:
-    return int(get_meta(conn, "min_floor") or DEFAULT_MIN_FLOOR)
+    val = get_meta(conn, "min_floor")
+    try:
+        return int(val) if val is not None and str(val).strip() != "" else DEFAULT_MIN_FLOOR
+    except (ValueError, TypeError):
+        return DEFAULT_MIN_FLOOR
 
 
 def set_min_floor(conn: sqlite3.Connection, value: int) -> None:

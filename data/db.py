@@ -141,9 +141,15 @@ DEFAULT_ROLE_REDUCTION = {
 
 
 def get_connection(db_path: str) -> sqlite3.Connection:
-    conn = sqlite3.connect(db_path, check_same_thread=False)
+    conn = sqlite3.connect(db_path, check_same_thread=False, timeout=30.0)
     conn.row_factory = sqlite3.Row
     conn.execute("PRAGMA foreign_keys = ON")
+    conn.execute("PRAGMA busy_timeout = 30000")
+    if db_path != ":memory:":
+        try:
+            conn.execute("PRAGMA journal_mode = WAL")
+        except Exception:
+            pass
     return conn
 
 

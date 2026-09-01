@@ -161,11 +161,20 @@ def create_school(name: str) -> str:
     return slug
 
 
-@st.cache_resource
 def get_conn(school_slug: str):
     SCHOOLS_DIR.mkdir(exist_ok=True)
+    conn_key = f"db_conn_{school_slug}"
+    if conn_key in st.session_state:
+        conn = st.session_state[conn_key]
+        try:
+            conn.execute("SELECT 1")
+            return conn
+        except Exception:
+            pass
+
     connection = db.get_connection(str(SCHOOLS_DIR / f"{school_slug}.db"))
     db.init_db(connection)
+    st.session_state[conn_key] = connection
     return connection
 
 
