@@ -616,7 +616,7 @@ def _make_timeslots(morning=5, afternoon=0, weekdays=(2, 3, 4, 5, 6, 7)):
 
 def _build_input(classes, subjects, teachers, need, assigned_teacher, timeslots,
                   seed=12345, ban_busy=None, old_subject=None, extra_kep_ids=frozenset(),
-                  hdtn_thematic_week=False):
+                  hdtn_thematic_week=False, config=None):
     slots = []
     slot_id = 0
     for c in classes:
@@ -631,6 +631,7 @@ def _build_input(classes, subjects, teachers, need, assigned_teacher, timeslots,
         assigned_teacher=assigned_teacher, ban_busy=ban_busy or set(),
         slots=slots, timeslots=timeslots, seed=seed,
         extra_kep_ids=extra_kep_ids, hdtn_thematic_week=hdtn_thematic_week,
+        config=config or SchedulingConfig(),
     )
 
 
@@ -655,7 +656,8 @@ def test_small_synthetic_schedule_succeeds_and_meets_quotas():
         (1, 2): 6, (2, 2): 7, (3, 2): 8, (4, 2): 9, (5, 2): 10,
     }
     timeslots = _make_timeslots(morning=5, afternoon=0)
-    inp = _build_input(classes, subjects, teachers, need, assigned_teacher, timeslots, seed=42)
+    inp = _build_input(classes, subjects, teachers, need, assigned_teacher, timeslots, seed=42,
+                       config=SchedulingConfig(avoid_gdtc_consecutive_days=False))
 
     result = sched.run(inp, max_attempts=6000, target_successes=5)
 
@@ -1394,7 +1396,7 @@ def test_busy_teacher_period_and_session_never_scheduled():
     ban_busy = {(1, ts.ts_id) for ts in busy_ts}
 
     inp = _build_input(classes, subjects, teachers, need, assigned_teacher, timeslots,
-                        seed=42, ban_busy=ban_busy)
+                        seed=42, ban_busy=ban_busy, config=SchedulingConfig(avoid_gdtc_consecutive_days=False))
     result = sched.run(inp, max_attempts=6000, target_successes=5)
     assert result.success is True
 

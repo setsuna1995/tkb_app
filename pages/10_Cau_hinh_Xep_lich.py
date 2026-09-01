@@ -167,6 +167,11 @@ mandatory_morning_selection = st.multiselect(
     format_func=lambda w: f"{WEEKDAY_NAMES[w]} Sáng",
     help="Các buổi sáng này (mặc định Thứ 2, Thứ 5, Thứ 6) toàn thể GV bắt buộc có mặt, cấm chọn làm buổi nghỉ và ưu tiên xếp tiết dạy.",
 )
+avoid_gdtc_consecutive = st.checkbox(
+    "GDTC (Thể dục) không xếp vào 2 ngày liên tiếp",
+    value=getattr(config, "avoid_gdtc_consecutive_days", True),
+    help="Ràng buộc CỨNG: GDTC của 1 lớp không bao giờ được xếp vào 2 ngày liền kề trong tuần.",
+)
 
 if st.button("💾 Lưu cấu hình", type="primary"):
     new_config = SchedulingConfig(
@@ -188,6 +193,7 @@ if st.button("💾 Lưu cấu hình", type="primary"):
         avoid_teacher_lone_periods=bool(avoid_teacher_lone_periods),
         balance_afternoon_teachers=bool(balance_afternoon_teachers),
         mandatory_morning_weekdays=tuple(sorted(mandatory_morning_selection)),
+        avoid_gdtc_consecutive_days=bool(avoid_gdtc_consecutive),
     )
     repo.set_scheduling_config(conn, new_config)
     st.success("Đã lưu cấu hình xếp lịch.")

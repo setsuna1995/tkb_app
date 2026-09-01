@@ -672,6 +672,7 @@ def get_scheduling_config(conn: sqlite3.Connection) -> SchedulingConfig:
     avoid_teacher_lone_periods_raw = get_meta(conn, "sched_avoid_teacher_lone_periods")
     balance_afternoon_teachers_raw = get_meta(conn, "sched_balance_afternoon_teachers")
     mandatory_mornings_raw = get_meta(conn, "sched_mandatory_morning_weekdays")
+    avoid_gdtc_consecutive_raw = get_meta(conn, "sched_avoid_gdtc_consecutive_days")
     return SchedulingConfig(
         gdtc_avoid_period=int(get_meta(conn, "sched_gdtc_avoid_period") or default.gdtc_avoid_period),
         chao_co_weekday=int(get_meta(conn, "sched_chao_co_weekday") or default.chao_co_weekday),
@@ -726,6 +727,10 @@ def get_scheduling_config(conn: sqlite3.Connection) -> SchedulingConfig:
             _parse_weekday_tuple(mandatory_mornings_raw) if mandatory_mornings_raw is not None
             else default.mandatory_morning_weekdays
         ),
+        avoid_gdtc_consecutive_days=(
+            bool(int(avoid_gdtc_consecutive_raw)) if avoid_gdtc_consecutive_raw is not None
+            else default.avoid_gdtc_consecutive_days
+        ),
     )
 
 
@@ -748,6 +753,7 @@ def set_scheduling_config(conn: sqlite3.Connection, config: SchedulingConfig) ->
     set_meta(conn, "sched_avoid_teacher_lone_periods", str(int(config.avoid_teacher_lone_periods)))
     set_meta(conn, "sched_balance_afternoon_teachers", str(int(config.balance_afternoon_teachers)))
     set_meta(conn, "sched_mandatory_morning_weekdays", _format_weekday_tuple(config.mandatory_morning_weekdays))
+    set_meta(conn, "sched_avoid_gdtc_consecutive_days", str(int(config.avoid_gdtc_consecutive_days)))
 
 
 

@@ -130,7 +130,8 @@ def _feasible(class_id: int, ts: TimeSlot, subject_id: int, teacher_id: int,
         return False
     
     non_consecutive = getattr(config, "non_consecutive_subject_ids", None) or frozenset()
-    if subject_id in non_consecutive:
+    avoid_gdtc = getattr(config, "avoid_gdtc_consecutive_days", True)
+    if (subject_id in non_consecutive) or (avoid_gdtc and subject_id == role_index.gdtc_id):
         if ts.weekday > 2 and state.placed.get((class_id, subject_id, ts.weekday - 1)):
             return False
         if ts.weekday < 7 and state.placed.get((class_id, subject_id, ts.weekday + 1)):
@@ -812,6 +813,8 @@ def run(inp: SchedulingInput, *, max_attempts: int = SO_LAN_THU,
         target_successes: int = SO_PA_TOT, lock_threshold: int = NGUONG_KHOA) -> ScheduleResult:
     role_index = resolve_roles(inp.subjects, inp.extra_kep_ids, inp.hdtn_thematic_week, inp.config.single_pair_subject_ids)
     config = inp.config
+    avoid_gdtc = getattr(config, "avoid_gdtc_consecutive_days", True)
+    non_consecutive = getattr(config, "non_consecutive_subject_ids", None) or frozenset()
     subject_class_allowed_cells = inp.subject_class_allowed_cells
     assigned_teacher = _build_effective_assigned_teacher(inp)
     teachers_by_id = {t.teacher_id: t for t in inp.teachers}
@@ -994,6 +997,16 @@ def run(inp: SchedulingInput, *, max_attempts: int = SO_LAN_THU,
                                      subject_class_allowed_cells)
             if _has_unpaired_block(inp, state, role_index):
                 done = False
+
+        if done and (avoid_gdtc or non_consecutive):
+            for (cid, sid, wd), pos_list in state.placed.items():
+                if pos_list and ((sid in non_consecutive) or (avoid_gdtc and sid == role_index.gdtc_id)):
+                    if wd > 2 and state.placed.get((cid, sid, wd - 1)):
+                        done = False
+                        break
+                    if wd < 7 and state.placed.get((cid, sid, wd + 1)):
+                        done = False
+                        break
 
         if done:
             cells_changed = 0

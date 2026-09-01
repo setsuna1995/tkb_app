@@ -61,6 +61,7 @@ def test_set_then_get_scheduling_config_round_trips_teacher_quality_fields(conn)
         avoid_teacher_lone_periods=False,
         balance_afternoon_teachers=False,
         mandatory_morning_weekdays=(2, 3, 5, 6),
+        avoid_gdtc_consecutive_days=False,
     )
     repo.set_scheduling_config(conn, custom)
     loaded = repo.get_scheduling_config(conn)
@@ -68,6 +69,7 @@ def test_set_then_get_scheduling_config_round_trips_teacher_quality_fields(conn)
     assert loaded.avoid_teacher_lone_periods is False
     assert loaded.balance_afternoon_teachers is False
     assert loaded.mandatory_morning_weekdays == (2, 3, 5, 6)
+    assert loaded.avoid_gdtc_consecutive_days is False
 
 
 

@@ -110,6 +110,7 @@ class SchedulingConfig:
     avoid_teacher_lone_periods: bool = True  # Tránh GV chỉ có 1 tiết/ngày hoặc sáng 1 tiết + chiều 1 tiết
     balance_afternoon_teachers: bool = True  # Cân đối buổi chiều, tránh GV nghỉ full chiều khi dạy lớp có tiết chiều
     mandatory_morning_weekdays: tuple = (2, 5, 6)  # Các sáng bắt buộc toàn thể GV có mặt/đi làm
+    avoid_gdtc_consecutive_days: bool = True  # GDTC của 1 lớp không xếp ở 2 hôm liền kề
 
 
 

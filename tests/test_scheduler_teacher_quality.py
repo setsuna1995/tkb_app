@@ -28,7 +28,7 @@ def test_gdtc_auto_non_consecutive_days():
     state.occupied[(101, 4, "S", 1)] = True
 
     # Check feasibility for Tuesday (day 3, consecutive to Monday day 2) -> must be False
-    config = SchedulingConfig(non_consecutive_subject_ids=frozenset({1}))
+    config = SchedulingConfig(avoid_gdtc_consecutive_days=True)
     assert sched._feasible(101, ts_tue, 1, 10, state, role_index, config=config) is False
 
     # Check feasibility for Wednesday (day 4, non-consecutive to Monday day 2) -> must be True
@@ -147,4 +147,30 @@ def test_teacher_lone_period_and_split_day_scoring():
     # Teacher 20 (who has no morning period) is preferred over Teacher 10 (who would get 1S + 1C split day)
     assert pick_c is not None
     assert pick_c[0] == 3  # Subject 3 (Teacher 20) preferred over Subject 1 (Teacher 10)
+
+
+def test_validation_helpers():
+    from core import validation as val
+    slot1 = Slot(1, 101, TimeSlot(1, 2, "S", 1))
+    slot2 = Slot(2, 101, TimeSlot(2, 2, "S", 4))  # creates gap 2-3 for Teacher 10
+    slot3 = Slot(3, 101, TimeSlot(3, 3, "S", 1))  # Subject 100 on Tuesday (day 3)
+    slot4 = Slot(4, 101, TimeSlot(4, 4, "S", 1))  # Subject 100 on Wednesday (day 4) -> consecutive!
+
+    slots = [slot1, slot2, slot3, slot4]
+    assignment = {1: 100, 2: 100, 3: 100, 4: 100}
+    assigned_teacher = {(100, 101): 10}
+
+    # Find teacher gaps
+    gaps = val.find_teacher_gaps(slots, assignment, assigned_teacher)
+    assert len(gaps) == 1
+    assert gaps[0][0] == 10  # Teacher 10
+    assert gaps[0][3] == [1, 4]
+
+    # Find consecutive subject days (days 2, 3, 4 -> pairs (2,3) and (3,4))
+    consec = val.find_consecutive_subject_days(slots, assignment, {100})
+    assert len(consec) == 2
+    assert consec[0] == (101, 100, 2, 3)
+    assert consec[1] == (101, 100, 3, 4)
+
+
 
