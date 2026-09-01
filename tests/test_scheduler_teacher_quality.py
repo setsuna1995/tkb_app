@@ -3,7 +3,7 @@ import pytest
 
 from core import scheduler as sched
 from core.models import (
-    ROLE_GDTC, ROLE_HDTN, ROLE_THUONG, ClassRoom,
+    ROLE_GDTC, ROLE_HDTN, ROLE_KEP, ROLE_THUONG, ClassRoom,
     SchedulingConfig, SchedulingInput, Slot, Subject, Teacher, TimeSlot,
 )
 from core.roles import resolve_roles
@@ -233,4 +233,86 @@ def test_gdtc_allowed_periods_feasibility():
     assert sched._feasible(101, ts_c4, 1, 10, _state_for_period("C", 4), role_index, config=config) is False
 
 
+def test_single_pair_overrides_role_kep():
+    """When a subject is listed in single_pair_subject_ids, it should be treated as single_pair (1 pair only)
+    even if its role_code was set to ROLE_KEP (2) or ROLE_NANG_KEP (3)."""
+    subjects = [
+        Subject(1, "Van", ROLE_KEP),
+        Subject(2, "HDTN", ROLE_HDTN),
+    ]
+    # Without single_pair_subject_ids: subject 1 is in kep_ids
+    role_idx_default = resolve_roles(subjects)
+    assert 1 in role_idx_default.kep_ids
+    assert 1 not in role_idx_default.single_pair_ids
 
+    # With single_pair_subject_ids={1}: subject 1 MUST be moved to single_pair_ids
+    role_idx_single_pair = resolve_roles(subjects, single_pair_subject_ids=frozenset({1}))
+    assert 1 in role_idx_single_pair.single_pair_ids
+    assert 1 not in role_idx_single_pair.kep_ids
+    assert role_idx_single_pair.block_size[1] == 2
+
+
+def test_balance_afternoon_teachers_penalty():
+    """When balance_afternoon_teachers is True, teachers who teach classes with afternoon slots
+    but are assigned zero afternoon periods in the entire week should incur a quality penalty."""
+    config_on = SchedulingConfig(balance_afternoon_teachers=True)
+    config_off = SchedulingConfig(balance_afternoon_teachers=False)
+
+    # Class 101 has afternoon slots (slot 5 is in session "C")
+    slot1 = Slot(1, 101, TimeSlot(1, 2, "S", 1))
+    slot2 = Slot(2, 101, TimeSlot(2, 3, "S", 1))
+    slot3 = Slot(3, 101, TimeSlot(3, 4, "S", 1))
+    slot4 = Slot(4, 101, TimeSlot(4, 5, "S", 1))
+    slot5 = Slot(5, 101, TimeSlot(5, 2, "C", 1))
+
+    # Teacher 10 teaches class 101 (4 periods in morning, 0 in afternoon)
+    # Teacher 20 teaches class 101 at slot 5 (afternoon)
+    slots = [slot1, slot2, slot3, slot4, slot5]
+    assigned = {1: 100, 2: 100, 3: 100, 4: 100, 5: 101}
+    slot_teacher = {1: 10, 2: 10, 3: 10, 4: 10, 5: 20}
+
+    # Calling _teacher_quality_penalty:
+    pen_on = sched._teacher_quality_penalty(slots, assigned, slot_teacher, config_on)
+    pen_off = sched._teacher_quality_penalty(slots, assigned, slot_teacher, config_off)
+
+    assert pen_on > pen_off, f"Expected pen_on ({pen_on}) > pen_off ({pen_off})"
+
+
+def test_validation_new_helpers():
+    from core import validation as val
+
+    # 1. Test find_morning_only_violations
+    slot_s = Slot(1, 101, TimeSlot(1, 2, "S", 1))
+    slot_c = Slot(2, 101, TimeSlot(2, 2, "C", 1))
+    assign = {1: 10, 2: 10} # Subject 10 placed in morning and afternoon
+    morning_violations = val.find_morning_only_violations([slot_s, slot_c], assign, {10})
+    assert len(morning_violations) == 1
+    assert morning_violations[0] == (101, 10, 2, "C", 1)
+
+    # 2. Test find_max_heavy_violations
+    # 4 consecutive heavy periods in Morning
+    heavy_slots = [
+        Slot(1, 101, TimeSlot(1, 2, "S", 1)),
+        Slot(2, 101, TimeSlot(2, 2, "S", 2)),
+        Slot(3, 101, TimeSlot(3, 2, "S", 3)),
+        Slot(4, 101, TimeSlot(4, 2, "S", 4)),
+    ]
+    heavy_assign = {1: 10, 2: 10, 3: 11, 4: 11} # Subjects 10 & 11 are heavy
+    heavy_violations = val.find_max_heavy_violations(heavy_slots, heavy_assign, {10, 11}, max_consecutive=3)
+    assert len(heavy_violations) == 1
+    assert heavy_violations[0] == (101, 2, "S", 1, 4)
+
+    # 3. Test find_subject_class_rule_violations
+    # Subject 10 in class 101 allowed ONLY on (2, "S")
+    rules = [
+        {"subject_id": 10, "class_ids": [101], "cells": {(2, "S")}}
+    ]
+    # Placed on (2, "S") -> Valid, Placed on (3, "S") -> Violation
+    rule_slots = [
+        Slot(1, 101, TimeSlot(1, 2, "S", 1)),
+        Slot(2, 101, TimeSlot(2, 3, "S", 1)),
+    ]
+    rule_assign = {1: 10, 2: 10}
+    rule_violations = val.find_subject_class_rule_violations(rule_slots, rule_assign, rules)
+    assert len(rule_violations) == 1
+    assert rule_violations[0] == (101, 10, 3, "S", 1)

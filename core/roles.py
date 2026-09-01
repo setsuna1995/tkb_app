@@ -38,9 +38,9 @@ def resolve_roles(subjects: list, extra_kep_ids: frozenset = frozenset(),
         )
         
     for subject_id in single_pair_subject_ids:
-        if subject_id not in idx.kep_ids:
-            idx.single_pair_ids.add(subject_id)
-            idx.block_size[subject_id] = 2
+        idx.kep_ids.discard(subject_id)
+        idx.single_pair_ids.add(subject_id)
+        idx.block_size[subject_id] = 2
 
 
     # Môn kép (cố định hoặc "chỉ tuần này") cần khối 2 tiết liền kề. "Tuần chuyên đề"

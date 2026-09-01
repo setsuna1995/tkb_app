@@ -117,3 +117,79 @@ def find_invalid_gdtc_periods(slots: list, assignment: dict, gdtc_id: int,
     return violations
 
 
+def find_morning_only_violations(slots: list, assignment: dict, morning_only_ids: set) -> list:
+    """Returns [(class_id, subject_id, weekday, session, period), ...] for any morning-only
+    subject placed in the afternoon."""
+    violations = []
+    for slot in slots:
+        subject_id = assignment.get(slot.slot_id)
+        if subject_id is not None and subject_id in morning_only_ids and slot.ts.session == "C":
+            violations.append((slot.class_id, subject_id, slot.ts.weekday, slot.ts.session, slot.ts.period))
+    return violations
+
+
+def find_max_heavy_violations(slots: list, assignment: dict, heavy_ids: set, max_consecutive: int = 3) -> list:
+    """Returns [(class_id, weekday, session, start_period, length), ...] for any continuous run of
+    heavy subjects in a session exceeding max_consecutive."""
+    # Group heavy periods by (class_id, weekday, session)
+    class_session_heavy = defaultdict(set)
+    for slot in slots:
+        subject_id = assignment.get(slot.slot_id)
+        if subject_id is not None and subject_id in heavy_ids:
+            class_session_heavy[(slot.class_id, slot.ts.weekday, slot.ts.session)].add(slot.ts.period)
+
+    violations = []
+    for (class_id, weekday, session), periods in class_session_heavy.items():
+        sorted_p = sorted(periods)
+        current_run = []
+        for p in sorted_p:
+            if not current_run or p == current_run[-1] + 1:
+                current_run.append(p)
+            else:
+                if len(current_run) > max_consecutive:
+                    violations.append((class_id, weekday, session, current_run[0], len(current_run)))
+                current_run = [p]
+        if len(current_run) > max_consecutive:
+            violations.append((class_id, weekday, session, current_run[0], len(current_run)))
+    return violations
+
+
+def find_subject_class_rule_violations(slots: list, assignment: dict, subject_class_rules: list) -> list:
+    """Returns [(class_id, subject_id, weekday, session, period), ...] for any placement
+    violating subject_class_rules (allowed (weekday, session) cells)."""
+    violations = []
+    # Build lookup: (subject_id, class_id) -> set of allowed (weekday, session)
+    allowed_map = {}
+    for rule in subject_class_rules:
+        sid = rule["subject_id"]
+        for cid in rule.get("class_ids", []):
+            allowed_map[(sid, cid)] = set(rule.get("cells", []))
+
+    for slot in slots:
+        subject_id = assignment.get(slot.slot_id)
+        if subject_id is not None:
+            allowed = allowed_map.get((subject_id, slot.class_id))
+            if allowed is not None and (slot.ts.weekday, slot.ts.session) not in allowed:
+                violations.append((slot.class_id, subject_id, slot.ts.weekday, slot.ts.session, slot.ts.period))
+    return violations
+
+
+def find_single_pair_violations(slots: list, assignment: dict, single_pair_ids: set) -> list:
+    """Returns [(class_id, subject_id, [pair_days], [excess_days]), ...] for any single-pair
+    subject that has more than 1 pair in a week or daily count > 2."""
+    class_subj_day_count = defaultdict(lambda: defaultdict(int))
+    for slot in slots:
+        subject_id = assignment.get(slot.slot_id)
+        if subject_id is not None and subject_id in single_pair_ids:
+            class_subj_day_count[(slot.class_id, subject_id)][slot.ts.weekday] += 1
+
+    violations = []
+    for (class_id, subject_id), day_counts in class_subj_day_count.items():
+        pair_days = [wd for wd, c in day_counts.items() if c >= 2]
+        invalid_days = [wd for wd, c in day_counts.items() if c > 2]
+        if len(pair_days) > 1 or invalid_days:
+            violations.append((class_id, subject_id, pair_days, invalid_days))
+    return violations
+
+
+

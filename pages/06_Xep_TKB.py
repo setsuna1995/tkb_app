@@ -2,10 +2,12 @@ import pandas as pd
 import streamlit as st
 
 from core import scheduler as sched
-from core.models import ROLE_GDTC, ROLE_HDTN, ROLE_KEP, ROLE_NANG_KEP, WEEKDAY_NAMES, WEEKDAYS
+from core.models import ROLE_GDTC, ROLE_HDTN, ROLE_KEP, ROLE_NANG, ROLE_NANG_KEP, WEEKDAY_NAMES, WEEKDAYS
 from core.validation import (
     compute_quota_diff, find_consecutive_subject_days, find_invalid_gdtc_periods,
-    find_teacher_conflicts, find_teacher_unavailability_violations,
+    find_max_heavy_violations, find_morning_only_violations, find_single_pair_violations,
+    find_subject_class_rule_violations, find_teacher_conflicts, find_teacher_gaps,
+    find_teacher_unavailability_violations,
 )
 from data import repository as repo
 from ui_common import get_conn, require_auth, require_school, sidebar_backup_export, sidebar_school_switcher
@@ -98,13 +100,13 @@ if result is not None:
 
         conflicts = find_teacher_conflicts(inp.slots, result.assignment, inp.assigned_teacher)
         if conflicts:
-            st.error(f"Phát hiện {len(conflicts)} trường hợp GV trùng lịch (không nên xảy ra, báo lỗi này).")
+            st.error(f"❌ Phát hiện {len(conflicts)} trường hợp GV trùng lịch.")
 
         busy_violations = find_teacher_unavailability_violations(
             inp.slots, result.assignment, inp.assigned_teacher, inp.ban_busy
         )
         if busy_violations:
-            st.error(f"Phát hiện {len(busy_violations)} tiết xếp vào giờ GV đã khai báo bận (GV_Bận).")
+            st.error(f"❌ Phát hiện {len(busy_violations)} tiết xếp vào giờ GV đã khai báo bận (GV_Bận).")
 
         gdtc_id = next((s.subject_id for s in inp.subjects if s.role_code == ROLE_GDTC), None)
         if gdtc_id:
@@ -114,11 +116,61 @@ if result is not None:
                 getattr(inp.config, "gdtc_afternoon_allowed_periods", (2, 3)),
             )
             if gdtc_period_violations:
-                st.error(f"Phát hiện {len(gdtc_period_violations)} tiết GDTC xếp ngoài khung giờ cho phép (Sáng 1-4, Chiều 2-3).")
+                st.error(f"❌ Phát hiện {len(gdtc_period_violations)} tiết GDTC xếp ngoài khung giờ cho phép.")
 
-            consec_violations = find_consecutive_subject_days(inp.slots, result.assignment, {gdtc_id})
+        # Kiểm tra môn không xếp liền ngày (GDTC + các môn trong non_consecutive_subject_ids)
+        non_consec_ids = set(getattr(inp.config, "non_consecutive_subject_ids", frozenset()))
+        if getattr(inp.config, "avoid_gdtc_consecutive_days", True) and gdtc_id:
+            non_consec_ids.add(gdtc_id)
+        if non_consec_ids:
+            consec_violations = find_consecutive_subject_days(inp.slots, result.assignment, non_consec_ids)
             if consec_violations:
-                st.error(f"Phát hiện {len(consec_violations)} trường hợp GDTC xếp 2 ngày liền nhau.")
+                st.error(f"❌ Phát hiện {len(consec_violations)} trường hợp môn không xếp liền ngày bị xếp 2 ngày liền kề.")
+
+        # Kiểm tra môn bắt buộc sáng (cấm chiều)
+        morning_only_ids = set(getattr(inp.config, "morning_only_subject_ids", frozenset()))
+        if getattr(inp.config, "heavy_subjects_morning_only", False):
+            heavy_ids = {s.subject_id for s in inp.subjects if s.role_code in (ROLE_NANG, ROLE_NANG_KEP)}
+            morning_only_ids |= heavy_ids
+        if morning_only_ids:
+            morn_violations = find_morning_only_violations(inp.slots, result.assignment, morning_only_ids)
+            if morn_violations:
+                st.error(f"❌ Phát hiện {len(morn_violations)} tiết môn cấm chiều bị xếp vào buổi chiều.")
+
+        # Kiểm tra vượt trần môn Nặng liên tiếp
+        heavy_subject_ids = {s.subject_id for s in inp.subjects if s.role_code in (ROLE_NANG, ROLE_NANG_KEP)}
+        if heavy_subject_ids:
+            max_heavy = getattr(inp.config, "max_heavy_consecutive", 3)
+            heavy_run_violations = find_max_heavy_violations(inp.slots, result.assignment, heavy_subject_ids, max_heavy)
+            if heavy_run_violations:
+                st.error(f"❌ Phát hiện {len(heavy_run_violations)} trường hợp môn Nặng bị xếp vượt quá {max_heavy} tiết liên tiếp.")
+
+        # Kiểm tra luật môn/lớp theo buổi cụ thể
+        subject_class_rules = repo.list_subject_class_rules(conn)
+        if subject_class_rules:
+            rule_violations = find_subject_class_rule_violations(inp.slots, result.assignment, subject_class_rules)
+            if rule_violations:
+                st.error(f"❌ Phát hiện {len(rule_violations)} tiết vi phạm ràng buộc môn/lớp theo buổi.")
+
+        # Kiểm tra môn 1 cặp liền tiết (single pair)
+        single_pair_ids = set(getattr(inp.config, "single_pair_subject_ids", frozenset()))
+        if single_pair_ids:
+            pair_violations = find_single_pair_violations(inp.slots, result.assignment, single_pair_ids)
+            if pair_violations:
+                st.error(f"❌ Phát hiện {len(pair_violations)} trường hợp môn 1 cặp liền tiết bị phân bổ sai quy tắc.")
+
+        # Đánh giá chất lượng lịch dạy của Giáo viên
+        teacher_gaps = find_teacher_gaps(inp.slots, result.assignment, inp.assigned_teacher)
+        if teacher_gaps and getattr(inp.config, "avoid_teacher_gaps", True):
+            teacher_map = {t.teacher_id: t.name for t in inp.teachers}
+            gap_summaries = []
+            for tid, wd, sess, p_list in teacher_gaps:
+                tname = teacher_map.get(tid, f"GV #{tid}")
+                sess_name = "Sáng" if sess == "S" else "Chiều"
+                gap_summaries.append(f"{tname} (Thứ {wd} {sess_name}: tiết {', '.join(str(p) for p in p_list)})")
+            with st.expander(f"⚠️ Cảnh báo chất lượng lịch: có {len(teacher_gaps)} buổi GV bị tiết trống / lủng", expanded=False):
+                for g_info in gap_summaries:
+                    st.write(f"- {g_info}")
 
         st.subheader("Kiểm tra định mức (thực tế − định mức, kỳ vọng 0)")
         diff = compute_quota_diff(inp.slots, result.assignment, repo.get_periods_per_week(conn), parity)

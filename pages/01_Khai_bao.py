@@ -116,11 +116,13 @@ with tab_teachers:
                 errors.append(f"{name}: đã chọn \"Đi T2\" nên không thể ghim nghỉ trọn ngày Thứ 2.")
             if must_monday and pinned_afternoon_off == 2:
                 errors.append(f"{name}: đã chọn \"Đi T2\" nên không thể ghim nghỉ chiều Thứ 2.")
+            mand_morns = getattr(config, "mandatory_morning_weekdays", (2, 5, 6))
             if pinned_full_day_off is not None and (
                 (pinned_full_day_off, "S") in config.forbidden_off_cells
                 or (pinned_full_day_off, "C") in config.forbidden_off_cells
+                or pinned_full_day_off in mand_morns
             ):
-                errors.append(f"{name}: Thứ ghim nghỉ trọn ngày nằm trong \"Buổi cấm chọn làm buổi nghỉ GV\".")
+                errors.append(f"{name}: Thứ ghim nghỉ trọn ngày (Thứ {pinned_full_day_off}) nằm trong buổi cấm nghỉ hoặc sáng bắt buộc toàn thể GV đi làm.")
             if pinned_afternoon_off is not None and (pinned_afternoon_off, "C") in config.forbidden_off_cells:
                 errors.append(f"{name}: buổi chiều ghim nghỉ nằm trong \"Buổi cấm chọn làm buổi nghỉ GV\".")
 

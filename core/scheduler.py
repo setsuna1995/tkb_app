@@ -44,7 +44,7 @@ TEACHER_CONSECUTIVE_BONUS = 150   # điểm thưởng khi xếp liền kề ti�
 TEACHER_GAP_PENALTY = 250         # điểm phạt khi xếp tạo lỗ hổng (tiết trống) cho GV trong cùng buổi
 TEACHER_SESSION_PAIR_BONUS = 150  # điểm thưởng khi ghép tiết thứ 2 vào cùng buổi cho GV (tránh lẻ 1 tiết)
 TEACHER_SPLIT_DAY_PENALTY = 180   # điểm phạt khi tạo ngày 1 sáng + 1 chiều
-TEACHER_AFTERNOON_BALANCE_BONUS = 0  # không ép rải tiết chiều gây lẻ 1 tiết
+TEACHER_AFTERNOON_BALANCE_BONUS = 0  # không ép rải tiết chiều trong greedy gây lẻ 1 tiết; đánh giá cân đối qua _teacher_quality_penalty
 TEACHER_MANDATORY_MORNING_BONUS = 280  # điểm thưởng mạnh khi xếp tiết vào các sáng bắt buộc (T2, T5, T6)
 
 # Buổi không được chọn làm buổi nghỉ của GV: sáng Thứ 2/5/6 (hoạt động cố định
@@ -851,6 +851,30 @@ def _count_teacher_missing_mandatory_mornings(slots: list[Slot], assigned: dict,
     return missing
 
 
+def _count_teacher_missing_afternoon_duty(slots: list[Slot], assigned: dict, slot_teacher: dict) -> int:
+    classes_with_afternoon = {s.class_id for s in slots if s.ts.session == "C"}
+    teacher_afternoon_count = defaultdict(int)
+    teacher_total_count = defaultdict(int)
+    teacher_classes = defaultdict(set)
+
+    for s in slots:
+        subj = assigned.get(s.slot_id)
+        if subj not in (None, -1):
+            tid = slot_teacher.get(s.slot_id)
+            if tid is not None and tid > 0:
+                teacher_total_count[tid] += 1
+                teacher_classes[tid].add(s.class_id)
+                if s.ts.session == "C":
+                    teacher_afternoon_count[tid] += 1
+
+    missing = 0
+    for tid, total in teacher_total_count.items():
+        if total >= 4 and any(cid in classes_with_afternoon for cid in teacher_classes[tid]):
+            if teacher_afternoon_count[tid] == 0:
+                missing += 1
+    return missing
+
+
 def _teacher_quality_penalty(slots: list[Slot], assigned: dict, slot_teacher: dict, config: SchedulingConfig) -> int:
     penalty = 0
     mand_morns = getattr(config, "mandatory_morning_weekdays", (2, 5, 6))
@@ -861,6 +885,8 @@ def _teacher_quality_penalty(slots: list[Slot], assigned: dict, slot_teacher: di
         penalty += _count_teacher_split_sessions(slots, assigned, slot_teacher) * 200
         penalty += _count_teacher_lone_days(slots, assigned, slot_teacher) * 250
     penalty += _count_teacher_missing_mandatory_mornings(slots, assigned, slot_teacher, mand_morns) * 800
+    if getattr(config, "balance_afternoon_teachers", True):
+        penalty += _count_teacher_missing_afternoon_duty(slots, assigned, slot_teacher) * 200
     return penalty
 
 

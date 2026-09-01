@@ -183,6 +183,16 @@ avoid_gdtc_consecutive = st.checkbox(
     help="Ràng buộc CỨNG: GDTC của 1 lớp không bao giờ được xếp vào 2 ngày liền kề trong tuần.",
 )
 
+# --- Kiểm tra cảnh báo xung đột cấu hình ---
+effective_morning_only = set(morning_only_selection)
+if heavy_subjects_morning_only:
+    effective_morning_only |= {s.subject_id for s in all_subjects if s.role_code in (1, 3)}
+
+conflict_afternoon_morning = effective_morning_only & set(afternoon_preferred_selection)
+if conflict_afternoon_morning:
+    c_names = [subject_names.get(sid, str(sid)) for sid in conflict_afternoon_morning]
+    st.warning(f"⚠️ **Xung đột cấu hình:** Môn **{', '.join(c_names)}** vừa được đặt \"Bắt buộc sáng (cấm chiều)\" vừa được chọn \"Ưu tiên buổi chiều\". Hãy bỏ chọn ở một trong hai mục.")
+
 if st.button("💾 Lưu cấu hình", type="primary"):
     new_config = SchedulingConfig(
         gdtc_avoid_period=int(gdtc_avoid_period),
@@ -238,7 +248,13 @@ else:
             format_func=lambda cell: f"{WEEKDAY_NAMES[cell[0]]} {'Sáng' if cell[1] == 'S' else 'Chiều'}",
         )
         if st.form_submit_button("➕ Thêm luật"):
-            if rule_class_ids and rule_cells:
+            is_morning_only = rule_subject_id in getattr(config, "morning_only_subject_ids", frozenset())
+            rule_subj_obj = next((s for s in rule_subjects if s.subject_id == rule_subject_id), None)
+            if getattr(config, "heavy_subjects_morning_only", False) and rule_subj_obj and rule_subj_obj.role_code in (1, 3):
+                is_morning_only = True
+            if is_morning_only and rule_cells and all(s == "C" for _wd, s in rule_cells):
+                st.error("Môn này đang bị cấm xếp buổi chiều theo cấu hình chung, không thể tạo luật chỉ cho phép xếp buổi chiều!")
+            elif rule_class_ids and rule_cells:
                 repo.upsert_subject_class_rule(conn, rule_subject_id, rule_class_ids, rule_cells)
                 st.success("Đã thêm luật.")
                 st.rerun()
