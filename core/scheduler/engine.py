@@ -19,7 +19,8 @@ from core.scheduler.placement import (
 from core.scheduler.quality import _teacher_quality_penalty
 from core.scheduler.state import _State
 from core.scheduler.swaps import (
-    _has_lone_period, _repair_lone_periods, _try_swap_repair,
+    _has_lone_period, _repair_lone_periods, _repair_teacher_lone_sessions,
+    _try_swap_repair,
 )
 from core.scheduler.teacher_off import _assign_off_slots
 
@@ -208,6 +209,10 @@ def run(inp: SchedulingInput, *, max_attempts: int = SO_LAN_THU,
                                      subject_class_allowed_cells)
             if _has_unpaired_block(inp, state, role_index):
                 done = False
+
+        if done:
+            _repair_teacher_lone_sessions(inp, state, role_index, assigned_teacher, slots_by_class,
+                                          day_capacity, config, subject_class_allowed_cells, slot_by_coord)
 
         if done and (avoid_gdtc or non_consecutive):
             for (cid, sid, wd), pos_list in state.placed.items():

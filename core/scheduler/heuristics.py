@@ -7,7 +7,8 @@ from core.models import SchedulingConfig, Slot
 from core.scheduler.constants import (
     AFTERNOON_MISMATCH_PENALTY, BLOCK_COMPLETE_BONUS, HEAVY_MORNING_BONUS,
     IDLE_DAY_BONUS, TEACHER_AFTERNOON_BALANCE_BONUS, TEACHER_CONSECUTIVE_BONUS,
-    TEACHER_GAP_PENALTY, TEACHER_MANDATORY_MORNING_BONUS, TEACHER_SESSION_PAIR_BONUS,
+    TEACHER_GAP_PENALTY, TEACHER_LONE_SESSION_HEURISTIC_PENALTY,
+    TEACHER_MANDATORY_MORNING_BONUS, TEACHER_SESSION_PAIR_BONUS,
     TEACHER_SPLIT_DAY_PENALTY,
 )
 from core.scheduler.feasibility import _feasible
@@ -91,6 +92,13 @@ def _pick_best_scored(class_id: int, slot: Slot, state: _State, role_index,
             current_in_session = len(state.teacher_session_periods.get((teacher_id, ts.weekday, ts.session), []))
             if current_in_session == 1:
                 score += TEACHER_SESSION_PAIR_BONUS
+            elif current_in_session == 0:
+                teacher_rem_need = sum(
+                    rem for (s, c), rem in state.remaining_need.items()
+                    if assigned_teacher.get((s, c)) == teacher_id and rem > 0
+                )
+                if teacher_rem_need <= 1:
+                    score -= TEACHER_LONE_SESSION_HEURISTIC_PENALTY
             if ts.session == "C" and current_in_session == 0:
                 morning_count = len(state.teacher_session_periods.get((teacher_id, ts.weekday, "S"), []))
                 if morning_count == 1:
@@ -103,7 +111,12 @@ def _pick_best_scored(class_id: int, slot: Slot, state: _State, role_index,
         mandatory_mornings = getattr(config, "mandatory_morning_weekdays", (2, 5, 6))
         if ts.session == "S" and ts.weekday in mandatory_mornings:
             if len(state.teacher_session_periods.get((teacher_id, ts.weekday, "S"), [])) == 0:
-                score += TEACHER_MANDATORY_MORNING_BONUS
+                teacher_total_need = sum(
+                    rem for (s, c), rem in state.remaining_need.items()
+                    if assigned_teacher.get((s, c)) == teacher_id
+                )
+                if teacher_total_need >= 12:
+                    score += TEACHER_MANDATORY_MORNING_BONUS
 
         if slot.old_subject_id == subj.subject_id and rng.random() > pu:
             score += 1_000_000

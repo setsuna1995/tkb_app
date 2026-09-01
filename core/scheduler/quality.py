@@ -72,7 +72,7 @@ def _count_teacher_missing_mandatory_mornings(slots: list[Slot], assigned: dict,
 
     missing = 0
     for tid, total in teacher_totals.items():
-        if total >= 5:  # GV có tải từ 5 tiết/tuần trở lên
+        if total >= 10:  # Chỉ ép sáng bắt buộc với GV có tải từ 10 tiết/tuần trở lên
             for wd in mandatory_mornings:
                 if teacher_morns[tid][wd] == 0:
                     missing += 1
@@ -109,7 +109,7 @@ def _teacher_quality_penalty(slots: list[Slot], assigned: dict, slot_teacher: di
     if getattr(config, "avoid_teacher_gaps", True):
         penalty += _count_teacher_gaps(slots, assigned, slot_teacher) * 350
     if getattr(config, "avoid_teacher_lone_periods", True):
-        penalty += _count_teacher_lone_sessions(slots, assigned, slot_teacher) * 180
+        penalty += _count_teacher_lone_sessions(slots, assigned, slot_teacher) * 500
         penalty += _count_teacher_split_sessions(slots, assigned, slot_teacher) * 200
         penalty += _count_teacher_lone_days(slots, assigned, slot_teacher) * 250
     penalty += _count_teacher_missing_mandatory_mornings(slots, assigned, slot_teacher, mand_morns) * 800

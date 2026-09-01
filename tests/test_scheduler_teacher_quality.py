@@ -316,3 +316,133 @@ def test_validation_new_helpers():
     rule_violations = val.find_subject_class_rule_violations(rule_slots, rule_assign, rules)
     assert len(rule_violations) == 1
     assert rule_violations[0] == (101, 10, 3, "S", 1)
+
+
+def test_greedy_prefers_pairing_over_lone_session():
+    """_pick_best_scored should strongly prefer assigning to a teacher who already has 1 period
+    in the session (creating a 2-period pair) over a teacher who currently has 0 periods in this session."""
+    ts_s2 = TimeSlot(2, 3, "S", 2)
+    slot_s2 = Slot(2, 102, ts_s2)
+
+    subj1 = Subject(1, "Toan", ROLE_THUONG)
+    subj2 = Subject(2, "Van", ROLE_THUONG)
+    subj_hdtn = Subject(3, "HDTN", ROLE_HDTN)
+    subjects = [subj1, subj2, subj_hdtn]
+    role_index = resolve_roles(subjects)
+
+    # Teacher 10 teaches Toan for class 101 & 102 (has 1 period on Wed S1 for class 101)
+    # Teacher 20 teaches Van for class 102 (has 0 periods on Wed S)
+    assigned_teacher = {(1, 101): 10, (1, 102): 10, (2, 102): 20}
+
+    state = sched._State(remaining_need={(1, 101): 2, (1, 102): 3, (2, 102): 3}, busy=set())
+    state.placed[(101, 1, 3)].append(("S", 1))
+    state.occupied[(101, 3, "S", 1)] = True
+    state.occupied[(102, 3, "S", 1)] = True
+    state.teacher_session_periods[(10, 3, "S")] = [1]
+    state.session_count[(10, 3, "S")] = 1
+
+    config = SchedulingConfig(avoid_teacher_lone_periods=True)
+    rng = random.Random(42)
+
+    pick = sched._pick_best_scored(102, slot_s2, state, role_index, subjects, assigned_teacher, 0.0, rng, config=config)
+    assert pick is not None
+    # Must pick Subject 1 (Teacher 10) to pair and avoid lone period!
+    assert pick[0] == 1, f"Expected Subject 1 (pair for Teacher 10), but got Subject {pick[0]}"
+
+
+def test_repair_teacher_lone_sessions_evacuates_or_pairs():
+    """_repair_teacher_lone_sessions should eliminate 1-period sessions for teachers by moving or pairing."""
+    # Create a 2-session scenario for Class 101:
+    # Mon S: Slot 1 (S1: Toan by Teacher 10) - lone period for Teacher 10!
+    # Tue S: Slot 2 (S1: Van by Teacher 20), Slot 3 (S2: Toan by Teacher 10) - Teacher 10 has 1 period here
+    # Teacher 20 also teaches Van on Mon S? No, let's say Slot 1 is Toan (T10), Slot 2 is Van (T20)
+    # If we swap Toan at Mon S1 with Van at Tue S1 -> then Tue has both Toan & Toan (or Toan & Van),
+    # eliminating the Mon S1 lone period for Teacher 10!
+    ts_mon_s1 = TimeSlot(1, 2, "S", 1)
+    ts_tue_s1 = TimeSlot(2, 3, "S", 1)
+    ts_tue_s2 = TimeSlot(3, 3, "S", 2)
+
+    slot1 = Slot(1, 101, ts_mon_s1)
+    slot2 = Slot(2, 101, ts_tue_s1)
+    slot3 = Slot(3, 102, ts_tue_s2)
+
+    subj1 = Subject(1, "Toan", ROLE_THUONG)
+    subj2 = Subject(2, "Van", ROLE_THUONG)
+    subj_hdtn = Subject(3, "HDTN", ROLE_HDTN)
+    subjects = [subj1, subj2, subj_hdtn]
+    role_index = resolve_roles(subjects)
+
+    assigned_teacher = {(1, 101): 10, (1, 102): 10, (2, 101): 20}
+    slots_by_class = {101: [slot1, slot2], 102: [slot3]}
+    slot_by_coord = {
+        (101, 2, "S", 1): slot1,
+        (101, 3, "S", 1): slot2,
+        (102, 3, "S", 2): slot3,
+    }
+
+    state = sched._State(remaining_need={(1, 101): 1, (1, 102): 1, (2, 101): 1}, busy=set())
+    # Place Toan (T10) at slot1 (Mon S1)
+    sched._put_at(state, slot1, 1, 10, role_index)
+    # Place Van (T20) at slot2 (Tue S1)
+    sched._put_at(state, slot2, 2, 20, role_index)
+    # Place Toan (T10) at slot3 (Tue S2)
+    sched._put_at(state, slot3, 1, 10, role_index)
+
+    # Initial state: Teacher 10 has 1 period on Mon S (lone period!) and 1 period on Tue S (lone period!)
+    assert len(state.teacher_session_periods[(10, 2, "S")]) == 1
+    assert len(state.teacher_session_periods[(10, 3, "S")]) == 1
+
+    inp = SchedulingInput(
+        classes=[ClassRoom(101, "6A1"), ClassRoom(102, "6A2")],
+        subjects=subjects,
+        teachers=[Teacher(10, "GV Toan"), Teacher(20, "GV Van")],
+        need={(1, 101): 1, (1, 102): 1, (2, 101): 1},
+        assigned_teacher=assigned_teacher,
+        ban_busy=set(),
+        slots=[slot1, slot2, slot3],
+        timeslots=[ts_mon_s1, ts_tue_s1, ts_tue_s2],
+    )
+
+    sched._repair_teacher_lone_sessions(
+        inp, state, role_index, assigned_teacher, slots_by_class,
+        config=SchedulingConfig(), slot_by_coord=slot_by_coord,
+    )
+
+    mon_count = len(state.teacher_session_periods.get((10, 2, "S"), []))
+    tue_count = len(state.teacher_session_periods.get((10, 3, "S"), []))
+    assert mon_count in (0, 2), f"Mon count should be 0 or 2, got {mon_count}"
+    assert tue_count in (0, 2), f"Tue count should be 0 or 2, got {tue_count}"
+
+
+def test_missing_mandatory_mornings_ignores_low_load_teachers():
+    """Teachers with low workload (< 10 periods/week, e.g. 4-6 periods) must NOT be penalized
+    for not having classes on all 3 mandatory mornings, because forcing them would fragment into 1-period sessions."""
+    slot1 = Slot(1, 101, TimeSlot(1, 2, "S", 1)) # Mon S1
+    slot2 = Slot(2, 101, TimeSlot(2, 2, "S", 2)) # Mon S2
+    slot3 = Slot(3, 101, TimeSlot(3, 3, "S", 1)) # Tue S1
+    slot4 = Slot(4, 101, TimeSlot(4, 3, "S", 2)) # Tue S2
+
+    # Teacher 10 has 4 periods total (all on Mon & Tue, absent on Thu & Fri morning)
+    slots = [slot1, slot2, slot3, slot4]
+    assigned = {1: 100, 2: 100, 3: 100, 4: 100}
+    slot_teacher = {1: 10, 2: 10, 3: 10, 4: 10}
+
+    # Should count 0 missing mandatory mornings for teacher with total=4 (< 10)
+    missing = sched._count_teacher_missing_mandatory_mornings(slots, assigned, slot_teacher, mandatory_mornings=(2, 5, 6))
+    assert missing == 0
+
+
+def test_teacher_lone_sessions_heavy_penalty():
+    """Lone period sessions for teachers should receive a heavier penalty of 500 per session."""
+    slot1 = Slot(1, 101, TimeSlot(1, 2, "S", 1)) # Lone period session for Teacher 10!
+    slots = [slot1]
+    assigned = {1: 100}
+    slot_teacher = {1: 10}
+    config = SchedulingConfig(avoid_teacher_lone_periods=True)
+
+    pen = sched._teacher_quality_penalty(slots, assigned, slot_teacher, config)
+    # 1 lone session (* 500) + 1 lone day (* 250) = 750
+    assert pen >= 750, f"Expected penalty >= 750 with 500 lone session weight, got {pen}"
+
+
+

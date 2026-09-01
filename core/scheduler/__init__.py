@@ -8,7 +8,8 @@ from core.scheduler.constants import (
     FORBIDDEN_OFF_CELLS, HEAVY_MORNING_BONUS, IDLE_DAY_BONUS,
     MAX_GV_BUOI, NGUONG_KHOA, SO_LAN_THU, SO_PA_TOT,
     TEACHER_AFTERNOON_BALANCE_BONUS, TEACHER_CONSECUTIVE_BONUS,
-    TEACHER_GAP_PENALTY, TEACHER_MANDATORY_MORNING_BONUS,
+    TEACHER_GAP_PENALTY, TEACHER_LONE_SESSION_HEURISTIC_PENALTY,
+    TEACHER_MANDATORY_MORNING_BONUS,
     TEACHER_SESSION_PAIR_BONUS, TEACHER_SPLIT_DAY_PENALTY,
 )
 from core.scheduler.state import _State
@@ -24,7 +25,8 @@ from core.scheduler.blocks import (
     _repair_unpaired_blocks, _try_place_block_atomically,
 )
 from core.scheduler.swaps import (
-    _has_lone_period, _repair_lone_periods, _try_swap_repair,
+    _has_lone_period, _repair_lone_periods, _repair_teacher_lone_sessions,
+    _try_swap_repair,
 )
 from core.scheduler.teacher_off import _assign_off_slots
 from core.scheduler.quality import (
@@ -52,6 +54,7 @@ __all__ = [
     "_block_partial_state",
     "_try_swap_repair",
     "_repair_lone_periods",
+    "_repair_teacher_lone_sessions",
     "_has_lone_period",
     "_assign_off_slots",
     "_teacher_quality_penalty",
@@ -75,6 +78,7 @@ __all__ = [
     "TEACHER_CONSECUTIVE_BONUS",
     "TEACHER_GAP_PENALTY",
     "TEACHER_SESSION_PAIR_BONUS",
+    "TEACHER_LONE_SESSION_HEURISTIC_PENALTY",
     "TEACHER_SPLIT_DAY_PENALTY",
     "TEACHER_AFTERNOON_BALANCE_BONUS",
     "TEACHER_MANDATORY_MORNING_BONUS",

@@ -27,10 +27,11 @@ BLOCK_COMPLETE_BONUS = 40         # điểm thưởng khi tiếp tục/hoàn th�
                                   # best-of-N mới là cơ chế đảm bảo (xem _repair_unpaired_blocks)
 TEACHER_CONSECUTIVE_BONUS = 150   # điểm thưởng khi xếp liền kề tiết GV đang dạy trong cùng buổi
 TEACHER_GAP_PENALTY = 250         # điểm phạt khi xếp tạo lỗ hổng (tiết trống) cho GV trong cùng buổi
-TEACHER_SESSION_PAIR_BONUS = 150  # điểm thưởng khi ghép tiết thứ 2 vào cùng buổi cho GV (tránh lẻ 1 tiết)
+TEACHER_SESSION_PAIR_BONUS = 320  # điểm thưởng mạnh khi ghép tiết thứ 2 vào cùng buổi cho GV (tránh lẻ 1 tiết)
+TEACHER_LONE_SESSION_HEURISTIC_PENALTY = 250  # điểm phạt khi mở buổi mới cho GV mà GV không còn đủ tiết để ghép cặp
 TEACHER_SPLIT_DAY_PENALTY = 180   # điểm phạt khi tạo ngày 1 sáng + 1 chiều
 TEACHER_AFTERNOON_BALANCE_BONUS = 0  # không ép rải tiết chiều trong greedy gây lẻ 1 tiết; đánh giá cân đối qua _teacher_quality_penalty
-TEACHER_MANDATORY_MORNING_BONUS = 280  # điểm thưởng mạnh khi xếp tiết vào các sáng bắt buộc (T2, T5, T6)
+TEACHER_MANDATORY_MORNING_BONUS = 280  # điểm thưởng khi xếp tiết vào các sáng bắt buộc (T2, T5, T6) cho GV tải cao
 
 # Buổi không được chọn làm buổi nghỉ của GV: sáng Thứ 2/5/6 (hoạt động cố định
 # buổi sáng những ngày này), và chiều Thứ 5/6 (đã bị khoá hẳn khỏi TKB ở
