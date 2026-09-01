@@ -18,21 +18,31 @@ st.caption(
 config = repo.get_scheduling_config(conn)
 max_p = frame_mod.MAX_PERIODS_PER_SESSION
 
-st.subheader("Vị trí cố định")
+st.subheader("Vị trí cố định & Khung tiết GDTC (Thể dục)")
 c1, c2 = st.columns(2)
-gdtc_avoid_period = c1.number_input(
-    "GDTC né tiết", 1, max_p, config.gdtc_avoid_period,
-    help="Thể dục sẽ không bao giờ được xếp vào tiết này.",
+gdtc_morning_allowed = c1.multiselect(
+    "GDTC: Các tiết được phép xếp buổi Sáng",
+    options=list(range(1, max_p + 1)),
+    default=[p for p in config.gdtc_morning_allowed_periods if p <= max_p],
+    help="Mặc định: Tiết 1, 2, 3, 4 (tránh tiết 5 trưa muộn trời nắng).",
 )
-chao_co_weekday = c2.selectbox(
+gdtc_afternoon_allowed = c2.multiselect(
+    "GDTC: Các tiết được phép xếp buổi Chiều",
+    options=list(range(1, max_p + 1)),
+    default=[p for p in config.gdtc_afternoon_allowed_periods if p <= max_p],
+    help="Mặc định: Tiết 2, 3 (tránh tiết đầu chiều trời nắng gắt).",
+)
+c_cc1, c_cc2 = st.columns(2)
+chao_co_weekday = c_cc1.selectbox(
     "Chào cờ - Thứ", WEEKDAYS, index=WEEKDAYS.index(config.chao_co_weekday),
     format_func=lambda w: WEEKDAY_NAMES[w],
 )
-c1.number_input(
+c_cc2.number_input(
     "Chào cờ - Tiết (buổi sáng)", 1, 1, 1, disabled=True,
     help="Cố định ở Tiết 1 -- cơ chế ghim tiết hiện tại chỉ hoạt động đúng ở tiết đầu buổi sáng.",
 )
 chao_co_period = 1
+gdtc_avoid_period = config.gdtc_avoid_period
 
 st.subheader("Ngưỡng số lượng")
 c3, c4, c5 = st.columns(3)
@@ -176,6 +186,8 @@ avoid_gdtc_consecutive = st.checkbox(
 if st.button("💾 Lưu cấu hình", type="primary"):
     new_config = SchedulingConfig(
         gdtc_avoid_period=int(gdtc_avoid_period),
+        gdtc_morning_allowed_periods=tuple(sorted(gdtc_morning_allowed)),
+        gdtc_afternoon_allowed_periods=tuple(sorted(gdtc_afternoon_allowed)),
         chao_co_weekday=int(chao_co_weekday),
         chao_co_period=int(chao_co_period),
         max_heavy_consecutive=int(max_heavy_consecutive),

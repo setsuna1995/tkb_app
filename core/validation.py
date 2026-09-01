@@ -84,3 +84,36 @@ def find_consecutive_subject_days(slots: list, assignment: dict, target_subject_
                 violations.append((class_id, subject_id, sorted_days[i], sorted_days[i + 1]))
     return violations
 
+
+def find_teacher_unavailability_violations(slots: list, assignment: dict, assigned_teacher: dict, ban_busy: set) -> list:
+    """Returns [(teacher_id, class_id, weekday, session, period), ...] for any slot where
+    a teacher is scheduled in a banned/busy timeslot."""
+    violations = []
+    for slot in slots:
+        subject_id = assignment.get(slot.slot_id)
+        if subject_id is None:
+            continue
+        teacher_id = assigned_teacher.get((subject_id, slot.class_id))
+        if teacher_id is None or teacher_id < 0:
+            continue
+        if (teacher_id, slot.ts.ts_id) in ban_busy:
+            violations.append((teacher_id, slot.class_id, slot.ts.weekday, slot.ts.session, slot.ts.period))
+    return violations
+
+
+def find_invalid_gdtc_periods(slots: list, assignment: dict, gdtc_id: int,
+                              morning_allowed: tuple = (1, 2, 3, 4),
+                              afternoon_allowed: tuple = (2, 3)) -> list:
+    """Returns [(class_id, weekday, session, period), ...] for any GDTC slot placed
+    outside allowed morning or afternoon periods."""
+    violations = []
+    for slot in slots:
+        subject_id = assignment.get(slot.slot_id)
+        if subject_id == gdtc_id:
+            if slot.ts.session == "S" and morning_allowed and slot.ts.period not in morning_allowed:
+                violations.append((slot.class_id, slot.ts.weekday, slot.ts.session, slot.ts.period))
+            elif slot.ts.session == "C" and afternoon_allowed and slot.ts.period not in afternoon_allowed:
+                violations.append((slot.class_id, slot.ts.weekday, slot.ts.session, slot.ts.period))
+    return violations
+
+

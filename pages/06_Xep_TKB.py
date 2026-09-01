@@ -2,8 +2,11 @@ import pandas as pd
 import streamlit as st
 
 from core import scheduler as sched
-from core.models import ROLE_HDTN, ROLE_KEP, ROLE_NANG_KEP, WEEKDAY_NAMES, WEEKDAYS
-from core.validation import compute_quota_diff, find_teacher_conflicts
+from core.models import ROLE_GDTC, ROLE_HDTN, ROLE_KEP, ROLE_NANG_KEP, WEEKDAY_NAMES, WEEKDAYS
+from core.validation import (
+    compute_quota_diff, find_consecutive_subject_days, find_invalid_gdtc_periods,
+    find_teacher_conflicts, find_teacher_unavailability_violations,
+)
 from data import repository as repo
 from ui_common import get_conn, require_auth, require_school, sidebar_backup_export, sidebar_school_switcher
 
@@ -96,6 +99,26 @@ if result is not None:
         conflicts = find_teacher_conflicts(inp.slots, result.assignment, inp.assigned_teacher)
         if conflicts:
             st.error(f"Phát hiện {len(conflicts)} trường hợp GV trùng lịch (không nên xảy ra, báo lỗi này).")
+
+        busy_violations = find_teacher_unavailability_violations(
+            inp.slots, result.assignment, inp.assigned_teacher, inp.ban_busy
+        )
+        if busy_violations:
+            st.error(f"Phát hiện {len(busy_violations)} tiết xếp vào giờ GV đã khai báo bận (GV_Bận).")
+
+        gdtc_id = next((s.subject_id for s in inp.subjects if s.role_code == ROLE_GDTC), None)
+        if gdtc_id:
+            gdtc_period_violations = find_invalid_gdtc_periods(
+                inp.slots, result.assignment, gdtc_id,
+                getattr(inp.config, "gdtc_morning_allowed_periods", (1, 2, 3, 4)),
+                getattr(inp.config, "gdtc_afternoon_allowed_periods", (2, 3)),
+            )
+            if gdtc_period_violations:
+                st.error(f"Phát hiện {len(gdtc_period_violations)} tiết GDTC xếp ngoài khung giờ cho phép (Sáng 1-4, Chiều 2-3).")
+
+            consec_violations = find_consecutive_subject_days(inp.slots, result.assignment, {gdtc_id})
+            if consec_violations:
+                st.error(f"Phát hiện {len(consec_violations)} trường hợp GDTC xếp 2 ngày liền nhau.")
 
         st.subheader("Kiểm tra định mức (thực tế − định mức, kỳ vọng 0)")
         diff = compute_quota_diff(inp.slots, result.assignment, repo.get_periods_per_week(conn), parity)

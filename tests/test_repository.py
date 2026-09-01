@@ -19,6 +19,8 @@ def test_get_scheduling_config_returns_defaults_when_never_saved(conn):
 def test_set_then_get_scheduling_config_round_trips(conn):
     custom = SchedulingConfig(
         gdtc_avoid_period=3,
+        gdtc_morning_allowed_periods=(1, 2),
+        gdtc_afternoon_allowed_periods=(3,),
         chao_co_weekday=3,
         chao_co_period=2,
         max_heavy_consecutive=2,

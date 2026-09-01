@@ -121,8 +121,15 @@ def _feasible(class_id: int, ts: TimeSlot, subject_id: int, teacher_id: int,
         return False
     if BAT_NGHI_1_BUOI and (ts.weekday, ts.session) in state.gv_off_slots.get(teacher_id, ()):
         return False
-    if subject_id == role_index.gdtc_id and ts.period == config.gdtc_avoid_period:
-        return False
+    if subject_id == role_index.gdtc_id:
+        morning_allowed = getattr(config, "gdtc_morning_allowed_periods", (1, 2, 3, 4))
+        afternoon_allowed = getattr(config, "gdtc_afternoon_allowed_periods", (2, 3))
+        if ts.session == "S" and morning_allowed and ts.period not in morning_allowed:
+            return False
+        if ts.session == "C" and afternoon_allowed and ts.period not in afternoon_allowed:
+            return False
+        if ts.period == config.gdtc_avoid_period:
+            return False
     if getattr(config, "heavy_subjects_morning_only", False) and subject_id in role_index.heavy_ids and ts.session == "C":
         return False
     morning_only = getattr(config, "morning_only_subject_ids", None)

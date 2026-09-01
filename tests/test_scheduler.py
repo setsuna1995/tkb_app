@@ -60,7 +60,7 @@ def test_gdtc_avoid_period_configurable():
     subjects = [Subject(1, "GDTC", ROLE_GDTC), Subject(2, "HDTN", ROLE_HDTN)]
     role_index = resolve_roles(subjects)
     state = _State(remaining_need={(1, 1): 10}, busy=set())
-    config = SchedulingConfig(gdtc_avoid_period=3)
+    config = SchedulingConfig(gdtc_avoid_period=3, gdtc_morning_allowed_periods=(1, 2, 3, 4, 5))
     ts3 = TimeSlot(1, 2, "S", 3)
     assert _feasible(1, ts3, 1, 100, state, role_index, config=config) is False
     state.occupied[(1, 2, "S", 4)] = True  # satisfy liền mạch so the avoid-period check is what's tested

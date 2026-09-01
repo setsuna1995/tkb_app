@@ -31,7 +31,7 @@ def sidebar_fixed_rules(conn) -> None:
     config = repo.get_scheduling_config(conn)
     configurable_rules = [
         f"Môn nặng (Toán/Lý/Hoá) tối đa {config.max_heavy_consecutive} tiết liên tiếp trong 1 buổi",
-        f"Thể dục né Tiết {config.gdtc_avoid_period}",
+        f"Thể dục chỉ xếp tiết {', '.join(str(p) for p in config.gdtc_morning_allowed_periods)} sáng và tiết {', '.join(str(p) for p in config.gdtc_afternoon_allowed_periods)} chiều",
         f"Chào cờ Thứ {config.chao_co_weekday} Tiết {config.chao_co_period}",
         f"Mỗi giáo viên được xếp đúng {config.teacher_off_sessions_per_week} buổi nghỉ/tuần",
         f"Mỗi giáo viên tối đa {config.max_periods_per_session} tiết/buổi",

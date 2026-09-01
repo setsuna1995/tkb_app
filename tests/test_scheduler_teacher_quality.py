@@ -172,5 +172,65 @@ def test_validation_helpers():
     assert consec[0] == (101, 100, 2, 3)
     assert consec[1] == (101, 100, 3, 4)
 
+    # Teacher unavailability violations
+    ban_busy = {(10, 1)}  # Teacher 10 is busy at ts_id 1
+    unav_violations = val.find_teacher_unavailability_violations(slots, assignment, assigned_teacher, ban_busy)
+    assert len(unav_violations) == 1
+    assert unav_violations[0] == (10, 101, 2, "S", 1)
+
+    # GDTC invalid periods
+    gdtc_slots = [
+        Slot(1, 101, TimeSlot(1, 2, "S", 2)),  # S2 -> Valid
+        Slot(2, 101, TimeSlot(2, 2, "S", 4)),  # S4 -> Valid (in 1..4)
+        Slot(3, 101, TimeSlot(3, 2, "S", 5)),  # S5 -> Invalid (outside 1..4)
+        Slot(4, 101, TimeSlot(4, 3, "C", 1)),  # C1 -> Invalid (outside 2..3)
+        Slot(5, 101, TimeSlot(5, 3, "C", 2)),  # C2 -> Valid
+    ]
+    gdtc_assign = {1: 100, 2: 100, 3: 100, 4: 100, 5: 100}
+    invalid_gdtc = val.find_invalid_gdtc_periods(gdtc_slots, gdtc_assign, 100, (1, 2, 3, 4), (2, 3))
+    assert len(invalid_gdtc) == 2
+    assert (101, 2, "S", 5) in invalid_gdtc
+    assert (101, 3, "C", 1) in invalid_gdtc
+
+
+def test_gdtc_allowed_periods_feasibility():
+    """Verify that _feasible rejects GDTC outside morning 1-4 and afternoon 2-3."""
+    subjects = [Subject(1, "GDTC", ROLE_GDTC), Subject(2, "HDTN", ROLE_HDTN)]
+    role_index = resolve_roles(subjects)
+    config = SchedulingConfig(
+        gdtc_morning_allowed_periods=(1, 2, 3, 4),
+        gdtc_afternoon_allowed_periods=(2, 3),
+    )
+
+    def _state_for_period(session, period):
+        st = sched._State(remaining_need={(1, 101): 2}, busy=set())
+        for p in range(1, period):
+            st.occupied[(101, 2, session, p)] = True
+        return st
+
+    # Morning tests
+    ts_s1 = TimeSlot(1, 2, "S", 1)
+    ts_s2 = TimeSlot(2, 2, "S", 2)
+    ts_s3 = TimeSlot(3, 2, "S", 3)
+    ts_s4 = TimeSlot(4, 2, "S", 4)
+    ts_s5 = TimeSlot(5, 2, "S", 5)
+
+    assert sched._feasible(101, ts_s1, 1, 10, _state_for_period("S", 1), role_index, config=config) is True
+    assert sched._feasible(101, ts_s2, 1, 10, _state_for_period("S", 2), role_index, config=config) is True
+    assert sched._feasible(101, ts_s3, 1, 10, _state_for_period("S", 3), role_index, config=config) is True
+    assert sched._feasible(101, ts_s4, 1, 10, _state_for_period("S", 4), role_index, config=config) is True
+    assert sched._feasible(101, ts_s5, 1, 10, _state_for_period("S", 5), role_index, config=config) is False
+
+    # Afternoon tests
+    ts_c1 = TimeSlot(6, 2, "C", 1)
+    ts_c2 = TimeSlot(7, 2, "C", 2)
+    ts_c3 = TimeSlot(8, 2, "C", 3)
+    ts_c4 = TimeSlot(9, 2, "C", 4)
+
+    assert sched._feasible(101, ts_c1, 1, 10, _state_for_period("C", 1), role_index, config=config) is False
+    assert sched._feasible(101, ts_c2, 1, 10, _state_for_period("C", 2), role_index, config=config) is True
+    assert sched._feasible(101, ts_c3, 1, 10, _state_for_period("C", 3), role_index, config=config) is True
+    assert sched._feasible(101, ts_c4, 1, 10, _state_for_period("C", 4), role_index, config=config) is False
+
 
 

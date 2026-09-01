@@ -602,6 +602,16 @@ def _format_id_set(ids) -> str:
     return ",".join(str(i) for i in sorted(ids))
 
 
+def _parse_period_tuple(raw: str) -> tuple:
+    if not raw:
+        return ()
+    return tuple(int(x) for x in raw.split(",") if x.strip() and x.strip().isdigit())
+
+
+def _format_period_tuple(periods) -> str:
+    return ",".join(str(p) for p in sorted(periods))
+
+
 # ---------------------------------------------------------------------------
 # subject_class_slot_rules -- per-(subject, class) hard placement restriction
 # ---------------------------------------------------------------------------
@@ -673,8 +683,18 @@ def get_scheduling_config(conn: sqlite3.Connection) -> SchedulingConfig:
     balance_afternoon_teachers_raw = get_meta(conn, "sched_balance_afternoon_teachers")
     mandatory_mornings_raw = get_meta(conn, "sched_mandatory_morning_weekdays")
     avoid_gdtc_consecutive_raw = get_meta(conn, "sched_avoid_gdtc_consecutive_days")
+    gdtc_morning_raw = get_meta(conn, "sched_gdtc_morning_allowed_periods")
+    gdtc_afternoon_raw = get_meta(conn, "sched_gdtc_afternoon_allowed_periods")
     return SchedulingConfig(
         gdtc_avoid_period=int(get_meta(conn, "sched_gdtc_avoid_period") or default.gdtc_avoid_period),
+        gdtc_morning_allowed_periods=(
+            _parse_period_tuple(gdtc_morning_raw) if gdtc_morning_raw is not None
+            else default.gdtc_morning_allowed_periods
+        ),
+        gdtc_afternoon_allowed_periods=(
+            _parse_period_tuple(gdtc_afternoon_raw) if gdtc_afternoon_raw is not None
+            else default.gdtc_afternoon_allowed_periods
+        ),
         chao_co_weekday=int(get_meta(conn, "sched_chao_co_weekday") or default.chao_co_weekday),
         chao_co_period=int(get_meta(conn, "sched_chao_co_period") or default.chao_co_period),
         max_heavy_consecutive=int(get_meta(conn, "sched_max_heavy_consecutive") or default.max_heavy_consecutive),
@@ -736,6 +756,8 @@ def get_scheduling_config(conn: sqlite3.Connection) -> SchedulingConfig:
 
 def set_scheduling_config(conn: sqlite3.Connection, config: SchedulingConfig) -> None:
     set_meta(conn, "sched_gdtc_avoid_period", str(config.gdtc_avoid_period))
+    set_meta(conn, "sched_gdtc_morning_allowed_periods", _format_period_tuple(config.gdtc_morning_allowed_periods))
+    set_meta(conn, "sched_gdtc_afternoon_allowed_periods", _format_period_tuple(config.gdtc_afternoon_allowed_periods))
     set_meta(conn, "sched_chao_co_weekday", str(config.chao_co_weekday))
     set_meta(conn, "sched_chao_co_period", str(config.chao_co_period))
     set_meta(conn, "sched_max_heavy_consecutive", str(config.max_heavy_consecutive))

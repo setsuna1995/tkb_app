@@ -91,6 +91,8 @@ class SchedulingConfig:
     cấu hình này, để hành vi không đổi cho tới khi trường chủ động lưu giá trị khác.
     """
     gdtc_avoid_period: int = 5
+    gdtc_morning_allowed_periods: tuple = (1, 2, 3, 4)  # GDTC chỉ xếp tiết 1-4 buổi sáng
+    gdtc_afternoon_allowed_periods: tuple = (2, 3)     # GDTC chỉ xếp tiết 2-3 buổi chiều
     chao_co_weekday: int = 2
     chao_co_period: int = 1
     max_heavy_consecutive: int = 3
