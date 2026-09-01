@@ -98,6 +98,135 @@ if result is not None:
                     rows.append(row)
                 st.dataframe(pd.DataFrame(rows), hide_index=True, use_container_width=True)
 
+        # ── Xem TKB theo Giáo viên ──
+        teacher_map = {t.teacher_id: t.name for t in inp.teachers}
+        teacher_sorted = sorted(inp.teachers, key=lambda t: t.name)
+        class_name_map = {c.class_id: c.name for c in inp.classes}
+
+        with st.expander("👩‍🏫 Xem thời khóa biểu theo Giáo viên", expanded=False):
+            # Build teacher schedule lookup
+            from collections import defaultdict as _ddict
+            _t_sched = _ddict(lambda: _ddict(list))
+            for s in inp.slots:
+                sub = result.assignment.get(s.slot_id)
+                if sub is not None and sub != -1:
+                    tid = inp.assigned_teacher.get((sub, s.class_id))
+                    if tid and tid > 0:
+                        _t_sched[tid][(s.ts.weekday, s.ts.session, s.ts.period)].append(
+                            (class_name_map.get(s.class_id, "?"), subject_names.get(sub, "?"))
+                        )
+
+            # Count periods per session for lone-session detection
+            _t_sess_counts = _ddict(int)
+            for tid in _t_sched:
+                for (wd, sess, per) in _t_sched[tid]:
+                    _t_sess_counts[(tid, wd, sess)] += 1
+
+            # Quick stats
+            total_lone = sum(1 for v in _t_sess_counts.values() if v == 1)
+            if total_lone > 0:
+                st.warning(f"⚠️ Có **{total_lone}** buổi giáo viên chỉ dạy 1 tiết (lẻ buổi).")
+            else:
+                st.success("✅ Không có giáo viên nào bị lẻ 1 tiết / buổi.")
+
+            # View mode: single teacher or all teachers overview
+            view_mode = st.radio(
+                "Chế độ xem", ["Chọn 1 GV", "Tổng quan tất cả GV"],
+                horizontal=True, key="teacher_view_mode"
+            )
+
+            if view_mode == "Chọn 1 GV":
+                chosen_teacher = st.selectbox(
+                    "Chọn giáo viên",
+                    teacher_sorted,
+                    format_func=lambda t: t.name,
+                    key="teacher_tkb_select",
+                )
+                if chosen_teacher:
+                    tid = chosen_teacher.teacher_id
+                    # Compute all sessions/periods this school uses
+                    all_periods = sorted(
+                        {(s.ts.session, s.ts.period) for s in inp.slots},
+                        key=lambda sp: (0 if sp[0] == "S" else 1, sp[1])
+                    )
+                    rows = []
+                    for (sess, per) in all_periods:
+                        row = {"Buổi": "Sáng" if sess == "S" else "Chiều", "Tiết": per}
+                        for wd in WEEKDAYS:
+                            entries = _t_sched[tid].get((wd, sess, per), [])
+                            row[WEEKDAY_NAMES[wd]] = ", ".join(f"{c} ({s})" for c, s in entries) if entries else ""
+                        rows.append(row)
+
+                    df = pd.DataFrame(rows)
+
+                    # Highlight lone sessions
+                    def _highlight_lone(row):
+                        styles = [""] * len(row)
+                        sess_code = "S" if row["Buổi"] == "Sáng" else "C"
+                        for i, col in enumerate(row.index):
+                            if col in ("Buổi", "Tiết"):
+                                continue
+                            wd_num = next((k for k, v in WEEKDAY_NAMES.items() if v == col), None)
+                            if wd_num and row[col] and _t_sess_counts.get((tid, wd_num, sess_code), 0) == 1:
+                                styles[i] = "background-color: #ffc7ce; font-weight: bold"
+                        return styles
+
+                    st.dataframe(
+                        df.style.apply(_highlight_lone, axis=1),
+                        hide_index=True, use_container_width=True,
+                    )
+
+                    # Summary stats for this teacher
+                    total_periods = sum(len(v) for k, v in _t_sched[tid].items())
+                    days_teaching = len({wd for (wd, sess, per) in _t_sched[tid]})
+                    sessions_teaching = len({(wd, sess) for (wd, sess, per) in _t_sched[tid]})
+                    lone_count = sum(
+                        1 for (wd, sess) in {(wd, sess) for (wd, sess, per) in _t_sched[tid]}
+                        if _t_sess_counts.get((tid, wd, sess), 0) == 1
+                    )
+                    col1, col2, col3, col4 = st.columns(4)
+                    col1.metric("Tổng tiết/tuần", total_periods)
+                    col2.metric("Số ngày dạy", days_teaching)
+                    col3.metric("Số buổi dạy", sessions_teaching)
+                    col4.metric("Buổi lẻ 1 tiết", lone_count, delta=f"-{lone_count}" if lone_count else None,
+                                delta_color="inverse" if lone_count else "off")
+
+            else:
+                # Overview: table with all teachers, their stats and lone sessions
+                overview_rows = []
+                for t in teacher_sorted:
+                    tid = t.teacher_id
+                    total_periods = sum(len(v) for k, v in _t_sched[tid].items())
+                    if total_periods == 0:
+                        continue
+                    sessions_set = {(wd, sess) for (wd, sess, per) in _t_sched[tid]}
+                    lone_count = sum(1 for (wd, sess) in sessions_set if _t_sess_counts.get((tid, wd, sess), 0) == 1)
+                    lone_details = []
+                    for (wd, sess) in sorted(sessions_set):
+                        if _t_sess_counts.get((tid, wd, sess), 0) == 1:
+                            sess_name = "S" if sess == "S" else "C"
+                            lone_details.append(f"{WEEKDAY_NAMES[wd]} ({sess_name})")
+                    overview_rows.append({
+                        "Giáo viên": t.name,
+                        "Tổng tiết": total_periods,
+                        "Số buổi dạy": len(sessions_set),
+                        "Buổi lẻ 1 tiết": lone_count,
+                        "Chi tiết lẻ": ", ".join(lone_details) if lone_details else "—",
+                    })
+
+                df_overview = pd.DataFrame(overview_rows)
+
+                def _highlight_lone_overview(row):
+                    return [
+                        "background-color: #ffc7ce; font-weight: bold" if col == "Buổi lẻ 1 tiết" and row[col] > 0
+                        else "" for col in row.index
+                    ]
+
+                st.dataframe(
+                    df_overview.style.apply(_highlight_lone_overview, axis=1),
+                    hide_index=True, use_container_width=True,
+                )
+
         conflicts = find_teacher_conflicts(inp.slots, result.assignment, inp.assigned_teacher)
         if conflicts:
             st.error(f"❌ Phát hiện {len(conflicts)} trường hợp GV trùng lịch.")
