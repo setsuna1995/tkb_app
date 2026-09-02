@@ -350,18 +350,24 @@ if result is not None:
             hard_rule_violations["II.3"] = missing_morning
 
         min_lone_load = getattr(inp.config, "min_weekly_periods_for_lone_penalty", 15)
-        lone_sessions = find_teacher_lone_session_violations(inp.slots, result.assignment, inp.assigned_teacher, min_lone_load)
-        lone_days = find_teacher_lone_day_violations(inp.slots, result.assignment, inp.assigned_teacher, min_lone_load)
-        if lone_sessions or lone_days:
-            hard_rule_violations["II.4"] = lone_sessions + [(tid, wd, "cả ngày") for tid, wd in lone_days]
+        if getattr(inp.config, "avoid_teacher_lone_periods", True):
+            # Gated the same way engine.py:_check_hard_post_generation_rules gates
+            # II.4/II.8 -- a school that disabled this toggle told the engine not to
+            # gate/relax on it, so the UI must not block save on it either.
+            lone_sessions = find_teacher_lone_session_violations(inp.slots, result.assignment, inp.assigned_teacher, min_lone_load)
+            lone_days = find_teacher_lone_day_violations(inp.slots, result.assignment, inp.assigned_teacher, min_lone_load)
+            if lone_sessions or lone_days:
+                hard_rule_violations["II.4"] = lone_sessions + [(tid, wd, "cả ngày") for tid, wd in lone_days]
 
-        split_days = find_teacher_split_day_violations(inp.slots, result.assignment, inp.assigned_teacher, min_lone_load)
-        if split_days:
-            hard_rule_violations["II.8"] = split_days
+            split_days = find_teacher_split_day_violations(inp.slots, result.assignment, inp.assigned_teacher, min_lone_load)
+            if split_days:
+                hard_rule_violations["II.8"] = split_days
 
-        consecutive_morning = find_teacher_4_consecutive_morning_violations(inp.slots, result.assignment, inp.assigned_teacher)
-        if consecutive_morning:
-            hard_rule_violations["II.14"] = consecutive_morning
+        if getattr(inp.config, "avoid_teacher_4_consecutive_morning", True):
+            # Gated the same way engine.py:_check_hard_post_generation_rules gates II.14.
+            consecutive_morning = find_teacher_4_consecutive_morning_violations(inp.slots, result.assignment, inp.assigned_teacher)
+            if consecutive_morning:
+                hard_rule_violations["II.14"] = consecutive_morning
 
         if hard_rule_violations:
             st.error(f"❌ Còn {len(hard_rule_violations)} tiêu chí HĐSP bắt buộc chưa được thỏa mãn (chặn lưu):")

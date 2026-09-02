@@ -314,13 +314,17 @@ def find_teacher_lone_day_violations(slots: list, assignment: dict, assigned_tea
 
 def find_teacher_split_day_violations(slots: list, assignment: dict, assigned_teacher: dict,
                                        min_weekly_periods: int = 15) -> list:
-    """Returns [(teacher_id, weekday), ...] for any teacher day with exactly 1 morning
-    period AND exactly 1 afternoon period -- Tiêu chí II.8, exempting teachers below
-    min_weekly_periods (same threshold as II.4 -- a teacher with very few periods/week
-    is structurally likely to land on an AM+PM split, so this shares II.4's exemption
-    per the 2026-09-02 Task 4 fix-round ruling). Mirrors
-    core.scheduler.quality._count_teacher_split_sessions exactly (post-fix-round,
-    that function also gained this same min_weekly_periods parameter)."""
+    """Returns [(teacher_id, weekday), ...] for any teacher day with periods in BOTH
+    sessions where at least one session has exactly 1 period (e.g. 1 AM + 1 PM, but
+    also the asymmetric case like 1 AM + 3 PM) -- Tiêu chí II.8, exempting teachers
+    below min_weekly_periods (same threshold as II.4 -- a teacher with very few
+    periods/week is structurally likely to land on a split day, so this shares II.4's
+    exemption per the 2026-09-02 Task 4 fix-round ruling). Mirrors
+    core.scheduler.quality._count_teacher_split_sessions's condition EXACTLY --
+    `S>0 and C>0 and (S==1 or C==1)`, NOT the narrower `S==1 and C==1` -- getting this
+    wrong here would silently disagree with the engine's hard gate, defeating the
+    entire point of this task (post-fix-round, that function also gained this same
+    min_weekly_periods parameter)."""
     teacher_day_sessions = defaultdict(lambda: defaultdict(int))
     teacher_totals = defaultdict(int)
     for slot in slots:
@@ -335,7 +339,9 @@ def find_teacher_split_day_violations(slots: list, assignment: dict, assigned_te
 
     violations = []
     for (teacher_id, wd), sess_counts in teacher_day_sessions.items():
-        if (sess_counts.get("S", 0) == 1 and sess_counts.get("C", 0) == 1
+        s_count = sess_counts.get("S", 0)
+        c_count = sess_counts.get("C", 0)
+        if (s_count > 0 and c_count > 0 and (s_count == 1 or c_count == 1)
                 and teacher_totals[teacher_id] >= min_weekly_periods):
             violations.append((teacher_id, wd))
     return violations
