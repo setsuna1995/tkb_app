@@ -26,9 +26,9 @@ def test_scheduling_config_has_all_hdsp_and_moet_criteria_fields():
     assert hasattr(config, "avoid_teacher_4_consecutive_morning")
     assert config.avoid_teacher_4_consecutive_morning is True
 
-    # Tiêu chí II.4: Cấu hình ngưỡng tải miễn trừ phạt lẻ tiết cho GV (default 0 = áp dụng toàn bộ)
+    # Tiêu chí II.4: Cấu hình ngưỡng tải miễn trừ phạt lẻ tiết cho GV (default 15 = miễn trừ GV <15 tiết/tuần)
     assert hasattr(config, "min_weekly_periods_for_lone_penalty")
-    assert config.min_weekly_periods_for_lone_penalty == 0
+    assert config.min_weekly_periods_for_lone_penalty == 15
 
 
 def test_teacher_max_periods_per_day_constraint():
