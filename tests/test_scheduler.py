@@ -1520,7 +1520,8 @@ def test_pick_best_scored_never_returns_none_for_a_feasible_candidate_under_heav
 
 
 def test_pick_best_scored_unbiased_with_default_config():
-    # Regression: config=None (mặc định) -> không thiên vị gì, kể cả tiết 1 buổi sáng.
+    # Regression: config with heavy_subject_priority_periods=0 (no bias) -> không thiên vị gì, kể cả tiết 1 buổi sáng.
+    # Note: Default config now has heavy_subject_priority_periods=4, so we explicitly set to 0 to test unbiased behavior.
     subjects = [Subject(1, "Toan", ROLE_NANG), Subject(2, "Nhac", ROLE_THUONG), Subject(3, "HDTN", ROLE_HDTN)]
     role_index = resolve_roles(subjects)
     assigned_teacher = {(1, 1): 100, (2, 1): 101}
@@ -1529,8 +1530,9 @@ def test_pick_best_scored_unbiased_with_default_config():
     for seed in range(10):
         state = _State(remaining_need={(1, 1): 5, (2, 1): 5}, busy=set())
         slot = Slot(1, 1, TimeSlot(1, 2, "S", 1))
+        config = SchedulingConfig(heavy_subject_priority_periods=0)  # Disable bias to test unbiased picking
         pick = sched._pick_best_scored(1, slot, state, role_index, subjects, assigned_teacher,
-                                        0.0, random.Random(seed))
+                                        0.0, random.Random(seed), config=config)
         outcomes.add(pick)
     assert len(outcomes) == 2
 
