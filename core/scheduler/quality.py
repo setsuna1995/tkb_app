@@ -47,18 +47,21 @@ def _count_teacher_lone_sessions(slots: list[Slot], assigned: dict, slot_teacher
     return sum(1 for (tid, wd, sess), count in t_sess.items() if count == 1 and teacher_totals[tid] >= min_weekly_periods)
 
 
-def _count_teacher_split_sessions(slots: list[Slot], assigned: dict, slot_teacher: dict) -> int:
+def _count_teacher_split_sessions(slots: list[Slot], assigned: dict, slot_teacher: dict, min_weekly_periods: int = 0) -> int:
     teacher_day_sessions = defaultdict(lambda: defaultdict(int))
+    teacher_totals = defaultdict(int)
     for slot in slots:
         subj = assigned.get(slot.slot_id)
         if subj not in (None, -1):
             tid = slot_teacher.get(slot.slot_id)
             if tid is not None and tid > 0:
                 teacher_day_sessions[(tid, slot.ts.weekday)][slot.ts.session] += 1
+                teacher_totals[tid] += 1
     return sum(
-        1 for sess_counts in teacher_day_sessions.values()
+        1 for (tid, wd), sess_counts in teacher_day_sessions.items()
         if sess_counts.get("S", 0) > 0 and sess_counts.get("C", 0) > 0
         and (sess_counts.get("S", 0) == 1 or sess_counts.get("C", 0) == 1)
+        and teacher_totals[tid] >= min_weekly_periods
     )
 
 
@@ -133,7 +136,7 @@ def _teacher_quality_penalty(slots: list[Slot], assigned: dict, slot_teacher: di
         penalty += _count_teacher_gaps(slots, assigned, slot_teacher) * 350
     if getattr(config, "avoid_teacher_lone_periods", True):
         penalty += _count_teacher_lone_sessions(slots, assigned, slot_teacher, min_weekly_periods=min_lone_load) * 500
-        penalty += _count_teacher_split_sessions(slots, assigned, slot_teacher) * 200
+        penalty += _count_teacher_split_sessions(slots, assigned, slot_teacher, min_weekly_periods=min_lone_load) * 200
         penalty += _count_teacher_lone_days(slots, assigned, slot_teacher, min_weekly_periods=min_lone_load) * 250
     if getattr(config, "avoid_teacher_4_consecutive_morning", True):
         penalty += _count_teacher_4_consecutive_mornings(slots, assigned, slot_teacher, max_load_for_penalty=20) * 300

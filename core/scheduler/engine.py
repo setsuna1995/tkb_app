@@ -46,7 +46,7 @@ def _check_hard_post_generation_rules(inp: SchedulingInput, state: _State, confi
         lone_days = _count_teacher_lone_days(inp.slots, state.assigned, state.slot_teacher, min_weekly_periods=min_lone_load)
         if lone_sessions > 0 or lone_days > 0:
             violated.append("II.4")
-        if _count_teacher_split_sessions(inp.slots, state.assigned, state.slot_teacher) > 0:
+        if _count_teacher_split_sessions(inp.slots, state.assigned, state.slot_teacher, min_weekly_periods=min_lone_load) > 0:
             violated.append("II.8")
     if getattr(config, "avoid_teacher_4_consecutive_morning", True):
         if _count_teacher_4_consecutive_mornings(inp.slots, state.assigned, state.slot_teacher, max_load_for_penalty=20) > 0:

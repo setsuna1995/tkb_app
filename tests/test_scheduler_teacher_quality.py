@@ -45,7 +45,7 @@ def test_mandatory_morning_weekdays_strictly_enforced():
         4: Teacher(4, "GV 4", off_sessions_override=2),
     }
     config = SchedulingConfig(mandatory_morning_weekdays=(2, 5, 6))
-    offs = sched._assign_off_slots(
+    offs, _shortfall = sched._assign_off_slots(
         set(teachers_by_id.keys()),
         teachers_by_id,
         rng,
@@ -438,7 +438,11 @@ def test_teacher_lone_sessions_heavy_penalty():
     slots = [slot1]
     assigned = {1: 100}
     slot_teacher = {1: 10}
-    config = SchedulingConfig(avoid_teacher_lone_periods=True)
+    # min_weekly_periods_for_lone_penalty explicitly 0 here: this test verifies the
+    # RAW penalty weights (500/lone-session, 250/lone-day), not the >=15-period
+    # exemption (default since Task 1 of 2026-09-02-hard-gate-hdsp-rules) -- the
+    # 1-period fixture below is intentionally far under that threshold.
+    config = SchedulingConfig(avoid_teacher_lone_periods=True, min_weekly_periods_for_lone_penalty=0)
 
     pen = sched._teacher_quality_penalty(slots, assigned, slot_teacher, config)
     # 1 lone session (* 500) + 1 lone day (* 250) = 750
