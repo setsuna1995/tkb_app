@@ -8,7 +8,11 @@ from core.validation import (
     find_invalid_gdtc_periods, find_max_heavy_violations, find_morning_only_violations,
     find_single_pair_violations, find_subject_class_rule_violations, find_teacher_conflicts,
     find_teacher_day_cap_violations, find_teacher_gaps, find_teacher_unavailability_violations,
+    find_teacher_4_consecutive_morning_violations, find_teacher_lone_day_violations,
+    find_teacher_lone_session_violations, find_teacher_missing_mandatory_morning_violations,
+    find_teacher_split_day_violations,
 )
+from core.rules_registry import RULES
 from data import repository as repo
 from ui_common import get_conn, require_auth, require_school, sidebar_backup_export, sidebar_school_switcher
 
@@ -333,6 +337,64 @@ if result is not None:
             if heavy_p3_violations:
                 st.error(f"❌ Phát hiện {len(heavy_p3_violations)} tiết môn Nặng bị xếp vào tiết 3 buổi chiều.")
 
+        # Kiểm tra các tiêu chí HĐSP được hard-gate (II.3, II.4, II.8, II.14) -- vi phạm các
+        # rule này sẽ CHẶN nút lưu (khác các cảnh báo phía trên chỉ hiển thị thông tin).
+        teacher_map = {t.teacher_id: t.name for t in inp.teachers}
+        hard_rule_violations = {}
+
+        missing_morning = find_teacher_missing_mandatory_morning_violations(
+            inp.slots, result.assignment, inp.assigned_teacher,
+            getattr(inp.config, "mandatory_morning_weekdays", (2, 5, 6)),
+        )
+        if missing_morning:
+            hard_rule_violations["II.3"] = missing_morning
+
+        min_lone_load = getattr(inp.config, "min_weekly_periods_for_lone_penalty", 15)
+        lone_sessions = find_teacher_lone_session_violations(inp.slots, result.assignment, inp.assigned_teacher, min_lone_load)
+        lone_days = find_teacher_lone_day_violations(inp.slots, result.assignment, inp.assigned_teacher, min_lone_load)
+        if lone_sessions or lone_days:
+            hard_rule_violations["II.4"] = lone_sessions + [(tid, wd, "cả ngày") for tid, wd in lone_days]
+
+        split_days = find_teacher_split_day_violations(inp.slots, result.assignment, inp.assigned_teacher, min_lone_load)
+        if split_days:
+            hard_rule_violations["II.8"] = split_days
+
+        consecutive_morning = find_teacher_4_consecutive_morning_violations(inp.slots, result.assignment, inp.assigned_teacher)
+        if consecutive_morning:
+            hard_rule_violations["II.14"] = consecutive_morning
+
+        if hard_rule_violations:
+            st.error(f"❌ Còn {len(hard_rule_violations)} tiêu chí HĐSP bắt buộc chưa được thỏa mãn (chặn lưu):")
+            for rule_id, items in hard_rule_violations.items():
+                with st.expander(f"{rule_id}: {RULES[rule_id].title_vi} ({len(items)} trường hợp)", expanded=False):
+                    for item in items:
+                        tid = item[0]
+                        tname = teacher_map.get(tid, f"GV #{tid}")
+                        rest = ", ".join(str(x) for x in item[1:])
+                        st.write(f"- {tname}: {rest}")
+
+        if result.relaxed_rules:
+            st.warning(f"⚠️ Lịch được tạo là phương án khả thi tốt nhất, nhưng {len(result.relaxed_rules)} ràng buộc HĐSP đã phải nới lỏng:")
+            for item in result.relaxed_rules:
+                rule_id = item.get("rule_id")
+                title = RULES[rule_id].title_vi if rule_id in RULES else rule_id
+                if item.get("detail") == "off_slot_shortfall":
+                    teachers_short = item.get("teachers", {})
+                    names = ", ".join(
+                        f"{teacher_map.get(tid, f'GV #{tid}')} ({got}/{need} buổi)"
+                        for tid, (got, need) in teachers_short.items()
+                    )
+                    st.write(f"- {rule_id}: {title} — thiếu buổi nghỉ cho: {names}")
+                else:
+                    st.write(f"- {rule_id}: {title}")
+
+        proceed_with_hard_violations = True
+        if hard_rule_violations:
+            proceed_with_hard_violations = st.checkbox(
+                "Vẫn lưu dù còn vi phạm tiêu chí HĐSP bắt buộc ở trên (không khuyến khích)",
+                key="proceed_with_hard_violations",
+            )
+
         # Đánh giá chất lượng lịch dạy của Giáo viên
         teacher_gaps = find_teacher_gaps(inp.slots, result.assignment, inp.assigned_teacher)
         if teacher_gaps and getattr(inp.config, "avoid_teacher_gaps", True):
@@ -367,7 +429,10 @@ if result is not None:
             hide_index=True, use_container_width=True,
         )
 
-        if st.button("✅ Chấp nhận và lưu làm lịch chính thức", type="primary"):
+        if st.button(
+            "✅ Chấp nhận và lưu làm lịch chính thức", type="primary",
+            disabled=bool(hard_rule_violations) and not proceed_with_hard_violations,
+        ):
             cells = {
                 (s.class_id, s.ts.weekday, s.ts.session, s.ts.period): result.assignment.get(s.slot_id)
                 for s in inp.slots

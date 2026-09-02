@@ -235,3 +235,132 @@ def find_heavy_afternoon_period3_violations(slots: list, assignment: dict, heavy
             if slot.ts.session == "C" and slot.ts.period == 3:
                 violations.append((slot.class_id, subject_id, slot.ts.weekday, slot.ts.session, slot.ts.period))
     return violations
+
+
+def find_teacher_missing_mandatory_morning_violations(slots: list, assignment: dict, assigned_teacher: dict,
+                                                        mandatory_mornings: tuple = (2, 5, 6)) -> list:
+    """Returns [(teacher_id, weekday), ...] for teachers (>=10 periods/week) who end up
+    with zero periods on a mandatory morning -- Tiêu chí II.3: catches an accidental
+    empty forbidden morning beyond the teacher's one designated off-slot. Mirrors
+    core.scheduler.quality._count_teacher_missing_mandatory_mornings exactly, so this
+    check and the engine's post-generation gate (core/scheduler/engine.py) never disagree."""
+    teacher_morns = defaultdict(lambda: defaultdict(int))
+    teacher_totals = defaultdict(int)
+    for slot in slots:
+        subject_id = assignment.get(slot.slot_id)
+        if subject_id is None:
+            continue
+        teacher_id = assigned_teacher.get((subject_id, slot.class_id))
+        if teacher_id is None or teacher_id <= 0:
+            continue
+        teacher_totals[teacher_id] += 1
+        if slot.ts.session == "S" and slot.ts.weekday in mandatory_mornings:
+            teacher_morns[teacher_id][slot.ts.weekday] += 1
+
+    violations = []
+    for teacher_id, total in teacher_totals.items():
+        if total >= 10:
+            for wd in mandatory_mornings:
+                if teacher_morns[teacher_id][wd] == 0:
+                    violations.append((teacher_id, wd))
+    return violations
+
+
+def find_teacher_lone_session_violations(slots: list, assignment: dict, assigned_teacher: dict,
+                                          min_weekly_periods: int = 15) -> list:
+    """Returns [(teacher_id, weekday, session), ...] for any teacher session with
+    exactly 1 period -- Tiêu chí II.4, exempting teachers below min_weekly_periods.
+    Mirrors core.scheduler.quality._count_teacher_lone_sessions exactly."""
+    t_sess = defaultdict(int)
+    teacher_totals = defaultdict(int)
+    for slot in slots:
+        subject_id = assignment.get(slot.slot_id)
+        if subject_id is None:
+            continue
+        teacher_id = assigned_teacher.get((subject_id, slot.class_id))
+        if teacher_id is None or teacher_id <= 0:
+            continue
+        t_sess[(teacher_id, slot.ts.weekday, slot.ts.session)] += 1
+        teacher_totals[teacher_id] += 1
+
+    return [
+        (tid, wd, sess) for (tid, wd, sess), count in t_sess.items()
+        if count == 1 and teacher_totals[tid] >= min_weekly_periods
+    ]
+
+
+def find_teacher_lone_day_violations(slots: list, assignment: dict, assigned_teacher: dict,
+                                      min_weekly_periods: int = 15) -> list:
+    """Returns [(teacher_id, weekday), ...] for any teacher day with exactly 1 period
+    total -- Tiêu chí II.4, exempting teachers below min_weekly_periods. Mirrors
+    core.scheduler.quality._count_teacher_lone_days exactly."""
+    teacher_days = defaultdict(int)
+    teacher_totals = defaultdict(int)
+    for slot in slots:
+        subject_id = assignment.get(slot.slot_id)
+        if subject_id is None:
+            continue
+        teacher_id = assigned_teacher.get((subject_id, slot.class_id))
+        if teacher_id is None or teacher_id <= 0:
+            continue
+        teacher_days[(teacher_id, slot.ts.weekday)] += 1
+        teacher_totals[teacher_id] += 1
+
+    return [
+        (tid, wd) for (tid, wd), count in teacher_days.items()
+        if count == 1 and teacher_totals[tid] >= min_weekly_periods
+    ]
+
+
+def find_teacher_split_day_violations(slots: list, assignment: dict, assigned_teacher: dict,
+                                       min_weekly_periods: int = 15) -> list:
+    """Returns [(teacher_id, weekday), ...] for any teacher day with exactly 1 morning
+    period AND exactly 1 afternoon period -- Tiêu chí II.8, exempting teachers below
+    min_weekly_periods (same threshold as II.4 -- a teacher with very few periods/week
+    is structurally likely to land on an AM+PM split, so this shares II.4's exemption
+    per the 2026-09-02 Task 4 fix-round ruling). Mirrors
+    core.scheduler.quality._count_teacher_split_sessions exactly (post-fix-round,
+    that function also gained this same min_weekly_periods parameter)."""
+    teacher_day_sessions = defaultdict(lambda: defaultdict(int))
+    teacher_totals = defaultdict(int)
+    for slot in slots:
+        subject_id = assignment.get(slot.slot_id)
+        if subject_id is None:
+            continue
+        teacher_id = assigned_teacher.get((subject_id, slot.class_id))
+        if teacher_id is None or teacher_id <= 0:
+            continue
+        teacher_day_sessions[(teacher_id, slot.ts.weekday)][slot.ts.session] += 1
+        teacher_totals[teacher_id] += 1
+
+    violations = []
+    for (teacher_id, wd), sess_counts in teacher_day_sessions.items():
+        if (sess_counts.get("S", 0) == 1 and sess_counts.get("C", 0) == 1
+                and teacher_totals[teacher_id] >= min_weekly_periods):
+            violations.append((teacher_id, wd))
+    return violations
+
+
+def find_teacher_4_consecutive_morning_violations(slots: list, assignment: dict, assigned_teacher: dict,
+                                                    max_load_for_penalty: int = 20) -> list:
+    """Returns [(teacher_id, weekday), ...] for any teacher with >=4 periods in one
+    morning session -- Tiêu chí II.14, exempting teachers above max_load_for_penalty.
+    Mirrors core.scheduler.quality._count_teacher_4_consecutive_mornings exactly."""
+    t_morn_periods = defaultdict(list)
+    teacher_totals = defaultdict(int)
+    for slot in slots:
+        subject_id = assignment.get(slot.slot_id)
+        if subject_id is None:
+            continue
+        teacher_id = assigned_teacher.get((subject_id, slot.class_id))
+        if teacher_id is None or teacher_id <= 0:
+            continue
+        teacher_totals[teacher_id] += 1
+        if slot.ts.session == "S":
+            t_morn_periods[(teacher_id, slot.ts.weekday)].append(slot.ts.period)
+
+    violations = []
+    for (teacher_id, wd), periods in t_morn_periods.items():
+        if len(periods) >= 4 and teacher_totals[teacher_id] <= max_load_for_penalty:
+            violations.append((teacher_id, wd))
+    return violations
