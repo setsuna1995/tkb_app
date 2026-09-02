@@ -5,7 +5,12 @@ MAX_GV_BUOI = 4          # teacher cap per session (never a "full" 5-period sess
 SO_LAN_THU = 6000         # max attempts (nâng từ 2000: ràng buộc "không để lẻ 1 tiết/buổi"
                           # khiến các khung có buổi chiều cần nhiều lượt thử hơn mới ra)
 SO_PA_TOT = 25            # stop early once this many valid attempts are found
-NGUONG_KHOA = 60          # attempts before shuffling timeslot order / discounting the "keep old" bonus
+NGUONG_KHOA = 20          # attempts before shuffling timeslot order / discounting the "keep old" bonus
+                          # (lowered from 60 on 2026-09-02: with more HARD_POST_GENERATION gates now
+                          # rejecting attempts that reproduce an old, never-validated-against-these-rules
+                          # schedule via the keep-old bonus, ~60 near-identical early attempts became
+                          # likely to fail identically -- entering exploration mode sooner spends the
+                          # SO_LAN_THU budget more usefully. Re-profile in Task 6 and adjust if needed.)
 CAP_TIET_NGAY = 5         # fallback cap khi không tính được theo khung; thực tế trần mỗi
                           # ngày = tổng số ô (sáng+chiều) khung của lớp đó ngày đó (xem
                           # day_capacity trong run()), để không chặn oan khung > 5 tiết/ngày
