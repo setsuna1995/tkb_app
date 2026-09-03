@@ -93,6 +93,40 @@ def test_set_then_get_scheduling_config_round_trips_mandatory_criteria_fields(co
     assert loaded.min_weekly_periods_for_lone_penalty == 18
 
 
+def test_set_then_get_scheduling_config_round_trips_explicit_zero_min_weekly_periods_for_lone_penalty(conn):
+    """Fix-wave Important #8 (2026-09-03): min_weekly_periods_for_lone_penalty's
+    code-level default changed from 0 to 15 (Task 1) -- an explicitly-configured 0
+    ("no exemption, apply the lone-session penalty to everyone", the OLD default
+    behavior) must round-trip as 0, not silently reset to the new default of 15.
+    The old `int(get_meta(...) or default...)` idiom is fragile for exactly this
+    "0 is meaningfully different from the current default" case; the fixed idiom
+    uses an explicit `is not None` check, matching this function's own established
+    pattern for boolean fields (e.g. hdtn_period2_afternoon just above)."""
+    custom = SchedulingConfig(min_weekly_periods_for_lone_penalty=0)
+    repo.set_scheduling_config(conn, custom)
+    loaded = repo.get_scheduling_config(conn)
+    assert loaded.min_weekly_periods_for_lone_penalty == 0
+
+
+def test_set_then_get_scheduling_config_round_trips_explicit_zero_heavy_subject_priority_periods(conn):
+    """Same bug, same story: heavy_subject_priority_periods' code-level default
+    also changed from 0 to 4 (Task 1), so an explicitly-configured 0 ("off", the
+    OLD default) must round-trip as 0 too, not the new default of 4."""
+    custom = SchedulingConfig(heavy_subject_priority_periods=0)
+    repo.set_scheduling_config(conn, custom)
+    loaded = repo.get_scheduling_config(conn)
+    assert loaded.heavy_subject_priority_periods == 0
+
+
+def test_get_scheduling_config_reads_raw_zero_string_saved_via_set_meta(conn):
+    """Same bug, exercised one level lower via set_meta directly (not through
+    set_scheduling_config) -- covers the exact DB-metadata write path the review
+    flagged: a raw stored "0" string must be read back as int 0, not fall through
+    to the (now-changed) code default of 15."""
+    repo.set_meta(conn, "sched_min_weekly_periods_for_lone_penalty", "0")
+    loaded = repo.get_scheduling_config(conn)
+    assert loaded.min_weekly_periods_for_lone_penalty == 0
+
 
 def test_upsert_and_list_teacher_round_trips_off_override_and_pins(conn):
     tid = repo.upsert_teacher(

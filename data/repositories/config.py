@@ -141,8 +141,10 @@ def get_scheduling_config(conn: sqlite3.Connection) -> SchedulingConfig:
         reserved_off_weekdays_chieu=(
             _parse_weekday_tuple(reserved_raw) if reserved_raw else default.reserved_off_weekdays_chieu
         ),
-        heavy_subject_priority_periods=int(
-            get_meta(conn, "sched_heavy_subject_priority_periods") or default.heavy_subject_priority_periods
+        heavy_subject_priority_periods=(
+            int(get_meta(conn, "sched_heavy_subject_priority_periods"))
+            if get_meta(conn, "sched_heavy_subject_priority_periods") is not None
+            else default.heavy_subject_priority_periods
         ),
         afternoon_preferred_subject_ids=(
             _parse_id_set(afternoon_preferred_raw) if afternoon_preferred_raw
@@ -202,8 +204,10 @@ def get_scheduling_config(conn: sqlite3.Connection) -> SchedulingConfig:
             bool(int(get_meta(conn, "sched_avoid_teacher_4_consecutive_morning"))) if get_meta(conn, "sched_avoid_teacher_4_consecutive_morning") is not None
             else default.avoid_teacher_4_consecutive_morning
         ),
-        min_weekly_periods_for_lone_penalty=int(
-            get_meta(conn, "sched_min_weekly_periods_for_lone_penalty") or default.min_weekly_periods_for_lone_penalty
+        min_weekly_periods_for_lone_penalty=(
+            int(get_meta(conn, "sched_min_weekly_periods_for_lone_penalty"))
+            if get_meta(conn, "sched_min_weekly_periods_for_lone_penalty") is not None
+            else default.min_weekly_periods_for_lone_penalty
         ),
     )
 
