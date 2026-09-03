@@ -260,7 +260,8 @@ def run(inp: SchedulingInput, *, max_attempts: int = SO_LAN_THU,
 
         if done:
             _repair_teacher_lone_sessions(inp, state, role_index, assigned_teacher, slots_by_class,
-                                          day_capacity, config, subject_class_allowed_cells, slot_by_coord)
+                                          day_capacity, config, subject_class_allowed_cells, slot_by_coord,
+                                          min_weekly_periods=getattr(config, "min_weekly_periods_for_lone_penalty", 15))
 
         if done and (avoid_gdtc or non_consecutive):
             for (cid, sid, wd), pos_list in state.placed.items():

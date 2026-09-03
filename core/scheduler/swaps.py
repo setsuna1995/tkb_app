@@ -80,13 +80,23 @@ def _repair_teacher_lone_sessions(inp, state: _State, role_index,
                                    day_capacity: Optional[dict] = None,
                                    config: Optional[SchedulingConfig] = None,
                                    subject_class_allowed_cells: Optional[dict] = None,
-                                   slot_by_coord: Optional[dict] = None) -> None:
+                                   slot_by_coord: Optional[dict] = None,
+                                   min_weekly_periods: int = 0) -> None:
     """Finds all teacher sessions with exactly 1 period, and attempts to eliminate them
     either by:
     1. Evacuate: Moving that 1 period to another session where the teacher already teaches,
        leaving the original session with 0 periods (giving the teacher a full session off).
     2. Consolidate: Moving a period of this teacher from another session into this session,
        making this session have >= 2 periods.
+
+    min_weekly_periods (default 0 = "no exemption, repair everyone", same
+    default-off convention as quality.py's counters): a teacher whose total
+    weekly load is below this threshold is exempt from the II.4 hard gate
+    (see engine.py/quality.py) anyway, so their lone sessions are excluded
+    from consideration here too -- otherwise this bounded repair loop
+    (max_rounds=3, first-improving-move only) wastes attempts on teachers
+    who can never violate the gate, leaving fewer rounds for teachers who
+    actually count (fix-wave Important #6, 2026-09-03).
     """
     config = config or SchedulingConfig()
     if not getattr(config, "avoid_teacher_lone_periods", True):
@@ -95,12 +105,17 @@ def _repair_teacher_lone_sessions(inp, state: _State, role_index,
     if slot_by_coord is None:
         slot_by_coord = {(s.class_id, s.ts.weekday, s.ts.session, s.ts.period): s for s in inp.slots}
 
+    teacher_totals: dict = defaultdict(int)
+    for (tid, _wd, _sess), periods in state.teacher_session_periods.items():
+        teacher_totals[tid] += len(periods)
+
     max_rounds = 3
     for _ in range(max_rounds):
         lone_teacher_sessions = [
             (tid, wd, sess)
             for (tid, wd, sess), periods in list(state.teacher_session_periods.items())
             if len(periods) == 1 and tid > 0
+            and (min_weekly_periods <= 0 or teacher_totals[tid] >= min_weekly_periods)
         ]
         if not lone_teacher_sessions:
             break
