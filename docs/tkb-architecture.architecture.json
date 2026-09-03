@@ -1,0 +1,87 @@
+{
+  "schema_version": 1,
+  "diagram_type": "architecture",
+  "meta": {
+    "title": "Kiến Trúc Tổng Thể Ứng Dụng Xếp Thời Khóa Biểu (TKB App)",
+    "output": "docs/tkb-architecture.html",
+    "visual_preset": "classic",
+    "animation": "trace",
+    "quality_profile": "showcase",
+    "views": [
+      {
+        "id": "main-pipeline",
+        "label": "Luồng Xếp Lịch & Lưu Trữ",
+        "focus": ["browser_user", "streamlit_ui", "scheduler_engine", "db_repo", "sqlite_db"],
+        "note": "Luồng tương tác chính từ giao diện người dùng qua bộ giải thuật toán đến cơ sở dữ liệu SQLite."
+      },
+      {
+        "id": "engine-internals",
+        "label": "Lõi Xử Lý Thuật Toán & Ràng Buộc",
+        "focus": ["feasibility", "scheduler_engine", "heuristics", "load_balancer"],
+        "note": "Bộ tứ engine xử lý tiền kiểm, định lượng heuristics, giải thuật hoán đổi và cân bằng tải giáo viên."
+      },
+      {
+        "id": "data-io",
+        "label": "Lớp Dữ Liệu & Xuất Nhập Excel",
+        "focus": ["streamlit_ui", "db_repo", "excel_io", "sqlite_db"],
+        "note": "Kiến trúc Multi-tenant phân tách database theo trường học và cơ chế sao lưu/đồng bộ với Excel."
+      }
+    ]
+  },
+  "components": [
+    { "id": "browser_user", "type": "external", "label": "Người Dùng", "sublabel": "Trình duyệt Web", "pos": [40, 250], "size": [120, 60] },
+    { "id": "auth_guard", "type": "security", "label": "Bảo Mật & Tenant", "sublabel": "ui_common.py", "pos": [230, 90], "size": [140, 60], "tag": "Session Guard" },
+    { "id": "streamlit_ui", "type": "frontend", "label": "Giao Diện Streamlit", "sublabel": "app.py & 11 pages", "pos": [230, 250], "size": [140, 60], "tag": "Port 8501" },
+    { "id": "feasibility", "type": "backend", "label": "Kiểm Tra Khả Thi", "sublabel": "feasibility.py", "pos": [460, 90], "size": [140, 60], "tag": "Slot Audit" },
+    { "id": "scheduler_engine", "type": "backend", "label": "Bộ Giải TKB", "sublabel": "engine.py & swaps.py", "pos": [460, 250], "size": [140, 60], "tag": "Greedy + Swap" },
+    { "id": "heuristics", "type": "backend", "label": "Quy Tắc Sư Phạm", "sublabel": "heuristics & teacher_off", "pos": [460, 410], "size": [140, 60], "tag": "Constraints" },
+    { "id": "excel_io", "type": "cloud", "label": "Bộ Nhập/Xuất Excel", "sublabel": "io_excel / openpyxl", "pos": [690, 90], "size": [140, 60], "tag": "Import / Export" },
+    { "id": "load_balancer", "type": "backend", "label": "Cân Bằng Tải GV", "sublabel": "07_Can_Bang_Tai.py", "pos": [690, 410], "size": [140, 60], "tag": "Workload Advisor" },
+    { "id": "db_repo", "type": "database", "label": "Tầng Repositories", "sublabel": "data/repositories/", "pos": [690, 250], "size": [140, 60], "tag": "CRUD Logic" },
+    { "id": "sqlite_db", "type": "database", "label": "SQLite Multi-tenant", "sublabel": "schools/<id>.db", "pos": [920, 250], "size": [130, 60], "tag": "Isolated DB" }
+  ],
+  "boundaries": [
+    { "kind": "region", "label": "Môi trường Ứng dụng (Python 3.11+ / Streamlit)", "wraps": ["auth_guard", "streamlit_ui", "feasibility", "scheduler_engine", "heuristics", "excel_io", "load_balancer", "db_repo"], "pad": 18 },
+    { "kind": "security-group", "label": "Lõi Thuật Toán Xếp Lịch (Core Scheduler)", "wraps": ["feasibility", "scheduler_engine", "heuristics", "load_balancer"], "pad": 12 }
+  ],
+  "connections": [
+    { "id": "c_user_ui", "from": "browser_user", "to": "streamlit_ui", "label": "HTTP :8501", "variant": "emphasis" },
+    { "id": "c_auth_ui", "from": "auth_guard", "to": "streamlit_ui", "label": "Xác thực & Tenant", "variant": "security", "labelDx": 50, "labelDy": 25 },
+    { "id": "c_ui_audit", "from": "streamlit_ui", "to": "feasibility", "label": "Tiền kiểm", "fromSide": "top", "toSide": "left" },
+    { "id": "c_ui_solve", "from": "streamlit_ui", "to": "scheduler_engine", "label": "Chạy xếp lịch", "variant": "emphasis", "labelDy": 14 },
+    { "id": "c_heur_solve", "from": "heuristics", "to": "scheduler_engine", "label": "Ràng buộc", "labelDx": 35 },
+    { "id": "c_solve_balance", "from": "scheduler_engine", "to": "load_balancer", "label": "Đánh giá tải" },
+    { "id": "c_solve_repo", "from": "scheduler_engine", "to": "db_repo", "label": "Lưu TKB", "variant": "emphasis" },
+    { "id": "c_excel_repo", "from": "excel_io", "to": "db_repo", "label": "Đồng bộ sheet", "labelDx": 50, "labelDy": 25 },
+    { "id": "c_repo_db", "from": "db_repo", "to": "sqlite_db", "label": "SQL SQLite", "variant": "emphasis" }
+  ],
+  "cards": [
+    {
+      "dot": "cyan",
+      "title": "Giao Diện & Phân Quyền Đa Trường",
+      "items": [
+        "Streamlit 11 trang chức năng chuyên biệt hóa từng nghiệp vụ",
+        "Mỗi trường học sở hữu 1 file database SQLite độc lập tuyệt đối",
+        "Chuyển đổi trường linh hoạt ngay trên thanh điều hướng"
+      ]
+    },
+    {
+      "dot": "emerald",
+      "title": "Lõi Thuật Toán Xếp Lịch Tối Ưu",
+      "items": [
+        "Thuật toán Greedy kết hợp Hoán đổi cục bộ (Swap-Repair) đa tầng",
+        "Hỗ trợ đảo định mức Tuần Chẵn / Tuần Lẻ",
+        "Đảm bảo 100% các ràng buộc sư phạm chuẩn mực Bộ Giáo Dục"
+      ]
+    },
+    {
+      "dot": "violet",
+      "title": "Tích Hợp & Sao Lưu Excel Toàn Diện",
+      "items": [
+        "Tương thích với định dạng Excel mẫu quản lý trường học (.xlsm / .xlsx)",
+        "Xuất tự động thời khóa biểu toàn trường và TKB riêng cho từng GV",
+        "Cơ chế sao lưu và khôi phục tức thì thông qua file Excel"
+      ]
+    }
+  ]
+}

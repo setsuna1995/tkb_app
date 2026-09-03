@@ -6,16 +6,17 @@ from copy import copy
 from collections import defaultdict
 from openpyxl.styles import PatternFill, Alignment, Font, Border, Side
 
-def build_standard_tkb_ha():
+def build_standard_tkb_ha(sheet_source="Sheet1", output_file="TKB_Ha_Chuan.xlsx"):
     input_file = "TKB Hà.xlsx"
-    output_file = "TKB_Ha_Chuan.xlsx"
     template_path = os.path.join("io_excel", "export_template.xlsm")
-    
-    # 1. Connect to DB to get metadata (roles, reduction, etc.)
     db_path = os.path.join("schools", "truong-thcs.db")
-    conn = sqlite3.connect(db_path)
-    conn.row_factory = sqlite3.Row
 
+    if not os.path.exists(input_file):
+        raise FileNotFoundError(f"Không tìm thấy file nguồn: {input_file}")
+    if not os.path.exists(template_path):
+        raise FileNotFoundError(f"Không tìm thấy template: {template_path}")
+
+    # 1. Connect to DB to get metadata dynamically if available
     classes = [
         {"class_id": 1, "name": "6A5", "sort_order": 0},
         {"class_id": 2, "name": "6A6", "sort_order": 1},
@@ -77,9 +78,30 @@ def build_standard_tkb_ha():
         "Thư ký HĐ": 2,
     }
 
+    db_periods = {}
+    unavailability_db = []
+    if os.path.exists(db_path):
+        conn = sqlite3.connect(db_path)
+        conn.row_factory = sqlite3.Row
+        try:
+            for r in conn.execute('SELECT s.name as subj, c.name as cls, p.parity, p.periods FROM periods_per_week p JOIN subjects s ON p.subject_id = s.subject_id JOIN classes c ON p.class_id = c.class_id').fetchall():
+                db_periods[(r['subj'], r['cls'], r['parity'])] = r['periods']
+            unavailability_db = conn.execute('''
+                SELECT t.name as tea, u.weekday, u.session, u.period
+                FROM teacher_unavailability u
+                JOIN teachers t ON u.teacher_id = t.teacher_id
+                ORDER BY u.row_id
+            ''').fetchall()
+        except Exception:
+            pass
+        finally:
+            conn.close()
+
     # 2. Parse TKB Hà.xlsx
     wb_ha = openpyxl.load_workbook(input_file, data_only=True)
-    ws_ha = wb_ha["Sheet1"]
+    if sheet_source not in wb_ha.sheetnames:
+        sheet_source = wb_ha.sheetnames[0]
+    ws_ha = wb_ha[sheet_source]
 
     teacher_map = {
         'Giang': 'Giang',
@@ -177,17 +199,16 @@ def build_standard_tkb_ha():
         (39, 'Thứ 6', 6, 'S', 5),
     ]
 
-    tkb_grid = {} # (cls_name, wd, session, period) -> {"subject": s, "teacher": t}
-    teacher_assignments = {} # (subj_name, cls_name) -> teacher_name
-    period_counts_c = defaultdict(lambda: defaultdict(int)) # (subj_name, cls_name) -> count
-
+    tkb_grid = {}
+    teacher_assignments = {}
+    period_counts_c = defaultdict(lambda: defaultdict(int))
     slot_teacher_classes = defaultdict(list)
 
     for r, day_name, wd, session, period in slot_defs:
         for c_idx, cls_name in enumerate(class_names):
             col = 3 + c_idx
             raw_val = ws_ha.cell(r, col).value
-            if not raw_val or str(raw_val).strip() in ('', '.;'):
+            if not raw_val or str(raw_val).strip() in ('', '.;', '.'):
                 continue
             subj_raw, tea_raw = parse_cell(raw_val)
             t_canonical = teacher_map.get(tea_raw, tea_raw)
@@ -200,7 +221,8 @@ def build_standard_tkb_ha():
             }
             teacher_assignments[(s_canonical, cls_name)] = t_canonical
             period_counts_c[cls_name][s_canonical] += 1
-            slot_teacher_classes[(t_canonical, wd, session, period)].append(cls_name)
+            if t_canonical:
+                slot_teacher_classes[(t_canonical, wd, session, period)].append(cls_name)
 
     conflicts = {k: v for k, v in slot_teacher_classes.items() if len(v) > 1}
 
@@ -261,7 +283,6 @@ def build_standard_tkb_ha():
     ws_pc = wb["PhanCong"]
     _clear_values(ws_pc, first_data_row=2)
     n_classes = len(classes)
-    n_subjects = len(subjects)
     code_col = 2 + n_classes + 1
     for i, cls in enumerate(classes):
         ws_pc.cell(2, 2 + i).value = cls["name"]
@@ -276,11 +297,6 @@ def build_standard_tkb_ha():
             ws_pc.cell(row, 2 + i).value = tea
 
     # 5. Fill SoTiet
-    # Get DB periods_per_week for Odd weeks
-    db_periods = {}
-    for r in conn.execute('SELECT s.name as subj, c.name as cls, p.parity, p.periods FROM periods_per_week p JOIN subjects s ON p.subject_id = s.subject_id JOIN classes c ON p.class_id = c.class_id').fetchall():
-        db_periods[(r['subj'], r['cls'], r['parity'])] = r['periods']
-
     ws_st = wb["SoTiet"]
     _clear_values(ws_st, first_data_row=2)
     odd_start_col = 2 + n_classes + 1
@@ -291,7 +307,6 @@ def build_standard_tkb_ha():
         row = 3 + r
         ws_st.cell(row, 1).value = subj["name"]
         for i, cls in enumerate(classes):
-            # Even week: exact count from TKB Hà
             cnt_c = period_counts_c[cls["name"]].get(subj["name"], 0)
             cnt_l = db_periods.get((subj["name"], cls["name"], "L"), cnt_c)
             ws_st.cell(row, 2 + i).value = cnt_c
@@ -328,24 +343,15 @@ def build_standard_tkb_ha():
     ws_gb.cell(2, 2).value = "Thứ"
     ws_gb.cell(2, 3).value = "Buổi"
     ws_gb.cell(2, 4).value = "Tiết"
-    unavailability_db = conn.execute('''
-        SELECT t.name as tea, u.weekday, u.session, u.period
-        FROM teacher_unavailability u
-        JOIN teachers t ON u.teacher_id = t.teacher_id
-        ORDER BY u.row_id
-    ''').fetchall()
-    for r, row_data in enumerate(unavailability_db):
-        row = 3 + r
-        ws_gb.cell(row, 1).value = row_data["tea"]
-        ws_gb.cell(row, 2).value = row_data["weekday"]
-        ws_gb.cell(row, 3).value = row_data["session"]
-        ws_gb.cell(row, 4).value = row_data["period"]
+    if unavailability_db:
+        for r, row_data in enumerate(unavailability_db):
+            row = 3 + r
+            ws_gb.cell(row, 1).value = row_data["tea"]
+            ws_gb.cell(row, 2).value = row_data["weekday"]
+            ws_gb.cell(row, 3).value = row_data["session"]
+            ws_gb.cell(row, 4).value = row_data["period"]
 
     # 8. Define Frame for each class
-    # 6A5, 6A6, 7A4, 7A5: S: 4, C: 3
-    # 8A5, 8A6, 9A5, 9A6: S: 4 standard (short/outlier: T6 S=5), C: 3
-    # Row layout: for classes 6-7: (S1..S4, C1..C3) -> 7 rows per class
-    # for classes 8-9: (S1..S5, C1..C3) -> 8 rows per class
     class_sessions = {}
     for cls in classes:
         cls_name = cls["name"]
@@ -381,7 +387,6 @@ def build_standard_tkb_ha():
                     ws_nh.cell(row_idx, col).value = item["subject"]
                     ws_khung.cell(row_idx, col).value = "x"
                 else:
-                    # Check if slot is active according to schedule rules (T2..T6 morning, T2..T4 afternoon)
                     if session == "S":
                         if period <= 4 and wd in (2, 3, 4, 5, 6):
                             ws_khung.cell(row_idx, col).value = "x"
@@ -394,8 +399,6 @@ def build_standard_tkb_ha():
 
     # 10. Fill TKB, TKB_Mon, TKB_GV
     ws_tkb = wb["TKB"]
-    ws_mon = wb["TKB_Nhap"] # We'll keep TKB_Nhap for import and copy or fill TKB_Mon if present
-    # In template: we have TKB, TKB_GV, TKB_Nhap. Let's create TKB_Mon sheet as well!
     if "TKB_Mon" not in wb.sheetnames:
         ws_mon = wb.copy_worksheet(wb["TKB"])
         ws_mon.title = "TKB_Mon"
@@ -403,7 +406,6 @@ def build_standard_tkb_ha():
         ws_mon = wb["TKB_Mon"]
     ws_gv = wb["TKB_GV"]
 
-    # Fill result sheets
     for ws_target, mode in [(ws_tkb, "full"), (ws_mon, "subject"), (ws_gv, "teacher")]:
         white_style, gray_style = _detect_banding(ws_target, first_data_row=2, n_cols=10)
         _clear_values(ws_target, first_data_row=2)
@@ -459,22 +461,7 @@ def build_standard_tkb_ha():
         _autofit_sheet(wb[name])
 
     # Reorder sheets logically:
-    # 1. TKB (Full)
-    # 2. TKB_Mon (Subject only)
-    # 3. TKB_GV (Teacher only)
-    # 4. PhanCong
-    # 5. SoTiet
-    # 6. DinhMuc_GV
-    # 7. GV_Ban
-    # 8. Khung
-    # 9. TKB_Nhap
-    # 10. TuanConfig
-    # 11. HuongDan
-    # 12. HuongDan_ChiTiet
-    # 13. KiemTra
     sheet_order = ["TKB", "TKB_Mon", "TKB_GV", "PhanCong", "SoTiet", "DinhMuc_GV", "GV_Ban", "Khung", "TKB_Nhap", "TuanConfig", "KiemTra", "HuongDan", "HuongDan_ChiTiet"]
-    
-    # Filter only sheets that exist
     ordered_sheets = [s for s in sheet_order if s in wb.sheetnames]
     for s in wb.sheetnames:
         if s not in ordered_sheets:
@@ -483,7 +470,14 @@ def build_standard_tkb_ha():
 
     # Save
     wb.save(output_file)
-    print(f"Successfully generated {output_file} with sheets: {wb.sheetnames}")
+    print(f"Successfully generated {output_file} from {sheet_source} with sheets: {wb.sheetnames}")
+    return output_file
+
+def main():
+    # Generate standard file for Sheet1
+    build_standard_tkb_ha(sheet_source="Sheet1", output_file="TKB_Ha_Chuan.xlsx")
+    # Also generate standard file for Sheet2 (the optimized variation)
+    build_standard_tkb_ha(sheet_source="Sheet2", output_file="TKB_Ha_Chuan_Sheet2.xlsx")
 
 if __name__ == "__main__":
-    build_standard_tkb_ha()
+    main()

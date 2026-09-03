@@ -1,0 +1,104 @@
+{
+  "schema_version": 2,
+  "diagram_type": "workflow",
+  "meta": {
+    "title": "Quy trình Xếp Thời Khóa Biểu Tự Động (TKB Scheduler)",
+    "animation": "trace",
+    "visual_preset": "classic",
+    "quality_profile": "showcase",
+    "views": [
+      {
+        "id": "full-flow",
+        "label": "Luồng Xếp Lịch Hoàn Chỉnh",
+        "focus": ["input_data", "feasibility", "day_off", "greedy", "swap_repair", "eval_score", "balance_save", "export_excel"],
+        "note": "Toàn bộ quy trình từ nhập cấu hình, giải thuật tối ưu đa tầng đến xuất file Excel hoàn chỉnh."
+      },
+      {
+        "id": "engine-core",
+        "label": "Lõi Thuật Toán Xếp Lịch",
+        "focus": ["feasibility", "day_off", "greedy", "swap_repair", "eval_score"],
+        "note": "Quy trình kết hợp Heuristics, Greedy Placement và Swap-Repair local search giải quyết ràng buộc sư phạm."
+      },
+      {
+        "id": "audit-recovery",
+        "label": "Kiểm Tra Khả Thi & Xử Lý Lỗi",
+        "focus": ["input_data", "feasibility", "conflict_alert"],
+        "note": "Tiền kiểm tra xung đột định mức, số tiết/buổi và khung giờ trước khi đưa vào bộ giải."
+      }
+    ],
+    "output": "docs/tkb-workflow.html"
+  },
+  "lanes": [
+    { "id": "ui", "label": "Giao diện & Cấu hình (Streamlit UI)" },
+    { "id": "audit", "label": "Tiền kiểm & Quy tắc (Audit Rules)", "variant": "exception" },
+    { "id": "engine", "label": "Bộ giải Thuật toán (Scheduler Engine)" },
+    { "id": "output", "label": "Hậu kiểm & Lưu trữ (Data & Export)" }
+  ],
+  "phases": [
+    { "id": "prep", "label": "Giai đoạn 1: Chuẩn bị & Tiền kiểm", "fromCol": 0, "toCol": 1 },
+    { "id": "solve", "label": "Giai đoạn 2: Giải thuật Tối ưu Đa tầng", "fromCol": 2, "toCol": 4, "variant": "emphasis" },
+    { "id": "publish", "label": "Giai đoạn 3: Hậu kiểm & Xuất bản", "fromCol": 5, "toCol": 5, "variant": "dashed" }
+  ],
+  "groups": [
+    { "id": "grp_input", "label": "Dữ liệu đầu vào", "lane": "ui", "fromCol": 0, "toCol": 0 },
+    { "id": "grp_check", "label": "Kiểm định ràng buộc", "lane": "audit", "fromCol": 1, "toCol": 1, "variant": "security" },
+    { "id": "grp_engine", "label": "Tối ưu hóa Lịch học", "lane": "engine", "fromCol": 2, "toCol": 4, "variant": "emphasis" },
+    { "id": "grp_export", "label": "Xuất bản kết quả", "lane": "output", "fromCol": 5, "toCol": 5 }
+  ],
+  "mainPath": ["input_data", "feasibility", "day_off", "greedy", "swap_repair", "eval_score", "balance_save", "export_excel"],
+  "nodes": [
+    { "id": "input_data", "lane": "ui", "col": 0, "type": "frontend", "label": "Nhập Cấu Hình", "sublabel": "Phân công, định mức, GV bận", "tag": "Input Data", "width": 136 },
+    { "id": "feasibility", "lane": "audit", "col": 1, "type": "security", "label": "Kiểm Tra Khả Thi", "sublabel": "Kiểm tra slot & xung đột", "tag": "Feasibility Check", "width": 136 },
+    { "id": "conflict_alert", "lane": "audit", "col": 2, "type": "security", "label": "Báo Xung Đột", "sublabel": "Quá tải hoặc kẹt lịch", "tag": "Blocked / Alert", "width": 136 },
+    { "id": "day_off", "lane": "engine", "col": 2, "type": "backend", "label": "Xếp Buổi Nghỉ GV", "sublabel": "1 buổi/tuần, né T2/T7 GVCN", "tag": "Teacher Off-day", "width": 136 },
+    { "id": "greedy", "lane": "engine", "col": 3, "type": "backend", "label": "Xếp Greedy Ban Đầu", "sublabel": "Tiết kép Văn, né TD T5", "tag": "Heuristics Placement", "width": 136 },
+    { "id": "swap_repair", "lane": "engine", "col": 4, "type": "backend", "label": "Tối Ưu Swap-Repair", "sublabel": "Hoán đổi 2-opt & đa seed", "tag": "Local Search", "width": 136 },
+    { "id": "eval_score", "lane": "output", "col": 4, "type": "backend", "label": "Chấm Điểm Ràng Buộc", "sublabel": "Tính penalty sư phạm", "tag": "Fitness Score", "width": 136 },
+    { "id": "balance_save", "lane": "output", "col": 5, "type": "database", "label": "Cân Bằng Tải & Lưu", "sublabel": "Đề xuất tải & Lưu SQLite", "tag": "SQLite Persistence", "width": 136 },
+    { "id": "export_excel", "lane": "ui", "col": 5, "type": "external", "label": "Xuất File Excel", "sublabel": "TKB trường & giáo viên", "tag": "Excel Output", "width": 136 }
+  ],
+  "edges": [
+    { "id": "e_input_to_check", "from": "input_data", "to": "feasibility", "label": "Bắt đầu xếp TKB", "variant": "emphasis" },
+    { "id": "e_check_to_dayoff", "from": "feasibility", "to": "day_off", "label": "Hợp lệ", "variant": "emphasis" },
+    { "id": "e_check_to_conflict", "from": "feasibility", "to": "conflict_alert", "label": "Phát hiện lỗi", "variant": "security", "role": "error" },
+    { "id": "e_conflict_return", "from": "conflict_alert", "to": "input_data", "label": "Chỉnh sửa dữ liệu", "variant": "dashed", "role": "return" },
+    { "id": "e_dayoff_to_greedy", "from": "day_off", "to": "greedy", "variant": "default" },
+    { "id": "e_greedy_to_swap", "from": "greedy", "to": "swap_repair", "label": "Khởi tạo xong", "variant": "default" },
+    { "id": "e_swap_to_eval", "from": "swap_repair", "to": "eval_score", "variant": "emphasis" },
+    { "id": "e_eval_retry", "from": "eval_score", "to": "swap_repair", "label": "Thử lại đa seed", "variant": "dashed", "role": "branch" },
+    { "id": "e_eval_to_save", "from": "eval_score", "to": "balance_save", "label": "Đạt điểm tối ưu", "variant": "emphasis" },
+    { "id": "e_save_to_export", "from": "balance_save", "to": "export_excel", "label": "Tải xuống TKB", "variant": "emphasis" }
+  ],
+  "cards": [
+    {
+      "dot": "cyan",
+      "title": "Ràng Buộc Sư Phạm Bắt Buộc (Hard Rules)",
+      "items": [
+        "Không trùng tiết của giáo viên tại cùng thời điểm",
+        "Môn nặng (Toán/Lý/Hóa/Văn) tối đa 3 tiết/buổi",
+        "Tiết kép Ngữ văn liền nhau cùng buổi, Thể dục né tiết 5",
+        "Chào cờ sáng Thứ 2 tiết 1, Sinh hoạt lớp Thứ 7 tiết 5",
+        "Chiều Thứ 5 & Thứ 6 để trống dành cho phụ đạo ngoại khóa"
+      ]
+    },
+    {
+      "dot": "emerald",
+      "title": "Cơ Chế Tối Ưu Hóa & Cân Bằng Tải",
+      "items": [
+        "Mỗi giáo viên có đúng 1 buổi nghỉ cố định trong tuần",
+        "Không xếp buổi nào bị lẻ đúng 1 tiết",
+        "Tối ưu hóa đa khởi động (Multi-restart seeds) tìm phương án tốt nhất",
+        "Đề xuất san sẻ tải giữa các GV cùng môn khi vượt định mức"
+      ]
+    },
+    {
+      "dot": "violet",
+      "title": "Lưu Trữ & Xuất Bản",
+      "items": [
+        "Multi-tenant SQLite: mỗi trường một database độc lập",
+        "Lưu lịch sử từng tuần, cho phép phục hồi chính xác theo Seed",
+        "Xuất file Excel chuẩn hóa gồm sheet Toàn trường & từng Giáo viên"
+      ]
+    }
+  ]
+}

@@ -9,3 +9,4 @@ __pycache__/
 /TKB_*.xlsm
 .playwright-mcp/
 .worktrees/
+.agents
