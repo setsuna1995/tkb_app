@@ -15,7 +15,13 @@ which rule was relaxed and for which teacher when the engine had to fall
 back.
 
 **Prerequisite:** Task 3 (`core/rules_registry.py`) and Task 4 (`engine.py`
-gate + `relaxed_rules`) must be complete.
+gate + `relaxed_rules`) must be complete. **Also requires Task 4's fix round 1**
+(ledger entry 2026-09-02): `core/scheduler/quality.py:_count_teacher_split_sessions`
+was extended with a `min_weekly_periods: int = 0` parameter, matching its 3
+sibling counters — `find_teacher_split_day_violations` below must accept and
+apply the SAME threshold, or the UI validator and the engine's hard gate will
+silently disagree about which teachers are exempt from II.8, defeating the
+whole point of this task (single source of truth between gate and UI).
 
 **Note on why this task has no automated UI test:** `pages/*.py` files in
 this codebase are Streamlit scripts with no existing unit test coverage
@@ -34,7 +40,7 @@ lives.
   `find_teacher_missing_mandatory_morning_violations(slots, assignment, assigned_teacher, mandatory_mornings=(2,5,6)) -> list[tuple[int,int]]`,
   `find_teacher_lone_session_violations(slots, assignment, assigned_teacher, min_weekly_periods=15) -> list[tuple[int,int,str]]`,
   `find_teacher_lone_day_violations(slots, assignment, assigned_teacher, min_weekly_periods=15) -> list[tuple[int,int]]`,
-  `find_teacher_split_day_violations(slots, assignment, assigned_teacher) -> list[tuple[int,int]]`,
+  `find_teacher_split_day_violations(slots, assignment, assigned_teacher, min_weekly_periods=15) -> list[tuple[int,int]]`,
   `find_teacher_4_consecutive_morning_violations(slots, assignment, assigned_teacher, max_load_for_penalty=20) -> list[tuple[int,int]]`.
 - Consumes: `core.rules_registry.RULES`, `core.rules_registry.HARD_POST_GENERATION_IDS` (Task 3); `ScheduleResult.relaxed_rules` (Task 1/4).
 
@@ -83,13 +89,32 @@ def test_find_teacher_lone_day_violations():
     assert find_teacher_lone_day_violations(slots, assignment, assigned_teacher, min_weekly_periods=0) == [(1, 2)]
 
 
-def test_find_teacher_split_day_violations():
+def test_find_teacher_split_day_violations_exempts_low_load():
+    # Teacher 1: split day (1 AM + 1 PM), but total load (2) < default threshold (15) -> exempt.
     slots = _slots_for([(2, 1)], session="S") + _slots_for([(2, 2)], session="C")
     for i, s in enumerate(slots):
         s.slot_id = i + 1
     assignment = {s.slot_id: 1 for s in slots}
     assigned_teacher = {(1, 101): 1}
-    assert find_teacher_split_day_violations(slots, assignment, assigned_teacher) == [(1, 2)]
+    assert find_teacher_split_day_violations(slots, assignment, assigned_teacher, min_weekly_periods=15) == []
+    assert find_teacher_split_day_violations(slots, assignment, assigned_teacher, min_weekly_periods=0) == [(1, 2)]
+
+
+def test_find_teacher_split_day_violations_catches_asymmetric_split():
+    # Teacher 1: 1 AM period + 3 PM periods on the same day (still a "split day" per
+    # II.8's actual definition -- one session is a lone period while the other also
+    # has periods -- NOT limited to the exact 1-AM-and-1-PM case).
+    am_slots = _slots_for([(2, 1)], session="S")
+    pm_slots = [Slot(90 + i, 101, TimeSlot(90 + i, 2, "C", p)) for i, p in enumerate((1, 2, 3))]
+    slots = am_slots + pm_slots
+    for i, s in enumerate(slots):
+        s.slot_id = i + 1
+    assignment = {s.slot_id: 1 for s in slots}
+    assigned_teacher = {(1, 101): 1}
+    # 4 total periods, still below default 15 -> exempt by default
+    assert find_teacher_split_day_violations(slots, assignment, assigned_teacher, min_weekly_periods=15) == []
+    # With the exemption disabled, the asymmetric split must be caught
+    assert find_teacher_split_day_violations(slots, assignment, assigned_teacher, min_weekly_periods=0) == [(1, 2)]
 
 
 def test_find_teacher_4_consecutive_morning_violations():
@@ -186,11 +211,21 @@ def find_teacher_lone_day_violations(slots: list, assignment: dict, assigned_tea
     ]
 
 
-def find_teacher_split_day_violations(slots: list, assignment: dict, assigned_teacher: dict) -> list:
-    """Returns [(teacher_id, weekday), ...] for any teacher day with exactly 1 morning
-    period AND exactly 1 afternoon period -- Tiêu chí II.8. Mirrors
-    core.scheduler.quality._count_teacher_split_sessions exactly."""
+def find_teacher_split_day_violations(slots: list, assignment: dict, assigned_teacher: dict,
+                                       min_weekly_periods: int = 15) -> list:
+    """Returns [(teacher_id, weekday), ...] for any teacher day with periods in BOTH
+    sessions where at least one session has exactly 1 period (e.g. 1 AM + 1 PM, but
+    also the asymmetric case like 1 AM + 3 PM) -- Tiêu chí II.8, exempting teachers
+    below min_weekly_periods (same threshold as II.4 -- a teacher with very few
+    periods/week is structurally likely to land on a split day, so this shares II.4's
+    exemption per the 2026-09-02 Task 4 fix-round ruling). Mirrors
+    core.scheduler.quality._count_teacher_split_sessions's condition EXACTLY --
+    `S>0 and C>0 and (S==1 or C==1)`, NOT the narrower `S==1 and C==1` -- getting this
+    wrong here would silently disagree with the engine's hard gate, defeating the
+    entire point of this task (post-fix-round, that function also gained this same
+    min_weekly_periods parameter)."""
     teacher_day_sessions = defaultdict(lambda: defaultdict(int))
+    teacher_totals = defaultdict(int)
     for slot in slots:
         subject_id = assignment.get(slot.slot_id)
         if subject_id is None:
@@ -199,10 +234,14 @@ def find_teacher_split_day_violations(slots: list, assignment: dict, assigned_te
         if teacher_id is None or teacher_id <= 0:
             continue
         teacher_day_sessions[(teacher_id, slot.ts.weekday)][slot.ts.session] += 1
+        teacher_totals[teacher_id] += 1
 
     violations = []
     for (teacher_id, wd), sess_counts in teacher_day_sessions.items():
-        if sess_counts.get("S", 0) == 1 and sess_counts.get("C", 0) == 1:
+        s_count = sess_counts.get("S", 0)
+        c_count = sess_counts.get("C", 0)
+        if (s_count > 0 and c_count > 0 and (s_count == 1 or c_count == 1)
+                and teacher_totals[teacher_id] >= min_weekly_periods):
             violations.append((teacher_id, wd))
     return violations
 
@@ -271,18 +310,24 @@ chiều" block (immediately after line 334, `st.error(f"❌ Phát hiện {len(he
             hard_rule_violations["II.3"] = missing_morning
 
         min_lone_load = getattr(inp.config, "min_weekly_periods_for_lone_penalty", 15)
-        lone_sessions = find_teacher_lone_session_violations(inp.slots, result.assignment, inp.assigned_teacher, min_lone_load)
-        lone_days = find_teacher_lone_day_violations(inp.slots, result.assignment, inp.assigned_teacher, min_lone_load)
-        if lone_sessions or lone_days:
-            hard_rule_violations["II.4"] = lone_sessions + [(tid, wd, "cả ngày") for tid, wd in lone_days]
+        if getattr(inp.config, "avoid_teacher_lone_periods", True):
+            # Gated the same way engine.py:_check_hard_post_generation_rules gates
+            # II.4/II.8 -- a school that disabled this toggle told the engine not to
+            # gate/relax on it, so the UI must not block save on it either.
+            lone_sessions = find_teacher_lone_session_violations(inp.slots, result.assignment, inp.assigned_teacher, min_lone_load)
+            lone_days = find_teacher_lone_day_violations(inp.slots, result.assignment, inp.assigned_teacher, min_lone_load)
+            if lone_sessions or lone_days:
+                hard_rule_violations["II.4"] = lone_sessions + [(tid, wd, "cả ngày") for tid, wd in lone_days]
 
-        split_days = find_teacher_split_day_violations(inp.slots, result.assignment, inp.assigned_teacher)
-        if split_days:
-            hard_rule_violations["II.8"] = split_days
+            split_days = find_teacher_split_day_violations(inp.slots, result.assignment, inp.assigned_teacher, min_lone_load)
+            if split_days:
+                hard_rule_violations["II.8"] = split_days
 
-        consecutive_morning = find_teacher_4_consecutive_morning_violations(inp.slots, result.assignment, inp.assigned_teacher)
-        if consecutive_morning:
-            hard_rule_violations["II.14"] = consecutive_morning
+        if getattr(inp.config, "avoid_teacher_4_consecutive_morning", True):
+            # Gated the same way engine.py:_check_hard_post_generation_rules gates II.14.
+            consecutive_morning = find_teacher_4_consecutive_morning_violations(inp.slots, result.assignment, inp.assigned_teacher)
+            if consecutive_morning:
+                hard_rule_violations["II.14"] = consecutive_morning
 
         if hard_rule_violations:
             st.error(f"❌ Còn {len(hard_rule_violations)} tiêu chí HĐSP bắt buộc chưa được thỏa mãn (chặn lưu):")

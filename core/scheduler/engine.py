@@ -3,7 +3,7 @@ from __future__ import annotations
 
 import random
 from collections import defaultdict
-from core.models import ScheduleResult, SchedulingInput
+from core.models import ScheduleResult, SchedulingConfig, SchedulingInput
 from core.roles import resolve_roles
 from core.scheduler.blocks import (
     _has_unpaired_block, _repair_unpaired_blocks, _try_place_block_atomically,
@@ -16,13 +16,56 @@ from core.scheduler.heuristics import _pick_best_scored
 from core.scheduler.placement import (
     _build_effective_assigned_teacher, _put_at,
 )
-from core.scheduler.quality import _teacher_quality_penalty
+from core.scheduler.quality import (
+    _count_teacher_4_consecutive_mornings, _count_teacher_lone_days,
+    _count_teacher_lone_sessions, _count_teacher_missing_mandatory_mornings,
+    _count_teacher_split_sessions, _teacher_quality_penalty,
+)
 from core.scheduler.state import _State
 from core.scheduler.swaps import (
     _has_lone_period, _repair_lone_periods, _repair_teacher_lone_sessions,
     _try_swap_repair,
 )
 from core.scheduler.teacher_off import _assign_off_slots
+
+
+def _check_hard_post_generation_rules(inp: SchedulingInput, state: _State, config: SchedulingConfig) -> tuple[list, int]:
+    """Post-generation hard gate for the HĐSP rules that need full-schedule
+    visibility (see core/rules_registry.py for tier classification: II.3,
+    II.4, II.8, II.14 are HARD_POST_GENERATION). Reuses the same per-teacher
+    counters quality.py uses for soft scoring, but as boolean reject-or-keep
+    gates instead of penalty accumulators. Returns (violated_rule_ids, total)
+    where violated_rule_ids is a list of *distinct* violated rule IDs, e.g.
+    ["II.4", "II.8"] (or [] when fully compliant), and total is the total
+    count of individual violation instances across all rules -- callers that
+    rank candidates by "how bad" must use total, not len(violated_rule_ids):
+    a candidate with 3 lone-session teachers is objectively worse than one
+    with 1 lone-session + 1 split-day teacher, even though the latter spans
+    more distinct rule IDs (fix-wave Important #2/#3, 2026-09-03)."""
+    violated = []
+    total = 0
+    mand_morns = getattr(config, "mandatory_morning_weekdays", (2, 5, 6))
+    missing = _count_teacher_missing_mandatory_mornings(inp.slots, state.assigned, state.slot_teacher, mand_morns)
+    if missing > 0:
+        violated.append("II.3")
+    total += missing
+    if getattr(config, "avoid_teacher_lone_periods", True):
+        min_lone_load = getattr(config, "min_weekly_periods_for_lone_penalty", 15)
+        lone_sessions = _count_teacher_lone_sessions(inp.slots, state.assigned, state.slot_teacher, min_weekly_periods=min_lone_load)
+        lone_days = _count_teacher_lone_days(inp.slots, state.assigned, state.slot_teacher, min_weekly_periods=min_lone_load)
+        if lone_sessions > 0 or lone_days > 0:
+            violated.append("II.4")
+        total += lone_sessions + lone_days
+        split = _count_teacher_split_sessions(inp.slots, state.assigned, state.slot_teacher, min_weekly_periods=min_lone_load)
+        if split > 0:
+            violated.append("II.8")
+        total += split
+    if getattr(config, "avoid_teacher_4_consecutive_morning", True):
+        consecutive = _count_teacher_4_consecutive_mornings(inp.slots, state.assigned, state.slot_teacher, max_load_for_penalty=20)
+        if consecutive > 0:
+            violated.append("II.14")
+        total += consecutive
+    return violated, total
 
 
 def run(inp: SchedulingInput, *, max_attempts: int = SO_LAN_THU,
@@ -94,6 +137,11 @@ def run(inp: SchedulingInput, *, max_attempts: int = SO_LAN_THU,
     best_assignment = None
     best_changed = None
     best_quality_score = None
+    best_relaxed_assignment = None
+    best_relaxed_changed = None
+    best_relaxed_score = None
+    best_relaxed_violations = None
+    off_shortfall = {}
     successes = 0
     attempts_tried = 0
 
@@ -108,7 +156,7 @@ def run(inp: SchedulingInput, *, max_attempts: int = SO_LAN_THU,
         for cls in inp.classes:
             state.rem_need_count[cls.class_id] = need_cls[cls.class_id]
             state.rem_slot_count[cls.class_id] = slot_cls_n[cls.class_id]
-        state.gv_off_slots = _assign_off_slots(
+        state.gv_off_slots, off_shortfall = _assign_off_slots(
             all_teacher_ids, teachers_by_id, rng, gvcn_shl_cell,
             off_slot_count=config.teacher_off_sessions_per_week,
             forbidden_off_cells=config.forbidden_off_cells,
@@ -212,7 +260,8 @@ def run(inp: SchedulingInput, *, max_attempts: int = SO_LAN_THU,
 
         if done:
             _repair_teacher_lone_sessions(inp, state, role_index, assigned_teacher, slots_by_class,
-                                          day_capacity, config, subject_class_allowed_cells, slot_by_coord)
+                                          day_capacity, config, subject_class_allowed_cells, slot_by_coord,
+                                          min_weekly_periods=getattr(config, "min_weekly_periods_for_lone_penalty", 15))
 
         if done and (avoid_gdtc or non_consecutive):
             for (cid, sid, wd), pos_list in state.placed.items():
@@ -233,24 +282,59 @@ def run(inp: SchedulingInput, *, max_attempts: int = SO_LAN_THU,
                 if final != slot.old_subject_id:
                     cells_changed += 1
             teacher_penalty = _teacher_quality_penalty(inp.slots, state.assigned, state.slot_teacher, config)
-            solution_score = (teacher_penalty, cells_changed)
-            successes += 1
-            if best_quality_score is None or solution_score < best_quality_score:
-                best_quality_score = solution_score
-                best_changed = cells_changed
-                best_assignment = dict(state.assigned)
-            if successes >= target_successes:
-                break
+            hard_gate_violations, hard_gate_total = _check_hard_post_generation_rules(inp, state, config)
+
+            if not hard_gate_violations:
+                solution_score = (teacher_penalty, cells_changed)
+                successes += 1
+                if best_quality_score is None or solution_score < best_quality_score:
+                    best_quality_score = solution_score
+                    best_changed = cells_changed
+                    best_assignment = dict(state.assigned)
+                if successes >= target_successes:
+                    break
+            else:
+                # Rank by the total violation-instance COUNT, not len(hard_gate_violations)
+                # (the number of distinct rule IDs violated) -- see
+                # _check_hard_post_generation_rules's docstring: a candidate with 3
+                # lone-session instances (1 distinct rule) is objectively better than
+                # one with 1 lone-session + 1 split-day instance (2 distinct rules),
+                # but the old len()-based key ranked it worse (fix-wave Important #2/#3).
+                relaxed_score = (hard_gate_total, teacher_penalty, cells_changed)
+                if best_relaxed_score is None or relaxed_score < best_relaxed_score:
+                    best_relaxed_score = relaxed_score
+                    best_relaxed_changed = cells_changed
+                    best_relaxed_assignment = dict(state.assigned)
+                    best_relaxed_violations = hard_gate_violations
 
     if successes == 0:
+        if best_relaxed_assignment is None:
+            return ScheduleResult(
+                success=False,
+                attempts_tried=attempts_tried,
+                successes_found=0,
+                cells_total=len(inp.slots),
+                failure_reason=FAILURE_MESSAGE.format(attempts=attempts_tried),
+            )
+        relaxed_rules = [{"rule_id": rid} for rid in best_relaxed_violations]
+        if off_shortfall:
+            relaxed_rules.append({"rule_id": "II.3", "detail": "off_slot_shortfall", "teachers": off_shortfall})
+        final_assignment = {
+            slot_id: (None if v == -1 else v) for slot_id, v in best_relaxed_assignment.items()
+        }
         return ScheduleResult(
-            success=False,
+            success=True,
+            assignment=final_assignment,
+            cells_changed=best_relaxed_changed,
+            cells_total=len(inp.slots),
             attempts_tried=attempts_tried,
             successes_found=0,
-            cells_total=len(inp.slots),
-            failure_reason=FAILURE_MESSAGE.format(attempts=attempts_tried),
+            relaxed_rules=relaxed_rules,
         )
 
+    relaxed_rules = []
+    if off_shortfall:
+        relaxed_rules.append({"rule_id": "II.3", "detail": "off_slot_shortfall", "teachers": off_shortfall})
     final_assignment = {
         slot_id: (None if v == -1 else v) for slot_id, v in best_assignment.items()
     }
@@ -261,4 +345,5 @@ def run(inp: SchedulingInput, *, max_attempts: int = SO_LAN_THU,
         cells_total=len(inp.slots),
         attempts_tried=attempts_tried,
         successes_found=successes,
+        relaxed_rules=relaxed_rules,
     )

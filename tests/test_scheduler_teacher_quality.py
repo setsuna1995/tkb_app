@@ -45,7 +45,7 @@ def test_mandatory_morning_weekdays_strictly_enforced():
         4: Teacher(4, "GV 4", off_sessions_override=2),
     }
     config = SchedulingConfig(mandatory_morning_weekdays=(2, 5, 6))
-    offs = sched._assign_off_slots(
+    offs, _shortfall = sched._assign_off_slots(
         set(teachers_by_id.keys()),
         teachers_by_id,
         rng,
@@ -414,6 +414,137 @@ def test_repair_teacher_lone_sessions_evacuates_or_pairs():
     assert tue_count in (0, 2), f"Tue count should be 0 or 2, got {tue_count}"
 
 
+def test_repair_teacher_lone_sessions_skips_exempt_low_load_teacher():
+    """Fix-wave Important #6 (2026-09-03): _repair_teacher_lone_sessions must not
+    spend its bounded repair budget (max_rounds=3, first-improving-move only) on a
+    teacher whose total weekly load is below min_weekly_periods_for_lone_penalty --
+    that teacher is exempt from the II.4 hard gate anyway (see engine.py/
+    quality.py's counters), so their lone session must be left completely
+    untouched, not consumed by a wasted repair attempt.
+
+    Two teachers get the IDENTICAL evacuate-repairable lone-session structure from
+    test_repair_teacher_lone_sessions_evacuates_or_pairs above (Mon S1 lone,
+    Tue S1/S2 swap partner); only their total weekly load differs. Teacher 10
+    (total=2, well under the 15-period threshold) must be left exactly as placed;
+    Teacher 30 (total=18, padded with 4 full 4-period mornings on separate classes/
+    weekdays so as to not create any extra lone sessions of its own) must still
+    get repaired, proving the exemption is selective, not a global no-op."""
+    ts_mon_s1 = TimeSlot(1, 2, "S", 1)
+    ts_tue_s1 = TimeSlot(2, 3, "S", 1)
+    ts_tue_s2 = TimeSlot(3, 3, "S", 2)
+    slot1 = Slot(1, 101, ts_mon_s1)
+    slot2 = Slot(2, 101, ts_tue_s1)
+    slot3 = Slot(3, 102, ts_tue_s2)
+
+    ts_mon_s1_b = TimeSlot(4, 2, "S", 1)
+    ts_tue_s1_b = TimeSlot(5, 3, "S", 1)
+    ts_tue_s2_b = TimeSlot(6, 3, "S", 2)
+    slot4 = Slot(4, 201, ts_mon_s1_b)
+    slot5 = Slot(5, 201, ts_tue_s1_b)
+    slot6 = Slot(6, 202, ts_tue_s2_b)
+
+    # Padding for Teacher 30: 4 full (max_periods_per_session=4) mornings on
+    # weekdays 4-7, in their OWN classes (203-206) that never touch (wd 2, "S")
+    # or (wd 3, "S") -- so they never qualify as a Strategy 1 evacuation target
+    # (len(periods) == max_periods_per_session there, excluded) and never expose
+    # a Strategy 2 consolidate target either (no slot at wd_lone/sess_lone in
+    # those classes). Pushes Teacher 30's total from 2 to 18 (>= 15) without
+    # creating any extra lone sessions.
+    padding_slots = []
+    padding_ts = []
+    slot_id = 7
+    for cid, wd in ((203, 4), (204, 5), (205, 6), (206, 7)):
+        for p in range(1, 5):
+            ts = TimeSlot(slot_id, wd, "S", p)
+            padding_slots.append(Slot(slot_id, cid, ts))
+            padding_ts.append(ts)
+            slot_id += 1
+
+    subj1 = Subject(1, "Toan", ROLE_THUONG)
+    subj2 = Subject(2, "Van", ROLE_THUONG)
+    subj_hdtn = Subject(3, "HDTN", ROLE_HDTN)
+    subjects = [subj1, subj2, subj_hdtn]
+    role_index = resolve_roles(subjects)
+
+    assigned_teacher = {
+        (1, 101): 10, (1, 102): 10, (2, 101): 20,
+        (1, 201): 30, (1, 202): 30, (2, 201): 40,
+        (1, 203): 30, (1, 204): 30, (1, 205): 30, (1, 206): 30,
+    }
+    slots_by_class = {
+        101: [slot1, slot2], 102: [slot3],
+        201: [slot4, slot5], 202: [slot6],
+        203: [s for s in padding_slots if s.class_id == 203],
+        204: [s for s in padding_slots if s.class_id == 204],
+        205: [s for s in padding_slots if s.class_id == 205],
+        206: [s for s in padding_slots if s.class_id == 206],
+    }
+    slot_by_coord = {
+        (101, 2, "S", 1): slot1, (101, 3, "S", 1): slot2, (102, 3, "S", 2): slot3,
+        (201, 2, "S", 1): slot4, (201, 3, "S", 1): slot5, (202, 3, "S", 2): slot6,
+    }
+    for s in padding_slots:
+        slot_by_coord[(s.class_id, s.ts.weekday, s.ts.session, s.ts.period)] = s
+
+    remaining_need = {
+        (1, 101): 1, (1, 102): 1, (2, 101): 1,
+        (1, 201): 1, (1, 202): 1, (2, 201): 1,
+        (1, 203): 4, (1, 204): 4, (1, 205): 4, (1, 206): 4,
+    }
+    state = sched._State(remaining_need=remaining_need, busy=set())
+    sched._put_at(state, slot1, 1, 10, role_index)
+    sched._put_at(state, slot2, 2, 20, role_index)
+    sched._put_at(state, slot3, 1, 10, role_index)
+    sched._put_at(state, slot4, 1, 30, role_index)
+    sched._put_at(state, slot5, 2, 40, role_index)
+    sched._put_at(state, slot6, 1, 30, role_index)
+    for s in padding_slots:
+        sched._put_at(state, s, 1, 30, role_index)
+
+    # Sanity check on the constructed fixture before repair.
+    assert len(state.teacher_session_periods[(10, 2, "S")]) == 1
+    assert len(state.teacher_session_periods[(10, 3, "S")]) == 1
+    assert len(state.teacher_session_periods[(30, 2, "S")]) == 1
+    assert len(state.teacher_session_periods[(30, 3, "S")]) == 1
+    teacher_10_total = sum(len(v) for (tid, wd, sess), v in state.teacher_session_periods.items() if tid == 10)
+    teacher_30_total = sum(len(v) for (tid, wd, sess), v in state.teacher_session_periods.items() if tid == 30)
+    assert teacher_10_total == 2
+    assert teacher_30_total == 18
+
+    classes = [
+        ClassRoom(101, "6A1"), ClassRoom(102, "6A2"),
+        ClassRoom(201, "7A1"), ClassRoom(202, "7A2"),
+        ClassRoom(203, "7A3"), ClassRoom(204, "7A4"), ClassRoom(205, "7A5"), ClassRoom(206, "7A6"),
+    ]
+    inp = SchedulingInput(
+        classes=classes,
+        subjects=subjects,
+        teachers=[Teacher(10, "GV Toan"), Teacher(20, "GV Van"), Teacher(30, "GV Ly"), Teacher(40, "GV Hoa")],
+        need={},
+        assigned_teacher=assigned_teacher,
+        ban_busy=set(),
+        slots=[slot1, slot2, slot3, slot4, slot5, slot6] + padding_slots,
+        timeslots=[ts_mon_s1, ts_tue_s1, ts_tue_s2, ts_mon_s1_b, ts_tue_s1_b, ts_tue_s2_b] + padding_ts,
+    )
+
+    sched._repair_teacher_lone_sessions(
+        inp, state, role_index, assigned_teacher, slots_by_class,
+        config=SchedulingConfig(), slot_by_coord=slot_by_coord,
+        min_weekly_periods=15,
+    )
+
+    # Teacher 10 (exempt, total=2 < 15): left EXACTLY as originally placed -- not
+    # consumed by a wasted repair attempt.
+    assert len(state.teacher_session_periods.get((10, 2, "S"), [])) == 1
+    assert len(state.teacher_session_periods.get((10, 3, "S"), [])) == 1
+
+    # Teacher 30 (non-exempt, total=18 >= 15): must still get repaired.
+    mon_count_30 = len(state.teacher_session_periods.get((30, 2, "S"), []))
+    tue_count_30 = len(state.teacher_session_periods.get((30, 3, "S"), []))
+    assert mon_count_30 in (0, 2), f"Mon count for Teacher 30 should be 0 or 2, got {mon_count_30}"
+    assert tue_count_30 in (0, 2), f"Tue count for Teacher 30 should be 0 or 2, got {tue_count_30}"
+
+
 def test_missing_mandatory_mornings_ignores_low_load_teachers():
     """Teachers with low workload (< 10 periods/week, e.g. 4-6 periods) must NOT be penalized
     for not having classes on all 3 mandatory mornings, because forcing them would fragment into 1-period sessions."""
@@ -438,7 +569,11 @@ def test_teacher_lone_sessions_heavy_penalty():
     slots = [slot1]
     assigned = {1: 100}
     slot_teacher = {1: 10}
-    config = SchedulingConfig(avoid_teacher_lone_periods=True)
+    # min_weekly_periods_for_lone_penalty explicitly 0 here: this test verifies the
+    # RAW penalty weights (500/lone-session, 250/lone-day), not the >=15-period
+    # exemption (default since Task 1 of 2026-09-02-hard-gate-hdsp-rules) -- the
+    # 1-period fixture below is intentionally far under that threshold.
+    config = SchedulingConfig(avoid_teacher_lone_periods=True, min_weekly_periods_for_lone_penalty=0)
 
     pen = sched._teacher_quality_penalty(slots, assigned, slot_teacher, config)
     # 1 lone session (* 500) + 1 lone day (* 250) = 750

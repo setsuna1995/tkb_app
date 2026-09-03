@@ -11,7 +11,7 @@ def test_scheduling_config_defaults_match_current_hardcoded_behavior():
     assert config.teacher_off_sessions_per_week == 1
     assert config.forbidden_off_cells == frozenset({(2, "S"), (5, "S"), (6, "S"), (5, "C"), (6, "C")})
     assert config.reserved_off_weekdays_chieu == (5, 6)
-    assert config.heavy_subject_priority_periods == 0
+    assert config.heavy_subject_priority_periods == 4
     assert config.afternoon_preferred_subject_ids == frozenset()
 
 

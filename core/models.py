@@ -103,7 +103,7 @@ class SchedulingConfig:
         default_factory=lambda: frozenset({(2, "S"), (5, "S"), (6, "S"), (5, "C"), (6, "C")})
     )
     reserved_off_weekdays_chieu: tuple = (5, 6)
-    heavy_subject_priority_periods: int = 0   # 0 = tắt; số tiết đầu buổi sáng được cộng điểm ưu tiên môn "Nặng"
+    heavy_subject_priority_periods: int = 4   # Tiêu chí II.5: 4 tiết đầu buổi sáng ưu tiên môn "Nặng"; 0 = tắt
     afternoon_preferred_subject_ids: frozenset = field(default_factory=frozenset)  # rỗng = tắt
     heavy_subjects_morning_only: bool = False   # True = môn Nặng cấm cứng xếp buổi chiều (R3, spec 2026-08-30)
     morning_only_subject_ids: frozenset = field(default_factory=frozenset)  # rỗng = tắt; các môn bị cấm cứng xếp buổi chiều (bất kể role_code)
@@ -119,7 +119,7 @@ class SchedulingConfig:
     hdtn_period2_afternoon: bool = True  # Tiêu chí II.6: Tiết 2 HĐTN xếp vào buổi chiều cho các lớp có học chiều
     avoid_heavy_afternoon_period3: bool = True  # Tiêu chí II.15: Hạn chế môn nặng tiết 3 chiều
     avoid_teacher_4_consecutive_morning: bool = True  # Tiêu chí II.14: Hạn chế GV dạy 4 tiết sáng liên tục nếu tải <= 20
-    min_weekly_periods_for_lone_penalty: int = 0  # Tiêu chí II.4: 0 = áp dụng phạt lẻ cho tất cả; > 0 = miễn trừ GV có tải < ngưỡng này
+    min_weekly_periods_for_lone_penalty: int = 15  # Tiêu chí II.4: miễn trừ GV có tải < ngưỡng này; 0 = áp dụng phạt lẻ cho tất cả
 
 
 
@@ -150,3 +150,6 @@ class ScheduleResult:
     attempts_tried: int = 0
     successes_found: int = 0
     failure_reason: Optional[str] = None
+    relaxed_rules: list = field(default_factory=list)  # [{"rule_id": "II.3", ...}] rules that could not be
+                                                          # fully satisfied even in the best available attempt
+                                                          # (see core/scheduler/engine.py's post-generation gate)

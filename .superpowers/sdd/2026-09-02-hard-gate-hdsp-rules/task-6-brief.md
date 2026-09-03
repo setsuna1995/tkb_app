@@ -19,6 +19,25 @@ to the two bugs the user (Kien) originally reported on 2026-09-02.
 - Consumes: everything produced by Tasks 1-5 (`ScheduleResult.relaxed_rules`,
   the 5 new `core/validation.py` finders, `core/scheduler/engine.py`'s gate).
 
+**Critical context from Task 4 (read before starting):** Task 4's implementer
+directly measured 4 real-fixture scenarios (`sample_school.xlsm`, both
+parities, 2 seeds, with/without `heavy_subjects_morning_only`) and found ALL
+4 exhaust the full `SO_LAN_THU=6000` attempt budget (~110-155s each) and land
+on the relaxed-fallback path — none achieve full II.3/II.4/II.8/II.14
+compliance. II.4 and II.8 were violated in all 4 scenarios; II.3 and II.14 in
+3/4. Notably, II.4 already has its `min_weekly_periods_for_lone_penalty`
+(15) exemption applied correctly (fixed in Task 4's fix round) and is STILL
+always violated — so this is not fully explained by the II.8
+missing-exemption bug that was fixed. **Do not treat "the extended
+`test_full_schedule_15_criteria_compliance` passes" as success on its own**
+— per the transparency-invariant design (unreported violations fail loudly,
+reported ones don't), the test may well pass via the relaxed-fallback path
+while `relaxed_rules` is non-empty. That is a valid engine behavior, but it
+means the FEATURE may not be delivering what it promises on real data yet.
+Step 2 below requires you to actually look at *which* teachers trigger II.4
+despite the exemption and report a real diagnosis, not just a pass/fail
+count.
+
 ---
 
 - [ ] **Step 1: Extend the existing end-to-end compliance test**
@@ -56,7 +75,7 @@ test function (currently the last line of the test body):
     lone_days = find_teacher_lone_day_violations(inp.slots, result.assignment, inp.assigned_teacher, min_lone_load)
     assert not (lone_sessions or lone_days) or "II.4" in relaxed_ids, f"Unreported II.4 violations: {lone_sessions + lone_days}"
 
-    split_days = find_teacher_split_day_violations(inp.slots, result.assignment, inp.assigned_teacher)
+    split_days = find_teacher_split_day_violations(inp.slots, result.assignment, inp.assigned_teacher, min_lone_load)
     assert not split_days or "II.8" in relaxed_ids, f"Unreported II.8 violations: {split_days}"
 
     consecutive_morning = find_teacher_4_consecutive_morning_violations(inp.slots, result.assignment, inp.assigned_teacher)
@@ -85,6 +104,47 @@ Three possible outcomes, all informative:
   and did not report. Do not weaken the assertion to make it pass; fix the
   root cause in `engine.py` (likely a gap between `_check_hard_post_generation_rules`
   and these validators — compare their logic line by line) and re-run.
+
+Given what Task 4 already found (see "Critical context" above), the
+non-empty-`relaxed_rules` outcome is the expected one here — but "expected"
+does not mean "done." Continue to Step 2b.
+
+- [ ] **Step 2b: Diagnose WHY II.4 is still violated despite its exemption**
+
+This is the step that turns Task 4's raw observation into an actionable
+answer. After Step 2's run, with `result` and `inp` still available (add a
+temporary `print` or use a debugger/REPL — this investigation code does not
+need to be committed):
+
+1. Call `find_teacher_lone_session_violations(inp.slots, result.assignment, inp.assigned_teacher, min_lone_load)`
+   and `find_teacher_lone_day_violations(...)` and print the teacher_ids
+   involved.
+2. For each such teacher_id, look up their name (`{t.teacher_id: t.name for t in inp.teachers}`)
+   and compute their total weekly period count (sum of `inp.need` values for
+   `(subject_id, class_id)` pairs where `inp.assigned_teacher[(subject_id, class_id)] == teacher_id`)
+   to confirm they are genuinely `>= min_lone_load` (i.e. the exemption
+   correctly does NOT apply to them — if it does apply and they're still
+   flagged, that's a real bug in `_count_teacher_lone_sessions`/`_count_teacher_lone_days`
+   or the gate wiring, not a data-feasibility issue).
+3. For 1-2 of these confirmed-non-exempt teachers, manually inspect their
+   generated schedule (filter `result.assignment` by slots where
+   `inp.assigned_teacher[(subject, class)] == that teacher_id`) and form a
+   judgment: is this teacher's course load genuinely structured such that SOME
+   session with exactly 1 period is unavoidable (e.g. they teach 1 class for
+   a subject with an odd total period count, or their class assignments are
+   scattered such that no two ever land in the same session) — or does the
+   search algorithm plausibly just fail to find a better arrangement that
+   likely exists?
+4. Write this diagnosis (with concrete teacher names/numbers, not just "it's
+   probably data" or "it's probably the algorithm") into `task-6-report.md`
+   under a "Diagnosis: why the real fixture never reaches full compliance"
+   heading. If you conclude it's a genuine data-structural limit for
+   specific teachers, say which ones and why. If you conclude the search
+   algorithm should be able to do better, say what evidence supports that
+   (e.g. "swapping X and Y would resolve it, and nothing else blocks that
+   swap") — but do NOT attempt to fix the search algorithm in this task
+   (that's out of scope and risks a much larger change); report it as a
+   follow-up recommendation instead.
 
 - [ ] **Step 3: Write the regression test for both original root-cause bugs**
 

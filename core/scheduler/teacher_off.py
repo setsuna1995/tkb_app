@@ -12,14 +12,22 @@ def _assign_off_slots(teacher_ids: set, teachers_by_id: dict, rng: random.Random
                        gvcn_shl_cell: Optional[dict] = None,
                        off_slot_count: int = 1,
                        forbidden_off_cells: frozenset = FORBIDDEN_OFF_CELLS,
-                       mandatory_morning_weekdays: tuple = (2, 5, 6)) -> dict:
+                       mandatory_morning_weekdays: tuple = (2, 5, 6)) -> tuple:
     """Pick each teacher's off-slot(s) for the week: off_slot_count (weekday, session)
     pairs, each on a DIFFERENT weekday when possible (never 2 off-sessions on the
     same day, i.e. never a full day off), drawn from every cell except
     FORBIDDEN_OFF_CELLS (plus the teacher's own must_monday/is_gvcn exclusions and mandatory_morning_weekdays).
+
+    Returns (gv_off_slots, shortfall):
+    - gv_off_slots: teacher_id -> set of (weekday, session) off-cells actually assigned.
+    - shortfall: teacher_id -> (assigned_count, required_count) for any teacher whose
+      exclusions leave fewer eligible cells than required -- this is a STRUCTURAL fact
+      (depends only on config, never on rng), so callers must not retry hoping to fix
+      it; they must surface it (see core/scheduler/engine.py's relaxed_rules reporting).
     """
     gvcn_shl_cell = gvcn_shl_cell or {}
     gv_off_slots = {}
+    shortfall = {}
     mandatory_mornings = set(mandatory_morning_weekdays)
     for tid in teacher_ids:
         t = teachers_by_id.get(tid)
@@ -66,4 +74,7 @@ def _assign_off_slots(teacher_ids: set, teachers_by_id: dict, rng: random.Random
             all_eligible_cells = [(wd, s) for wd in eligible_weekdays for s in by_weekday[wd]]
             picks = rng.sample(all_eligible_cells, min(remaining_count, len(all_eligible_cells)))
             gv_off_slots[tid] = pinned_cells | set(picks)
-    return gv_off_slots
+            assigned_total = len(gv_off_slots[tid])
+            if assigned_total < effective_count:
+                shortfall[tid] = (assigned_total, effective_count)
+    return gv_off_slots, shortfall

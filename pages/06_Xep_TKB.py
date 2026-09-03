@@ -8,7 +8,11 @@ from core.validation import (
     find_invalid_gdtc_periods, find_max_heavy_violations, find_morning_only_violations,
     find_single_pair_violations, find_subject_class_rule_violations, find_teacher_conflicts,
     find_teacher_day_cap_violations, find_teacher_gaps, find_teacher_unavailability_violations,
+    find_teacher_4_consecutive_morning_violations, find_teacher_lone_day_violations,
+    find_teacher_lone_session_violations, find_teacher_missing_mandatory_morning_violations,
+    find_teacher_split_day_violations,
 )
+from core.rules_registry import RULES
 from data import repository as repo
 from ui_common import get_conn, require_auth, require_school, sidebar_backup_export, sidebar_school_switcher
 
@@ -100,12 +104,47 @@ if result is not None:
     if not result.success:
         st.error(result.failure_reason)
     else:
-        st.success(
-            f"Xếp thành công sau {result.attempts_tried} lần thử "
-            f"({result.successes_found} phương án hợp lệ). "
-            f"Giữ nguyên {result.cells_total - result.cells_changed}/{result.cells_total} ô, "
-            f"thay đổi {result.cells_changed} ô."
-        )
+        # teacher_map is needed by the relaxed_rules block below (off_slot_shortfall
+        # names GVs) -- computed here, ahead of the tabs/grids, so the banner + the
+        # relaxed_rules warning can render together at the very top of the results
+        # (see the "successes_found == 0" branch and the relocated relaxed_rules
+        # block just below: fix-wave Item 4 -- the warning used to render ~275 lines
+        # below, past where an operator scanning top-to-bottom might already have
+        # clicked save).
+        teacher_map = {t.teacher_id: t.name for t in inp.teachers}
+
+        if result.successes_found > 0:
+            st.success(
+                f"Xếp thành công sau {result.attempts_tried} lần thử "
+                f"({result.successes_found} phương án hợp lệ). "
+                f"Giữ nguyên {result.cells_total - result.cells_changed}/{result.cells_total} ô, "
+                f"thay đổi {result.cells_changed} ô."
+            )
+        else:
+            # successes_found == 0 is the ONLY other case where result.success is True
+            # (core/scheduler/engine.py's relaxed-fallback path) -- this is NOT a fully
+            # compliant schedule, so it must not look like an unqualified success.
+            st.warning(
+                f"⚠️ Xếp xong sau {result.attempts_tried} lần thử. Lịch được tạo là phương án khả thi tốt "
+                f"nhất (một số ràng buộc HĐSP đã phải nới lỏng — xem chi tiết bên dưới). "
+                f"Giữ nguyên {result.cells_total - result.cells_changed}/{result.cells_total} ô, "
+                f"thay đổi {result.cells_changed} ô."
+            )
+
+        if result.relaxed_rules:
+            st.warning(f"⚠️ Lịch được tạo là phương án khả thi tốt nhất, nhưng {len(result.relaxed_rules)} ràng buộc HĐSP đã phải nới lỏng:")
+            for item in result.relaxed_rules:
+                rule_id = item.get("rule_id")
+                title = RULES[rule_id].title_vi if rule_id in RULES else rule_id
+                if item.get("detail") == "off_slot_shortfall":
+                    teachers_short = item.get("teachers", {})
+                    names = ", ".join(
+                        f"{teacher_map.get(tid, f'GV #{tid}')} ({got}/{need} buổi)"
+                        for tid, (got, need) in teachers_short.items()
+                    )
+                    st.write(f"- {rule_id}: {title} — thiếu buổi nghỉ cho: {names}")
+                else:
+                    st.write(f"- {rule_id}: {title}")
 
         subject_names = {s.subject_id: s.name for s in inp.subjects}
         classes_sorted = sorted(inp.classes, key=lambda c: c.sort_order)
@@ -333,6 +372,55 @@ if result is not None:
             if heavy_p3_violations:
                 st.error(f"❌ Phát hiện {len(heavy_p3_violations)} tiết môn Nặng bị xếp vào tiết 3 buổi chiều.")
 
+        # Kiểm tra các tiêu chí HĐSP được hard-gate (II.3, II.4, II.8, II.14) -- vi phạm các
+        # rule này sẽ CHẶN nút lưu (khác các cảnh báo phía trên chỉ hiển thị thông tin).
+        teacher_map = {t.teacher_id: t.name for t in inp.teachers}
+        hard_rule_violations = {}
+
+        missing_morning = find_teacher_missing_mandatory_morning_violations(
+            inp.slots, result.assignment, inp.assigned_teacher,
+            getattr(inp.config, "mandatory_morning_weekdays", (2, 5, 6)),
+        )
+        if missing_morning:
+            hard_rule_violations["II.3"] = missing_morning
+
+        min_lone_load = getattr(inp.config, "min_weekly_periods_for_lone_penalty", 15)
+        if getattr(inp.config, "avoid_teacher_lone_periods", True):
+            # Gated the same way engine.py:_check_hard_post_generation_rules gates
+            # II.4/II.8 -- a school that disabled this toggle told the engine not to
+            # gate/relax on it, so the UI must not block save on it either.
+            lone_sessions = find_teacher_lone_session_violations(inp.slots, result.assignment, inp.assigned_teacher, min_lone_load)
+            lone_days = find_teacher_lone_day_violations(inp.slots, result.assignment, inp.assigned_teacher, min_lone_load)
+            if lone_sessions or lone_days:
+                hard_rule_violations["II.4"] = lone_sessions + [(tid, wd, "cả ngày") for tid, wd in lone_days]
+
+            split_days = find_teacher_split_day_violations(inp.slots, result.assignment, inp.assigned_teacher, min_lone_load)
+            if split_days:
+                hard_rule_violations["II.8"] = split_days
+
+        if getattr(inp.config, "avoid_teacher_4_consecutive_morning", True):
+            # Gated the same way engine.py:_check_hard_post_generation_rules gates II.14.
+            consecutive_morning = find_teacher_4_consecutive_morning_violations(inp.slots, result.assignment, inp.assigned_teacher)
+            if consecutive_morning:
+                hard_rule_violations["II.14"] = consecutive_morning
+
+        if hard_rule_violations:
+            st.error(f"❌ Còn {len(hard_rule_violations)} tiêu chí HĐSP bắt buộc chưa được thỏa mãn (chặn lưu):")
+            for rule_id, items in hard_rule_violations.items():
+                with st.expander(f"{rule_id}: {RULES[rule_id].title_vi} ({len(items)} trường hợp)", expanded=False):
+                    for item in items:
+                        tid = item[0]
+                        tname = teacher_map.get(tid, f"GV #{tid}")
+                        rest = ", ".join(str(x) for x in item[1:])
+                        st.write(f"- {tname}: {rest}")
+
+        proceed_with_hard_violations = True
+        if hard_rule_violations:
+            proceed_with_hard_violations = st.checkbox(
+                "Vẫn lưu dù còn vi phạm tiêu chí HĐSP bắt buộc ở trên (không khuyến khích)",
+                key="proceed_with_hard_violations",
+            )
+
         # Đánh giá chất lượng lịch dạy của Giáo viên
         teacher_gaps = find_teacher_gaps(inp.slots, result.assignment, inp.assigned_teacher)
         if teacher_gaps and getattr(inp.config, "avoid_teacher_gaps", True):
@@ -367,7 +455,10 @@ if result is not None:
             hide_index=True, use_container_width=True,
         )
 
-        if st.button("✅ Chấp nhận và lưu làm lịch chính thức", type="primary"):
+        if st.button(
+            "✅ Chấp nhận và lưu làm lịch chính thức", type="primary",
+            disabled=bool(hard_rule_violations) and not proceed_with_hard_violations,
+        ):
             cells = {
                 (s.class_id, s.ts.weekday, s.ts.session, s.ts.period): result.assignment.get(s.slot_id)
                 for s in inp.slots
@@ -461,12 +552,40 @@ with st.expander("📅 Xếp nhiều tuần cùng lúc", expanded=False):
             if not b_result.success:
                 st.error(b_result.failure_reason)
                 continue
-            st.success(
-                f"Xếp thành công sau {b_result.attempts_tried} lần thử "
-                f"({b_result.successes_found} phương án hợp lệ). "
-                f"Giữ nguyên {b_result.cells_total - b_result.cells_changed}/{b_result.cells_total} ô, "
-                f"thay đổi {b_result.cells_changed} ô."
-            )
+
+            b_teacher_map = {t.teacher_id: t.name for t in b_inp.teachers}
+
+            if b_result.successes_found > 0:
+                st.success(
+                    f"Xếp thành công sau {b_result.attempts_tried} lần thử "
+                    f"({b_result.successes_found} phương án hợp lệ). "
+                    f"Giữ nguyên {b_result.cells_total - b_result.cells_changed}/{b_result.cells_total} ô, "
+                    f"thay đổi {b_result.cells_changed} ô."
+                )
+            else:
+                # successes_found == 0 is the ONLY other case where b_result.success is
+                # True (relaxed-fallback path) -- must not read as an unqualified success.
+                st.warning(
+                    f"⚠️ Xếp xong sau {b_result.attempts_tried} lần thử. Lịch được tạo là phương án khả thi tốt "
+                    f"nhất (một số ràng buộc HĐSP đã phải nới lỏng — xem chi tiết bên dưới). "
+                    f"Giữ nguyên {b_result.cells_total - b_result.cells_changed}/{b_result.cells_total} ô, "
+                    f"thay đổi {b_result.cells_changed} ô."
+                )
+
+            if b_result.relaxed_rules:
+                st.warning(f"⚠️ Lịch được tạo là phương án khả thi tốt nhất, nhưng {len(b_result.relaxed_rules)} ràng buộc HĐSP đã phải nới lỏng:")
+                for item in b_result.relaxed_rules:
+                    rule_id = item.get("rule_id")
+                    title = RULES[rule_id].title_vi if rule_id in RULES else rule_id
+                    if item.get("detail") == "off_slot_shortfall":
+                        teachers_short = item.get("teachers", {})
+                        names = ", ".join(
+                            f"{b_teacher_map.get(tid, f'GV #{tid}')} ({got}/{need} buổi)"
+                            for tid, (got, need) in teachers_short.items()
+                        )
+                        st.write(f"- {rule_id}: {title} — thiếu buổi nghỉ cho: {names}")
+                    else:
+                        st.write(f"- {rule_id}: {title}")
 
             b_subject_names = {s.subject_id: s.name for s in b_inp.subjects}
             b_classes_sorted = sorted(b_inp.classes, key=lambda c: c.sort_order)
@@ -492,6 +611,56 @@ with st.expander("📅 Xếp nhiều tuần cùng lúc", expanded=False):
             if b_conflicts:
                 st.error(f"Phát hiện {len(b_conflicts)} trường hợp GV trùng lịch (không nên xảy ra, báo lỗi này).")
 
+            # Kiểm tra các tiêu chí HĐSP được hard-gate (II.3, II.4, II.8, II.14) cho Tuần
+            # {wn} -- mirrors the single-week flow's block above (fix-wave Item 1: the
+            # batch flow used to skip this entirely, letting an operator batch-save
+            # non-compliant timetables for every selected week with zero warning).
+            b_hard_rule_violations = {}
+
+            b_missing_morning = find_teacher_missing_mandatory_morning_violations(
+                b_inp.slots, b_result.assignment, b_inp.assigned_teacher,
+                getattr(b_inp.config, "mandatory_morning_weekdays", (2, 5, 6)),
+            )
+            if b_missing_morning:
+                b_hard_rule_violations["II.3"] = b_missing_morning
+
+            b_min_lone_load = getattr(b_inp.config, "min_weekly_periods_for_lone_penalty", 15)
+            if getattr(b_inp.config, "avoid_teacher_lone_periods", True):
+                # Gated the same way engine.py:_check_hard_post_generation_rules gates
+                # II.4/II.8 -- a school that disabled this toggle told the engine not to
+                # gate/relax on it, so the UI must not block save on it either.
+                b_lone_sessions = find_teacher_lone_session_violations(b_inp.slots, b_result.assignment, b_inp.assigned_teacher, b_min_lone_load)
+                b_lone_days = find_teacher_lone_day_violations(b_inp.slots, b_result.assignment, b_inp.assigned_teacher, b_min_lone_load)
+                if b_lone_sessions or b_lone_days:
+                    b_hard_rule_violations["II.4"] = b_lone_sessions + [(tid, wd, "cả ngày") for tid, wd in b_lone_days]
+
+                b_split_days = find_teacher_split_day_violations(b_inp.slots, b_result.assignment, b_inp.assigned_teacher, b_min_lone_load)
+                if b_split_days:
+                    b_hard_rule_violations["II.8"] = b_split_days
+
+            if getattr(b_inp.config, "avoid_teacher_4_consecutive_morning", True):
+                # Gated the same way engine.py:_check_hard_post_generation_rules gates II.14.
+                b_consecutive_morning = find_teacher_4_consecutive_morning_violations(b_inp.slots, b_result.assignment, b_inp.assigned_teacher)
+                if b_consecutive_morning:
+                    b_hard_rule_violations["II.14"] = b_consecutive_morning
+
+            if b_hard_rule_violations:
+                st.error(f"❌ Còn {len(b_hard_rule_violations)} tiêu chí HĐSP bắt buộc chưa được thỏa mãn (chặn lưu) cho Tuần {wn}:")
+                for rule_id, items in b_hard_rule_violations.items():
+                    with st.expander(f"{rule_id}: {RULES[rule_id].title_vi} ({len(items)} trường hợp)", expanded=False):
+                        for item in items:
+                            tid = item[0]
+                            tname = b_teacher_map.get(tid, f"GV #{tid}")
+                            rest = ", ".join(str(x) for x in item[1:])
+                            st.write(f"- {tname}: {rest}")
+
+            b_proceed_with_hard_violations = True
+            if b_hard_rule_violations:
+                b_proceed_with_hard_violations = st.checkbox(
+                    "Vẫn lưu dù còn vi phạm tiêu chí HĐSP bắt buộc ở trên (không khuyến khích)",
+                    key=f"batch_proceed_with_hard_violations_{wn}",
+                )
+
             st.caption(f"Kiểm tra định mức Tuần {wn} (thực tế − định mức tuần {wn}, kỳ vọng 0)")
             b_expected_quota = repo.get_periods_for_week(conn, week_no=wn, parity=b_parity)
             b_diff = compute_quota_diff(b_inp.slots, b_result.assignment, b_expected_quota, b_parity)
@@ -506,7 +675,10 @@ with st.expander("📅 Xếp nhiều tuần cùng lúc", expanded=False):
                 hide_index=True, use_container_width=True,
             )
 
-            if st.button(f"✅ Chấp nhận & Lưu Tuần {wn}", key=f"batch_accept_{wn}"):
+            if st.button(
+                f"✅ Chấp nhận & Lưu Tuần {wn}", key=f"batch_accept_{wn}",
+                disabled=bool(b_hard_rule_violations) and not b_proceed_with_hard_violations,
+            ):
                 b_cells = {
                     (s.class_id, s.ts.weekday, s.ts.session, s.ts.period): b_result.assignment.get(s.slot_id)
                     for s in b_inp.slots
