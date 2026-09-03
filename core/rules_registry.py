@@ -35,7 +35,7 @@ RULES: dict[str, RuleSpec] = {
     "II.3": RuleSpec(
         id="II.3",
         title_vi="Mỗi GV có 1 buổi nghỉ chủ nhật xanh (trừ sáng Thứ 2, Thứ 5, Thứ 6)",
-        tier=RuleTier.HARD_POST_GENERATION,
+        tier=RuleTier.SOFT,
         config_flag=None,
     ),
     "II.4": RuleSpec(
@@ -53,7 +53,7 @@ RULES: dict[str, RuleSpec] = {
     "II.8": RuleSpec(
         id="II.8",
         title_vi="Không xếp GV dạy sáng 1 tiết + chiều 1 tiết trong cùng ngày",
-        tier=RuleTier.HARD_POST_GENERATION,
+        tier=RuleTier.SOFT,
         config_flag="avoid_teacher_lone_periods",
     ),
     "II.9": RuleSpec(
@@ -65,7 +65,7 @@ RULES: dict[str, RuleSpec] = {
     "II.14": RuleSpec(
         id="II.14",
         title_vi="Hạn chế GV dạy 4 tiết liên tục buổi sáng (trừ GV >20 tiết/tuần)",
-        tier=RuleTier.HARD_POST_GENERATION,
+        tier=RuleTier.SOFT,
         config_flag="avoid_teacher_4_consecutive_morning",
     ),
 }

@@ -202,9 +202,7 @@ def test_full_schedule_15_criteria_compliance(tmp_path):
         compute_quota_diff, find_consecutive_subject_days, find_heavy_afternoon_period3_violations,
         find_invalid_gdtc_periods, find_max_heavy_violations, find_teacher_conflicts,
         find_teacher_day_cap_violations, find_teacher_gaps,
-        find_teacher_4_consecutive_morning_violations, find_teacher_lone_day_violations,
-        find_teacher_lone_session_violations, find_teacher_missing_mandatory_morning_violations,
-        find_teacher_split_day_violations,
+        find_teacher_lone_day_violations, find_teacher_lone_session_violations,
     )
     from data import db, repository as repo
     from io_excel.importer import import_xlsm
@@ -270,25 +268,24 @@ def test_full_schedule_15_criteria_compliance(tmp_path):
         if slot.ts.weekday == 2 and slot.ts.session == "S" and slot.ts.period == 1:
             assert result.assignment.get(slot.slot_id) == hdtn_id, f"Slot {slot} is not Chào cờ (HDTN)"
 
-    # 9-12. Tiêu chí II.3, II.4, II.8, II.14 (hard-gated 2026-09-02): mọi vi phạm phải
-    # được engine tự tránh, HOẶC được báo cáo minh bạch qua relaxed_rules -- không được
-    # có vi phạm "câm" (tồn tại nhưng không báo cáo). Đây chính là bug gốc gây ra báo cáo
-    # của người dùng ngày 2026-09-02 ("vẫn có người được nghỉ sáng T2, vẫn nhiều buổi lẻ").
+    # 9. Tiêu chí II.4 (hard-gated -- the only rule still hard-gated as of
+    # 2026-09-03, prioritized above II.3/II.8/II.14 per user decision): mọi vi
+    # phạm phải được engine tự tránh, HOẶC được báo cáo minh bạch qua
+    # relaxed_rules -- không được có vi phạm "câm" (tồn tại nhưng không báo
+    # cáo). Đây chính là bug gốc gây ra báo cáo của người dùng ngày 2026-09-02
+    # ("vẫn nhiều buổi lẻ").
     relaxed_ids = {item.get("rule_id") for item in result.relaxed_rules}
-
-    missing_morning = find_teacher_missing_mandatory_morning_violations(inp.slots, result.assignment, inp.assigned_teacher)
-    assert not missing_morning or "II.3" in relaxed_ids, f"Unreported II.3 violations: {missing_morning}"
 
     min_lone_load = config.min_weekly_periods_for_lone_penalty
     lone_sessions = find_teacher_lone_session_violations(inp.slots, result.assignment, inp.assigned_teacher, min_lone_load)
     lone_days = find_teacher_lone_day_violations(inp.slots, result.assignment, inp.assigned_teacher, min_lone_load)
     assert not (lone_sessions or lone_days) or "II.4" in relaxed_ids, f"Unreported II.4 violations: {lone_sessions + lone_days}"
 
-    split_days = find_teacher_split_day_violations(inp.slots, result.assignment, inp.assigned_teacher, min_lone_load)
-    assert not split_days or "II.8" in relaxed_ids, f"Unreported II.8 violations: {split_days}"
-
-    consecutive_morning = find_teacher_4_consecutive_morning_violations(inp.slots, result.assignment, inp.assigned_teacher)
-    assert not consecutive_morning or "II.14" in relaxed_ids, f"Unreported II.14 violations: {consecutive_morning}"
+    # II.3/II.8/II.14 are soft as of 2026-09-03 (demoted so II.4 can be
+    # prioritized without being blocked by them) -- no longer part of the
+    # relaxed_rules transparency invariant above. They still get scored (and
+    # thus minimized when possible) via quality.py's existing soft penalties,
+    # unaffected by this change.
 
     connection.close()
 

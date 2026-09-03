@@ -17,9 +17,7 @@ from core.scheduler.placement import (
     _build_effective_assigned_teacher, _put_at,
 )
 from core.scheduler.quality import (
-    _count_teacher_4_consecutive_mornings, _count_teacher_lone_days,
-    _count_teacher_lone_sessions, _count_teacher_missing_mandatory_mornings,
-    _count_teacher_split_sessions, _teacher_quality_penalty,
+    _count_teacher_lone_days, _count_teacher_lone_sessions, _teacher_quality_penalty,
 )
 from core.scheduler.state import _State
 from core.scheduler.swaps import (
@@ -31,24 +29,20 @@ from core.scheduler.teacher_off import _assign_off_slots
 
 def _check_hard_post_generation_rules(inp: SchedulingInput, state: _State, config: SchedulingConfig) -> tuple[list, int]:
     """Post-generation hard gate for the HĐSP rules that need full-schedule
-    visibility (see core/rules_registry.py for tier classification: II.3,
-    II.4, II.8, II.14 are HARD_POST_GENERATION). Reuses the same per-teacher
-    counters quality.py uses for soft scoring, but as boolean reject-or-keep
-    gates instead of penalty accumulators. Returns (violated_rule_ids, total)
-    where violated_rule_ids is a list of *distinct* violated rule IDs, e.g.
-    ["II.4", "II.8"] (or [] when fully compliant), and total is the total
-    count of individual violation instances across all rules -- callers that
-    rank candidates by "how bad" must use total, not len(violated_rule_ids):
-    a candidate with 3 lone-session teachers is objectively worse than one
-    with 1 lone-session + 1 split-day teacher, even though the latter spans
-    more distinct rule IDs (fix-wave Important #2/#3, 2026-09-03)."""
+    visibility (see core/rules_registry.py for tier classification -- as of
+    2026-09-03, only II.4 is HARD_POST_GENERATION; II.3/II.8/II.14 were demoted
+    to soft per user decision, prioritizing II.4 above them -- II.8 is also
+    mathematically subsumed by II.4 anyway, since a split day's 1-period side
+    is always also a lone session). Reuses the same per-teacher counters
+    quality.py uses for soft scoring, but as a boolean reject-or-keep gate
+    instead of a penalty accumulator. Returns (violated_rule_ids, total) where
+    violated_rule_ids is [] or ["II.4"], and total is the count of individual
+    II.4 violation instances -- callers that rank candidates by "how bad" must
+    use total, not len(violated_rule_ids), which can only ever be 0 or 1 and
+    is therefore blind to severity differences between candidates that both
+    violate II.4 (fix-wave Important #2/#3, 2026-09-03)."""
     violated = []
     total = 0
-    mand_morns = getattr(config, "mandatory_morning_weekdays", (2, 5, 6))
-    missing = _count_teacher_missing_mandatory_mornings(inp.slots, state.assigned, state.slot_teacher, mand_morns)
-    if missing > 0:
-        violated.append("II.3")
-    total += missing
     if getattr(config, "avoid_teacher_lone_periods", True):
         min_lone_load = getattr(config, "min_weekly_periods_for_lone_penalty", 15)
         lone_sessions = _count_teacher_lone_sessions(inp.slots, state.assigned, state.slot_teacher, min_weekly_periods=min_lone_load)
@@ -56,15 +50,6 @@ def _check_hard_post_generation_rules(inp: SchedulingInput, state: _State, confi
         if lone_sessions > 0 or lone_days > 0:
             violated.append("II.4")
         total += lone_sessions + lone_days
-        split = _count_teacher_split_sessions(inp.slots, state.assigned, state.slot_teacher, min_weekly_periods=min_lone_load)
-        if split > 0:
-            violated.append("II.8")
-        total += split
-    if getattr(config, "avoid_teacher_4_consecutive_morning", True):
-        consecutive = _count_teacher_4_consecutive_mornings(inp.slots, state.assigned, state.slot_teacher, max_load_for_penalty=20)
-        if consecutive > 0:
-            violated.append("II.14")
-        total += consecutive
     return violated, total
 
 

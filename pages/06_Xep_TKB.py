@@ -372,23 +372,24 @@ if result is not None:
             if heavy_p3_violations:
                 st.error(f"❌ Phát hiện {len(heavy_p3_violations)} tiết môn Nặng bị xếp vào tiết 3 buổi chiều.")
 
-        # Kiểm tra các tiêu chí HĐSP được hard-gate (II.3, II.4, II.8, II.14) -- vi phạm các
-        # rule này sẽ CHẶN nút lưu (khác các cảnh báo phía trên chỉ hiển thị thông tin).
+        # Kiểm tra tiêu chí HĐSP hard-gate (chỉ còn II.4 -- ưu tiên cao nhất, chặn nút
+        # lưu, per quyết định 2026-09-03). II.3/II.8/II.14 hạ xuống cảnh báo mềm (không
+        # chặn lưu) cùng ngày -- engine vẫn cố tránh chúng khi có thể qua điểm trừ mềm
+        # sẵn có trong quality.py, chỉ là không còn reject/relax vì chúng nữa.
         teacher_map = {t.teacher_id: t.name for t in inp.teachers}
         hard_rule_violations = {}
+        soft_rule_warnings = {}
 
         missing_morning = find_teacher_missing_mandatory_morning_violations(
             inp.slots, result.assignment, inp.assigned_teacher,
             getattr(inp.config, "mandatory_morning_weekdays", (2, 5, 6)),
         )
         if missing_morning:
-            hard_rule_violations["II.3"] = missing_morning
+            soft_rule_warnings["II.3"] = missing_morning
 
         min_lone_load = getattr(inp.config, "min_weekly_periods_for_lone_penalty", 15)
         if getattr(inp.config, "avoid_teacher_lone_periods", True):
-            # Gated the same way engine.py:_check_hard_post_generation_rules gates
-            # II.4/II.8 -- a school that disabled this toggle told the engine not to
-            # gate/relax on it, so the UI must not block save on it either.
+            # Gated the same way engine.py:_check_hard_post_generation_rules gates II.4.
             lone_sessions = find_teacher_lone_session_violations(inp.slots, result.assignment, inp.assigned_teacher, min_lone_load)
             lone_days = find_teacher_lone_day_violations(inp.slots, result.assignment, inp.assigned_teacher, min_lone_load)
             if lone_sessions or lone_days:
@@ -396,18 +397,30 @@ if result is not None:
 
             split_days = find_teacher_split_day_violations(inp.slots, result.assignment, inp.assigned_teacher, min_lone_load)
             if split_days:
-                hard_rule_violations["II.8"] = split_days
+                soft_rule_warnings["II.8"] = split_days
 
         if getattr(inp.config, "avoid_teacher_4_consecutive_morning", True):
-            # Gated the same way engine.py:_check_hard_post_generation_rules gates II.14.
             consecutive_morning = find_teacher_4_consecutive_morning_violations(inp.slots, result.assignment, inp.assigned_teacher)
             if consecutive_morning:
-                hard_rule_violations["II.14"] = consecutive_morning
+                soft_rule_warnings["II.14"] = consecutive_morning
 
         if hard_rule_violations:
             st.error(f"❌ Còn {len(hard_rule_violations)} tiêu chí HĐSP bắt buộc chưa được thỏa mãn (chặn lưu):")
             for rule_id, items in hard_rule_violations.items():
                 with st.expander(f"{rule_id}: {RULES[rule_id].title_vi} ({len(items)} trường hợp)", expanded=False):
+                    for item in items:
+                        tid = item[0]
+                        tname = teacher_map.get(tid, f"GV #{tid}")
+                        rest = ", ".join(str(x) for x in item[1:])
+                        st.write(f"- {tname}: {rest}")
+
+        if soft_rule_warnings:
+            with st.expander(
+                f"⚠️ {sum(len(v) for v in soft_rule_warnings.values())} trường hợp thuộc "
+                f"{len(soft_rule_warnings)} tiêu chí HĐSP mềm (không chặn lưu)", expanded=False,
+            ):
+                for rule_id, items in soft_rule_warnings.items():
+                    st.write(f"**{rule_id}: {RULES[rule_id].title_vi}** ({len(items)} trường hợp)")
                     for item in items:
                         tid = item[0]
                         tname = teacher_map.get(tid, f"GV #{tid}")
@@ -611,24 +624,22 @@ with st.expander("📅 Xếp nhiều tuần cùng lúc", expanded=False):
             if b_conflicts:
                 st.error(f"Phát hiện {len(b_conflicts)} trường hợp GV trùng lịch (không nên xảy ra, báo lỗi này).")
 
-            # Kiểm tra các tiêu chí HĐSP được hard-gate (II.3, II.4, II.8, II.14) cho Tuần
-            # {wn} -- mirrors the single-week flow's block above (fix-wave Item 1: the
-            # batch flow used to skip this entirely, letting an operator batch-save
-            # non-compliant timetables for every selected week with zero warning).
+            # Kiểm tra tiêu chí HĐSP hard-gate (chỉ còn II.4) cho Tuần {wn} -- mirrors the
+            # single-week flow's block above. II.3/II.8/II.14 hạ xuống cảnh báo mềm, không
+            # chặn lưu (per quyết định 2026-09-03).
             b_hard_rule_violations = {}
+            b_soft_rule_warnings = {}
 
             b_missing_morning = find_teacher_missing_mandatory_morning_violations(
                 b_inp.slots, b_result.assignment, b_inp.assigned_teacher,
                 getattr(b_inp.config, "mandatory_morning_weekdays", (2, 5, 6)),
             )
             if b_missing_morning:
-                b_hard_rule_violations["II.3"] = b_missing_morning
+                b_soft_rule_warnings["II.3"] = b_missing_morning
 
             b_min_lone_load = getattr(b_inp.config, "min_weekly_periods_for_lone_penalty", 15)
             if getattr(b_inp.config, "avoid_teacher_lone_periods", True):
-                # Gated the same way engine.py:_check_hard_post_generation_rules gates
-                # II.4/II.8 -- a school that disabled this toggle told the engine not to
-                # gate/relax on it, so the UI must not block save on it either.
+                # Gated the same way engine.py:_check_hard_post_generation_rules gates II.4.
                 b_lone_sessions = find_teacher_lone_session_violations(b_inp.slots, b_result.assignment, b_inp.assigned_teacher, b_min_lone_load)
                 b_lone_days = find_teacher_lone_day_violations(b_inp.slots, b_result.assignment, b_inp.assigned_teacher, b_min_lone_load)
                 if b_lone_sessions or b_lone_days:
@@ -636,18 +647,30 @@ with st.expander("📅 Xếp nhiều tuần cùng lúc", expanded=False):
 
                 b_split_days = find_teacher_split_day_violations(b_inp.slots, b_result.assignment, b_inp.assigned_teacher, b_min_lone_load)
                 if b_split_days:
-                    b_hard_rule_violations["II.8"] = b_split_days
+                    b_soft_rule_warnings["II.8"] = b_split_days
 
             if getattr(b_inp.config, "avoid_teacher_4_consecutive_morning", True):
-                # Gated the same way engine.py:_check_hard_post_generation_rules gates II.14.
                 b_consecutive_morning = find_teacher_4_consecutive_morning_violations(b_inp.slots, b_result.assignment, b_inp.assigned_teacher)
                 if b_consecutive_morning:
-                    b_hard_rule_violations["II.14"] = b_consecutive_morning
+                    b_soft_rule_warnings["II.14"] = b_consecutive_morning
 
             if b_hard_rule_violations:
                 st.error(f"❌ Còn {len(b_hard_rule_violations)} tiêu chí HĐSP bắt buộc chưa được thỏa mãn (chặn lưu) cho Tuần {wn}:")
                 for rule_id, items in b_hard_rule_violations.items():
                     with st.expander(f"{rule_id}: {RULES[rule_id].title_vi} ({len(items)} trường hợp)", expanded=False):
+                        for item in items:
+                            tid = item[0]
+                            tname = b_teacher_map.get(tid, f"GV #{tid}")
+                            rest = ", ".join(str(x) for x in item[1:])
+                            st.write(f"- {tname}: {rest}")
+
+            if b_soft_rule_warnings:
+                with st.expander(
+                    f"⚠️ {sum(len(v) for v in b_soft_rule_warnings.values())} trường hợp thuộc "
+                    f"{len(b_soft_rule_warnings)} tiêu chí HĐSP mềm (không chặn lưu) cho Tuần {wn}", expanded=False,
+                ):
+                    for rule_id, items in b_soft_rule_warnings.items():
+                        st.write(f"**{rule_id}: {RULES[rule_id].title_vi}** ({len(items)} trường hợp)")
                         for item in items:
                             tid = item[0]
                             tname = b_teacher_map.get(tid, f"GV #{tid}")
