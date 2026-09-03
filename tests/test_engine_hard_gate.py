@@ -1,4 +1,7 @@
-from core.models import ClassRoom, SchedulingConfig, SchedulingInput, Slot, Teacher, TimeSlot
+from core.models import (
+    ROLE_HDTN, ROLE_THUONG, ClassRoom, SchedulingConfig, SchedulingInput, Slot, Subject, Teacher, TimeSlot,
+)
+from core.scheduler import run
 from core.scheduler.engine import _check_hard_post_generation_rules
 from core.scheduler.state import _State
 
@@ -165,3 +168,66 @@ def test_check_hard_post_generation_rules_ranks_by_total_violation_count_not_dis
     # B spans MORE distinct rule types (2) than A (1) -- the old len()-based key
     # got this backwards.
     assert total_b < total_a
+
+
+def test_run_surfaces_off_slot_shortfall_into_relaxed_rules_end_to_end():
+    """Fix-wave Important #5 (2026-09-03): core/scheduler/teacher_off.py's
+    shortfall detection has unit coverage at the _assign_off_slots level
+    (tests/test_teacher_off.py), but nothing exercised core/scheduler/engine.py's
+    run() actually surfacing a shortfall into ScheduleResult.relaxed_rules
+    end-to-end -- i.e. that the wiring at engine.py's
+    relaxed_rules.append({"rule_id": "II.3", "detail": "off_slot_shortfall", ...})
+    (both the full-success and relaxed-fallback return paths) actually fires when
+    a real run() call produces a shortfall.
+
+    Minimal fixture: a single class with ONE morning-only subject taught entirely
+    by a "Hiệu trưởng" teacher (forbidden ALL mornings for OFF-SLOT purposes, per
+    test_teacher_off.py's precedent -- this is unrelated to whether they can teach
+    mornings, which they still can) with teacher_off_sessions_per_week=5 -- the
+    same off_slot_count that test_teacher_off.py's own shortfall test uses to
+    reliably exceed the 4 eligible afternoon off-cells left after
+    FORBIDDEN_OFF_CELLS + the TPT/BGH exclusion. Because all of this teacher's
+    actual teaching slots are morning-only, their off-slot cells (afternoon-only)
+    never collide with placement, and their total teaching load (5 periods/week)
+    sits under min_weekly_periods_for_lone_penalty's default 15-period threshold,
+    so the fixture also can't trip any *other* hard-gate rule and mask the
+    assertion -- the only relaxed_rules entry possible here is the off_shortfall
+    one, whichever of run()'s two success return paths gets taken."""
+    subj_toan = Subject(1, "Toan", ROLE_THUONG)
+    subj_hdtn = Subject(2, "HDTN", ROLE_HDTN)  # required by resolve_roles; zero need, never scheduled
+    subjects = [subj_toan, subj_hdtn]
+
+    teacher = Teacher(1, "Hieu Truong", role="Hiệu trưởng")
+
+    slots = []
+    for slot_id, wd in enumerate((2, 3, 4, 5, 6), start=1):
+        slots.append(Slot(slot_id, 101, TimeSlot(slot_id, wd, "S", 1)))
+    timeslots = [s.ts for s in slots]
+
+    inp = SchedulingInput(
+        classes=[ClassRoom(101, "6A1")],
+        subjects=subjects,
+        teachers=[teacher],
+        need={(1, 101): 5},
+        assigned_teacher={(1, 101): 1},
+        ban_busy=set(),
+        slots=slots,
+        timeslots=timeslots,
+        seed=2026,
+        config=SchedulingConfig(teacher_off_sessions_per_week=5),
+    )
+
+    result = run(inp)
+
+    assert result.success is True, f"Schedule generation failed: {result.failure_reason}"
+
+    shortfall_items = [
+        item for item in result.relaxed_rules
+        if item.get("rule_id") == "II.3" and item.get("detail") == "off_slot_shortfall"
+    ]
+    assert len(shortfall_items) == 1, f"Expected exactly 1 off_slot_shortfall entry, got {result.relaxed_rules}"
+
+    teachers_short = shortfall_items[0]["teachers"]
+    assert 1 in teachers_short
+    assigned_count, required_count = teachers_short[1]
+    assert assigned_count < required_count
