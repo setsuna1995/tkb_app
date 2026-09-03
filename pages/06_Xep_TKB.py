@@ -104,15 +104,6 @@ if result is not None:
     if not result.success:
         st.error(result.failure_reason)
     else:
-        # teacher_map is needed by the relaxed_rules block below (off_slot_shortfall
-        # names GVs) -- computed here, ahead of the tabs/grids, so the banner + the
-        # relaxed_rules warning can render together at the very top of the results
-        # (see the "successes_found == 0" branch and the relocated relaxed_rules
-        # block just below: fix-wave Item 4 -- the warning used to render ~275 lines
-        # below, past where an operator scanning top-to-bottom might already have
-        # clicked save).
-        teacher_map = {t.teacher_id: t.name for t in inp.teachers}
-
         if result.successes_found > 0:
             st.success(
                 f"Xếp thành công sau {result.attempts_tried} lần thử "
@@ -136,15 +127,7 @@ if result is not None:
             for item in result.relaxed_rules:
                 rule_id = item.get("rule_id")
                 title = RULES[rule_id].title_vi if rule_id in RULES else rule_id
-                if item.get("detail") == "off_slot_shortfall":
-                    teachers_short = item.get("teachers", {})
-                    names = ", ".join(
-                        f"{teacher_map.get(tid, f'GV #{tid}')} ({got}/{need} buổi)"
-                        for tid, (got, need) in teachers_short.items()
-                    )
-                    st.write(f"- {rule_id}: {title} — thiếu buổi nghỉ cho: {names}")
-                else:
-                    st.write(f"- {rule_id}: {title}")
+                st.write(f"- {rule_id}: {title}")
 
         subject_names = {s.subject_id: s.name for s in inp.subjects}
         classes_sorted = sorted(inp.classes, key=lambda c: c.sort_order)
@@ -372,10 +355,10 @@ if result is not None:
             if heavy_p3_violations:
                 st.error(f"❌ Phát hiện {len(heavy_p3_violations)} tiết môn Nặng bị xếp vào tiết 3 buổi chiều.")
 
-        # Kiểm tra tiêu chí HĐSP hard-gate (chỉ còn II.4 -- ưu tiên cao nhất, chặn nút
-        # lưu, per quyết định 2026-09-03). II.3/II.8/II.14 hạ xuống cảnh báo mềm (không
-        # chặn lưu) cùng ngày -- engine vẫn cố tránh chúng khi có thể qua điểm trừ mềm
-        # sẵn có trong quality.py, chỉ là không còn reject/relax vì chúng nữa.
+        # Kiểm tra tiêu chí HĐSP hard-gate (II.4 + II.8 -- chặn nút lưu, per quyết định
+        # 2026-09-03 [bản sửa thứ 2 trong ngày]). II.3/II.14 là cảnh báo mềm (không
+        # chặn lưu) -- engine vẫn cố tránh chúng khi có thể qua điểm trừ mềm sẵn có
+        # trong quality.py, chỉ là không còn reject/relax vì chúng nữa.
         teacher_map = {t.teacher_id: t.name for t in inp.teachers}
         hard_rule_violations = {}
         soft_rule_warnings = {}
@@ -389,7 +372,7 @@ if result is not None:
 
         min_lone_load = getattr(inp.config, "min_weekly_periods_for_lone_penalty", 15)
         if getattr(inp.config, "avoid_teacher_lone_periods", True):
-            # Gated the same way engine.py:_check_hard_post_generation_rules gates II.4.
+            # Gated the same way engine.py:_check_hard_post_generation_rules gates II.4/II.8.
             lone_sessions = find_teacher_lone_session_violations(inp.slots, result.assignment, inp.assigned_teacher, min_lone_load)
             lone_days = find_teacher_lone_day_violations(inp.slots, result.assignment, inp.assigned_teacher, min_lone_load)
             if lone_sessions or lone_days:
@@ -397,7 +380,7 @@ if result is not None:
 
             split_days = find_teacher_split_day_violations(inp.slots, result.assignment, inp.assigned_teacher, min_lone_load)
             if split_days:
-                soft_rule_warnings["II.8"] = split_days
+                hard_rule_violations["II.8"] = split_days
 
         if getattr(inp.config, "avoid_teacher_4_consecutive_morning", True):
             consecutive_morning = find_teacher_4_consecutive_morning_violations(inp.slots, result.assignment, inp.assigned_teacher)
@@ -590,15 +573,7 @@ with st.expander("📅 Xếp nhiều tuần cùng lúc", expanded=False):
                 for item in b_result.relaxed_rules:
                     rule_id = item.get("rule_id")
                     title = RULES[rule_id].title_vi if rule_id in RULES else rule_id
-                    if item.get("detail") == "off_slot_shortfall":
-                        teachers_short = item.get("teachers", {})
-                        names = ", ".join(
-                            f"{b_teacher_map.get(tid, f'GV #{tid}')} ({got}/{need} buổi)"
-                            for tid, (got, need) in teachers_short.items()
-                        )
-                        st.write(f"- {rule_id}: {title} — thiếu buổi nghỉ cho: {names}")
-                    else:
-                        st.write(f"- {rule_id}: {title}")
+                    st.write(f"- {rule_id}: {title}")
 
             b_subject_names = {s.subject_id: s.name for s in b_inp.subjects}
             b_classes_sorted = sorted(b_inp.classes, key=lambda c: c.sort_order)
@@ -624,9 +599,9 @@ with st.expander("📅 Xếp nhiều tuần cùng lúc", expanded=False):
             if b_conflicts:
                 st.error(f"Phát hiện {len(b_conflicts)} trường hợp GV trùng lịch (không nên xảy ra, báo lỗi này).")
 
-            # Kiểm tra tiêu chí HĐSP hard-gate (chỉ còn II.4) cho Tuần {wn} -- mirrors the
-            # single-week flow's block above. II.3/II.8/II.14 hạ xuống cảnh báo mềm, không
-            # chặn lưu (per quyết định 2026-09-03).
+            # Kiểm tra tiêu chí HĐSP hard-gate (II.4 + II.8) cho Tuần {wn} -- mirrors the
+            # single-week flow's block above. II.3/II.14 là cảnh báo mềm, không chặn
+            # lưu (per quyết định 2026-09-03, bản sửa thứ 2 trong ngày).
             b_hard_rule_violations = {}
             b_soft_rule_warnings = {}
 
@@ -639,7 +614,7 @@ with st.expander("📅 Xếp nhiều tuần cùng lúc", expanded=False):
 
             b_min_lone_load = getattr(b_inp.config, "min_weekly_periods_for_lone_penalty", 15)
             if getattr(b_inp.config, "avoid_teacher_lone_periods", True):
-                # Gated the same way engine.py:_check_hard_post_generation_rules gates II.4.
+                # Gated the same way engine.py:_check_hard_post_generation_rules gates II.4/II.8.
                 b_lone_sessions = find_teacher_lone_session_violations(b_inp.slots, b_result.assignment, b_inp.assigned_teacher, b_min_lone_load)
                 b_lone_days = find_teacher_lone_day_violations(b_inp.slots, b_result.assignment, b_inp.assigned_teacher, b_min_lone_load)
                 if b_lone_sessions or b_lone_days:
@@ -647,7 +622,7 @@ with st.expander("📅 Xếp nhiều tuần cùng lúc", expanded=False):
 
                 b_split_days = find_teacher_split_day_violations(b_inp.slots, b_result.assignment, b_inp.assigned_teacher, b_min_lone_load)
                 if b_split_days:
-                    b_soft_rule_warnings["II.8"] = b_split_days
+                    b_hard_rule_violations["II.8"] = b_split_days
 
             if getattr(b_inp.config, "avoid_teacher_4_consecutive_morning", True):
                 b_consecutive_morning = find_teacher_4_consecutive_morning_violations(b_inp.slots, b_result.assignment, b_inp.assigned_teacher)

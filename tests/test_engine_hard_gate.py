@@ -34,14 +34,14 @@ def test_check_hard_post_generation_rules_flags_lone_session():
     assert violations == ["II.4"]
 
 
-def test_check_hard_post_generation_rules_never_gates_ii8_split_day():
-    """User decision 2026-09-03: II.8 (AM+PM split day) is demoted from hard-gate
-    to soft -- it never blocks save or rejects an attempt, regardless of teacher
-    load. It stays fully scored via quality.py's soft penalty (unaffected by this
-    change), so the engine still tries to avoid it when possible; this test only
-    proves the post-generation REJECT gate no longer includes it. A split day's
-    1-period side is inherently also a lone SESSION, so a high-load split day
-    still surfaces as II.4 -- just never as II.8."""
+def test_check_hard_post_generation_rules_gates_ii8_split_day_again():
+    """User decision 2026-09-03 (second revision, same day): II.8 (AM+PM split
+    day) is back to hard-gate ("là bắt buộc") after being briefly demoted to
+    soft earlier the same day. It shares II.4's min_weekly_periods_for_lone_penalty
+    exemption (2026-09-02 fix-round ruling, unaffected by this back-and-forth):
+    a teacher whose total weekly load is below the threshold must NOT be
+    flagged for a split day, while the identical split-day pattern for a
+    teacher at/above the threshold must be flagged."""
     def build(extra_slots):
         slots = []
         slot_id = 1
@@ -60,25 +60,24 @@ def test_check_hard_post_generation_rules_never_gates_ii8_split_day():
         return _check_hard_post_generation_rules(inp, state, inp.config)
 
     # Low load: just the split day itself (1 AM + 1 PM on weekday 3) = 2 total
-    # periods, well under the 15-period threshold -> exempt from II.4 too, no violations.
+    # periods, well under the 15-period threshold -> exempt from both II.4 and
+    # II.8, no violations.
     low_load_split_day = [(3, "S", 1), (3, "C", 1)]
     low_violations, low_total = build(low_load_split_day)
     assert low_violations == []
     assert low_total == 0
 
-    # High load: 5 full mornings of 3 periods each (wd 2,4,5,6,7; all mandatory
-    # mornings covered so II.3 would never have triggered anyway; 3 not 4 periods
-    # so II.14 would never have triggered anyway) = 15, plus the same split day on
-    # weekday 3 = 17 total (>= 15) -> II.8 must NEVER appear (demoted to soft), but
-    # II.4 must still catch it (the split day's two 1-period sides are each a lone
-    # session in their own right).
+    # High load: 5 full mornings of 3 periods each (wd 2,4,5,6,7; 3 not 4 periods
+    # so II.14-shaped placement never matters here since II.14 isn't checked by
+    # this gate) = 15, plus the same split day on weekday 3 = 17 total (>= 15) ->
+    # II.8 must be flagged again (co-occurring with II.4 is expected/inherent: a
+    # split day's "lone" side is by definition also a lone session).
     high_load_full_mornings = [
         (wd, "S", p) for wd in (2, 4, 5, 6, 7) for p in (1, 2, 3)
     ]
     high_load_split_day = high_load_full_mornings + [(3, "S", 1), (3, "C", 1)]
     violations, _total = build(high_load_split_day)
-    assert "II.8" not in violations
-    assert violations == ["II.4"]
+    assert "II.8" in violations
 
 
 def test_check_hard_post_generation_rules_never_gates_ii3_missing_mandatory_morning():
@@ -151,18 +150,21 @@ def test_check_hard_post_generation_rules_empty_when_compliant():
 def test_check_hard_post_generation_rules_ranks_by_total_violation_count_not_distinct_rule_count():
     """Fix-wave Important #2/#3 (2026-09-03): the relaxed-candidate ranking key in
     engine.py must use the TOTAL violation-instance count, not len(violated_rule_ids)
-    (the number of DISTINCT rule types violated). Originally reproduced using II.4
-    co-occurring with II.8; since II.8 was demoted to soft (2026-09-03 user
-    decision), only II.4 can ever appear in `violated` now -- which makes
-    len(violated) permanently stuck at 0 or 1, unable to distinguish severity AT
-    ALL between "1 lone session" and "4 lone sessions/days". This is exactly why
-    `total` (not `len(violated)`) must be the ranking key going forward: candidate
-    A has 4 raw II.4 instances (2 isolated lone session+day pairs), candidate B
-    has only 2 (a single split day, whose two 1-period sides each count once as a
-    lone SESSION but not as a lone DAY, since the day's own total is 2). Under the
-    OLD buggy key, both tie at len(['II.4'])==1 and the ranking would silently
-    fall through to teacher_penalty/cells_changed, blind to A being objectively
-    worse; under the FIXED key (total: 4 vs 2), B correctly ranks better."""
+    (the number of DISTINCT rule types violated). Reproduces the ledger's worked
+    example with the real counters (not fabricated numbers): a candidate with 2
+    isolated lone-session teacher-days (only II.4, 1 distinct rule, but 4 total
+    violation instances -- each isolated lone morning session is BOTH a lone
+    SESSION and a lone DAY by the counters' own definitions) must be ranked WORSE
+    than a candidate with just 1 split day (II.4 + II.8, 2 distinct rules, but only
+    3 total violation instances -- a split day's two 1-period sides each count once
+    as a lone SESSION, but the day's own total is 2 so it does NOT also count as a
+    lone DAY). Under the OLD buggy ranking key len(violated) -- (1, ...) for the
+    first candidate vs (2, ...) for the second -- the first (objectively worse, 4
+    raw violations) candidate would incorrectly win; under the FIXED key (total:
+    4 vs 3), the second (objectively better, 3 raw violations) candidate correctly
+    wins, regardless of it spanning more distinct rule types. (II.8 is hard-gated
+    again as of the second 2026-09-03 revision, so this is back to its original
+    two-distinct-rule form.)"""
 
     def build(extra_slots):
         slots = []
@@ -202,53 +204,50 @@ def test_check_hard_post_generation_rules_ranks_by_total_violation_count_not_dis
     assert violations_a == ["II.4"]
     assert total_a == 4
 
-    # Candidate B: 1 split day (wd 3: 1 AM + 1 PM) + the SAME padding as A. Only
-    # II.4 fires (II.8 is soft, never checked here), with 2 total instances (the
-    # split day's two 1-period sides, each a lone SESSION; the day's own total is
-    # 2, so it is NOT also counted as a lone day).
+    # Candidate B: 1 split day (wd 3: 1 AM + 1 PM) + the SAME padding as A. Both
+    # II.4 and II.8 fire (2 distinct rules), but only 3 total instances (2 lone
+    # sessions from the split day's two 1-period sides + 1 split; the day's own
+    # total is 2, so it is NOT also counted as a lone day).
     candidate_b_extra = [
         (2, "C", 1), (2, "C", 2), (2, "C", 3),
         (5, "C", 1), (5, "C", 2),
-        (3, "S", 1), (3, "C", 1),                 # split day (II.8 no longer checked)
+        (3, "S", 1), (3, "C", 1),                 # split day
     ]
     violations_b, total_b = build(candidate_b_extra)
-    assert violations_b == ["II.4"]
-    assert total_b == 2
+    assert set(violations_b) == {"II.4", "II.8"}
+    assert total_b == 3
 
-    # Sanity check: with II.8 demoted to soft, both candidates span the SAME
-    # single distinct rule -- len(violated) is now permanently blind to the real
-    # difference between them (this is exactly why it must not be the ranking key).
-    assert len(violations_a) == len(violations_b) == 1
+    # Sanity check: A spans fewer distinct rule types than B (this is exactly the
+    # OLD ranking key -- len(violated) -- that used to decide "better").
+    assert len(violations_a) < len(violations_b)
 
-    # FIXED ranking: candidate B (fewer raw violations, 2) must rank strictly
-    # better (lower total) than candidate A (more raw violations, 4) -- a
-    # distinction len(violated) can no longer make on its own.
+    # FIXED ranking: candidate B (fewer raw violations, 3) must rank strictly
+    # better (lower total) than candidate A (more raw violations, 4), even though
+    # B spans MORE distinct rule types (2) than A (1) -- the old len()-based key
+    # got this backwards.
     assert total_b < total_a
 
 
-def test_run_surfaces_off_slot_shortfall_into_relaxed_rules_end_to_end():
-    """Fix-wave Important #5 (2026-09-03): core/scheduler/teacher_off.py's
-    shortfall detection has unit coverage at the _assign_off_slots level
-    (tests/test_teacher_off.py), but nothing exercised core/scheduler/engine.py's
-    run() actually surfacing a shortfall into ScheduleResult.relaxed_rules
-    end-to-end -- i.e. that the wiring at engine.py's
-    relaxed_rules.append({"rule_id": "II.3", "detail": "off_slot_shortfall", ...})
-    (both the full-success and relaxed-fallback return paths) actually fires when
-    a real run() call produces a shortfall.
+def test_run_never_reports_off_slot_shortfall_into_relaxed_rules():
+    """User decision 2026-09-03 (second revision, same day): the requirement
+    that "each teacher gets exactly N off-slots/week" is dropped entirely --
+    core/scheduler/teacher_off.py's shortfall detection still runs internally
+    (unit-tested at the _assign_off_slots level in tests/test_teacher_off.py,
+    unaffected), but core/scheduler/engine.py's run() must no longer surface
+    it into ScheduleResult.relaxed_rules. This reverses fix-wave Important #5
+    (2026-09-03, first revision), which added exactly this reporting because
+    the original 2026-09-02 root-cause narrative wrongly attributed the user's
+    "vẫn có người được nghỉ sáng T2" complaint to this mechanism (the final
+    whole-branch review corrected that: the actual fix is II.3's mandatory-
+    morning-teaching gate, unrelated to and untouched by this change).
 
-    Minimal fixture: a single class with ONE morning-only subject taught entirely
-    by a "Hiệu trưởng" teacher (forbidden ALL mornings for OFF-SLOT purposes, per
-    test_teacher_off.py's precedent -- this is unrelated to whether they can teach
-    mornings, which they still can) with teacher_off_sessions_per_week=5 -- the
-    same off_slot_count that test_teacher_off.py's own shortfall test uses to
-    reliably exceed the 4 eligible afternoon off-cells left after
-    FORBIDDEN_OFF_CELLS + the TPT/BGH exclusion. Because all of this teacher's
-    actual teaching slots are morning-only, their off-slot cells (afternoon-only)
-    never collide with placement, and their total teaching load (5 periods/week)
-    sits under min_weekly_periods_for_lone_penalty's default 15-period threshold,
-    so the fixture also can't trip any *other* hard-gate rule and mask the
-    assertion -- the only relaxed_rules entry possible here is the off_shortfall
-    one, whichever of run()'s two success return paths gets taken."""
+    Same minimal fixture as before: a single class with ONE morning-only
+    subject taught entirely by a "Hiệu trưởng" teacher (forbidden ALL mornings
+    for OFF-SLOT purposes, per test_teacher_off.py's precedent) with
+    teacher_off_sessions_per_week=5 -- reliably exceeds the 4 eligible
+    afternoon off-cells left after FORBIDDEN_OFF_CELLS + the TPT/BGH
+    exclusion, guaranteeing a shortfall occurs internally even though it must
+    no longer be reported."""
     subj_toan = Subject(1, "Toan", ROLE_THUONG)
     subj_hdtn = Subject(2, "HDTN", ROLE_HDTN)  # required by resolve_roles; zero need, never scheduled
     subjects = [subj_toan, subj_hdtn]
@@ -279,11 +278,6 @@ def test_run_surfaces_off_slot_shortfall_into_relaxed_rules_end_to_end():
 
     shortfall_items = [
         item for item in result.relaxed_rules
-        if item.get("rule_id") == "II.3" and item.get("detail") == "off_slot_shortfall"
+        if item.get("detail") == "off_slot_shortfall"
     ]
-    assert len(shortfall_items) == 1, f"Expected exactly 1 off_slot_shortfall entry, got {result.relaxed_rules}"
-
-    teachers_short = shortfall_items[0]["teachers"]
-    assert 1 in teachers_short
-    assigned_count, required_count = teachers_short[1]
-    assert assigned_count < required_count
+    assert shortfall_items == [], f"off_slot_shortfall must never be reported anymore, got: {shortfall_items}"

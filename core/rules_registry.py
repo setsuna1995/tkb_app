@@ -34,7 +34,14 @@ class RuleSpec:
 RULES: dict[str, RuleSpec] = {
     "II.3": RuleSpec(
         id="II.3",
-        title_vi="Mỗi GV có 1 buổi nghỉ chủ nhật xanh (trừ sáng Thứ 2, Thứ 5, Thứ 6)",
+        # Corrected 2026-09-03: the previous title_vi ("Mỗi GV có 1 buổi nghỉ...")
+        # described the WEEKLY OFF-SLOT mechanism (core/scheduler/teacher_off.py),
+        # not what this rule_id actually checks
+        # (core/scheduler/quality.py:_count_teacher_missing_mandatory_mornings) --
+        # this mislabeling caused real user confusion. The off-slot mechanism has
+        # no rule_id of its own; its shortfall is no longer reported at all (user
+        # decision 2026-09-03, second revision -- not a hard requirement).
+        title_vi="GV tải >=10 tiết/tuần phải có mặt dạy vào sáng Thứ 2, Thứ 5, Thứ 6",
         tier=RuleTier.SOFT,
         config_flag=None,
     ),
@@ -53,7 +60,7 @@ RULES: dict[str, RuleSpec] = {
     "II.8": RuleSpec(
         id="II.8",
         title_vi="Không xếp GV dạy sáng 1 tiết + chiều 1 tiết trong cùng ngày",
-        tier=RuleTier.SOFT,
+        tier=RuleTier.HARD_POST_GENERATION,
         config_flag="avoid_teacher_lone_periods",
     ),
     "II.9": RuleSpec(

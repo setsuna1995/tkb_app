@@ -203,6 +203,7 @@ def test_full_schedule_15_criteria_compliance(tmp_path):
         find_invalid_gdtc_periods, find_max_heavy_violations, find_teacher_conflicts,
         find_teacher_day_cap_violations, find_teacher_gaps,
         find_teacher_lone_day_violations, find_teacher_lone_session_violations,
+        find_teacher_split_day_violations,
     )
     from data import db, repository as repo
     from io_excel.importer import import_xlsm
@@ -268,11 +269,10 @@ def test_full_schedule_15_criteria_compliance(tmp_path):
         if slot.ts.weekday == 2 and slot.ts.session == "S" and slot.ts.period == 1:
             assert result.assignment.get(slot.slot_id) == hdtn_id, f"Slot {slot} is not Chào cờ (HDTN)"
 
-    # 9. Tiêu chí II.4 (hard-gated -- the only rule still hard-gated as of
-    # 2026-09-03, prioritized above II.3/II.8/II.14 per user decision): mọi vi
-    # phạm phải được engine tự tránh, HOẶC được báo cáo minh bạch qua
-    # relaxed_rules -- không được có vi phạm "câm" (tồn tại nhưng không báo
-    # cáo). Đây chính là bug gốc gây ra báo cáo của người dùng ngày 2026-09-02
+    # 9-10. Tiêu chí II.4, II.8 (hard-gated as of 2026-09-03, second revision same
+    # day): mọi vi phạm phải được engine tự tránh, HOẶC được báo cáo minh bạch qua
+    # relaxed_rules -- không được có vi phạm "câm" (tồn tại nhưng không báo cáo).
+    # Đây chính là bug gốc gây ra báo cáo của người dùng ngày 2026-09-02
     # ("vẫn nhiều buổi lẻ").
     relaxed_ids = {item.get("rule_id") for item in result.relaxed_rules}
 
@@ -281,11 +281,14 @@ def test_full_schedule_15_criteria_compliance(tmp_path):
     lone_days = find_teacher_lone_day_violations(inp.slots, result.assignment, inp.assigned_teacher, min_lone_load)
     assert not (lone_sessions or lone_days) or "II.4" in relaxed_ids, f"Unreported II.4 violations: {lone_sessions + lone_days}"
 
-    # II.3/II.8/II.14 are soft as of 2026-09-03 (demoted so II.4 can be
-    # prioritized without being blocked by them) -- no longer part of the
-    # relaxed_rules transparency invariant above. They still get scored (and
-    # thus minimized when possible) via quality.py's existing soft penalties,
-    # unaffected by this change.
+    split_days = find_teacher_split_day_violations(inp.slots, result.assignment, inp.assigned_teacher, min_lone_load)
+    assert not split_days or "II.8" in relaxed_ids, f"Unreported II.8 violations: {split_days}"
+
+    # II.3/II.14 are soft (II.3's off-slot-count-shortfall reporting was also
+    # dropped entirely, not just demoted) -- no longer part of the relaxed_rules
+    # transparency invariant above. They still get scored (and thus minimized
+    # when possible) via quality.py's existing soft penalties, unaffected by
+    # this change.
 
     connection.close()
 
