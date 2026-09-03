@@ -29,29 +29,43 @@ from core.scheduler.swaps import (
 from core.scheduler.teacher_off import _assign_off_slots
 
 
-def _check_hard_post_generation_rules(inp: SchedulingInput, state: _State, config: SchedulingConfig) -> list:
+def _check_hard_post_generation_rules(inp: SchedulingInput, state: _State, config: SchedulingConfig) -> tuple[list, int]:
     """Post-generation hard gate for the HĐSP rules that need full-schedule
     visibility (see core/rules_registry.py for tier classification: II.3,
     II.4, II.8, II.14 are HARD_POST_GENERATION). Reuses the same per-teacher
     counters quality.py uses for soft scoring, but as boolean reject-or-keep
-    gates instead of penalty accumulators. Returns a list of violated rule
-    IDs, e.g. ["II.4", "II.8"], or [] when fully compliant."""
+    gates instead of penalty accumulators. Returns (violated_rule_ids, total)
+    where violated_rule_ids is a list of *distinct* violated rule IDs, e.g.
+    ["II.4", "II.8"] (or [] when fully compliant), and total is the total
+    count of individual violation instances across all rules -- callers that
+    rank candidates by "how bad" must use total, not len(violated_rule_ids):
+    a candidate with 3 lone-session teachers is objectively worse than one
+    with 1 lone-session + 1 split-day teacher, even though the latter spans
+    more distinct rule IDs (fix-wave Important #2/#3, 2026-09-03)."""
     violated = []
+    total = 0
     mand_morns = getattr(config, "mandatory_morning_weekdays", (2, 5, 6))
-    if _count_teacher_missing_mandatory_mornings(inp.slots, state.assigned, state.slot_teacher, mand_morns) > 0:
+    missing = _count_teacher_missing_mandatory_mornings(inp.slots, state.assigned, state.slot_teacher, mand_morns)
+    if missing > 0:
         violated.append("II.3")
+    total += missing
     if getattr(config, "avoid_teacher_lone_periods", True):
         min_lone_load = getattr(config, "min_weekly_periods_for_lone_penalty", 15)
         lone_sessions = _count_teacher_lone_sessions(inp.slots, state.assigned, state.slot_teacher, min_weekly_periods=min_lone_load)
         lone_days = _count_teacher_lone_days(inp.slots, state.assigned, state.slot_teacher, min_weekly_periods=min_lone_load)
         if lone_sessions > 0 or lone_days > 0:
             violated.append("II.4")
-        if _count_teacher_split_sessions(inp.slots, state.assigned, state.slot_teacher, min_weekly_periods=min_lone_load) > 0:
+        total += lone_sessions + lone_days
+        split = _count_teacher_split_sessions(inp.slots, state.assigned, state.slot_teacher, min_weekly_periods=min_lone_load)
+        if split > 0:
             violated.append("II.8")
+        total += split
     if getattr(config, "avoid_teacher_4_consecutive_morning", True):
-        if _count_teacher_4_consecutive_mornings(inp.slots, state.assigned, state.slot_teacher, max_load_for_penalty=20) > 0:
+        consecutive = _count_teacher_4_consecutive_mornings(inp.slots, state.assigned, state.slot_teacher, max_load_for_penalty=20)
+        if consecutive > 0:
             violated.append("II.14")
-    return violated
+        total += consecutive
+    return violated, total
 
 
 def run(inp: SchedulingInput, *, max_attempts: int = SO_LAN_THU,
@@ -267,7 +281,7 @@ def run(inp: SchedulingInput, *, max_attempts: int = SO_LAN_THU,
                 if final != slot.old_subject_id:
                     cells_changed += 1
             teacher_penalty = _teacher_quality_penalty(inp.slots, state.assigned, state.slot_teacher, config)
-            hard_gate_violations = _check_hard_post_generation_rules(inp, state, config)
+            hard_gate_violations, hard_gate_total = _check_hard_post_generation_rules(inp, state, config)
 
             if not hard_gate_violations:
                 solution_score = (teacher_penalty, cells_changed)
@@ -279,7 +293,13 @@ def run(inp: SchedulingInput, *, max_attempts: int = SO_LAN_THU,
                 if successes >= target_successes:
                     break
             else:
-                relaxed_score = (len(hard_gate_violations), teacher_penalty, cells_changed)
+                # Rank by the total violation-instance COUNT, not len(hard_gate_violations)
+                # (the number of distinct rule IDs violated) -- see
+                # _check_hard_post_generation_rules's docstring: a candidate with 3
+                # lone-session instances (1 distinct rule) is objectively better than
+                # one with 1 lone-session + 1 split-day instance (2 distinct rules),
+                # but the old len()-based key ranked it worse (fix-wave Important #2/#3).
+                relaxed_score = (hard_gate_total, teacher_penalty, cells_changed)
                 if best_relaxed_score is None or relaxed_score < best_relaxed_score:
                     best_relaxed_score = relaxed_score
                     best_relaxed_changed = cells_changed
