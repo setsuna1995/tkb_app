@@ -194,7 +194,8 @@ def _count_teacher_missing_afternoon_duty(slots: list[Slot], assigned: dict, slo
     return missing
 
 
-def _teacher_quality_penalty(slots: list[Slot], assigned: dict, slot_teacher: dict, config: SchedulingConfig) -> int:
+def _teacher_quality_penalty(slots: list[Slot], assigned: dict, slot_teacher: dict, config: SchedulingConfig,
+                              exempt_teacher_ids: frozenset = frozenset()) -> int:
     penalty = 0
     mand_morns = getattr(config, "mandatory_morning_weekdays", (2, 5, 6))
     min_lone_load = getattr(config, "min_weekly_periods_for_lone_penalty", 8)
@@ -221,7 +222,10 @@ def _teacher_quality_penalty(slots: list[Slot], assigned: dict, slot_teacher: di
     penalty += _count_teacher_missing_mandatory_mornings(
         slots, assigned, slot_teacher, mand_morns,
         min_weekly_periods=getattr(config, "min_weekly_periods_for_mandatory_morning", 10),
+        strict_weekdays=getattr(config, "strict_morning_weekdays", ()) or (),
+        exempt_teacher_ids=exempt_teacher_ids,
     ) * 800
     if getattr(config, "balance_afternoon_teachers", True):
         penalty += _count_teacher_missing_afternoon_duty(slots, assigned, slot_teacher) * 200
     return penalty
+

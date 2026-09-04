@@ -887,3 +887,133 @@ def test_hdtn_thematic_week_forms_block_of_3_contiguous_periods():
     )
 
 
+# ==============================================================================
+# Task 6: Hàm mục tiêu (các tiêu chí HĐSP mềm)
+# ==============================================================================
+
+def test_objective_matches_quality_teacher_penalty():
+    """Test 1 (Task 6): Trọng số khớp 100% giữa hàm mục tiêu CP-SAT và
+    quality.py:_teacher_quality_penalty trên một lời giải."""
+    ts = [
+        TimeSlot(1, 2, "S", 1), TimeSlot(2, 2, "S", 2),
+        TimeSlot(3, 3, "S", 1), TimeSlot(4, 3, "S", 2),
+        TimeSlot(5, 4, "S", 1),
+    ]
+    slots = [Slot(i + 1, 101, t) for i, t in enumerate(ts)]
+    subjects = [
+        Subject(1, "Toan", ROLE_THUONG),
+        Subject(2, "Van", ROLE_THUONG),
+        Subject(3, "HDTN", ROLE_HDTN),
+    ]
+    inp = SchedulingInput(
+        classes=[ClassRoom(101, "6A1")], subjects=subjects,
+        teachers=[Teacher(10, "GV Toan"), Teacher(20, "GV Van")],
+        need={(1, 101): 3, (2, 101): 2},
+        assigned_teacher={(1, 101): 10, (2, 101): 20},
+        ban_busy=set(), slots=slots, timeslots=ts,
+        config=SchedulingConfig(
+            teacher_off_sessions_per_week=0,
+            mandatory_morning_weekdays=(2, 3),
+            min_weekly_periods_for_mandatory_morning=2,
+            min_weekly_periods_for_lone_penalty=2,
+        ),
+    )
+    built = cpsat.build_model(inp)
+    assert hasattr(built, "penalty_terms"), "built phải có thuộc tính penalty_terms"
+    from ortools.sat.python import cp_model
+    solver = cp_model.CpSolver()
+    status = solver.Solve(built.model)
+    assert status in (cp_model.OPTIMAL, cp_model.FEASIBLE)
+
+    assignment = {
+        s.slot_id: subj for (s_id, subj), var in built.x.items()
+        for s in inp.slots if s.slot_id == s_id and solver.Value(var)
+    }
+    from core.scheduler.quality import _teacher_quality_penalty
+    from core.scheduler.placement import _build_effective_assigned_teacher
+    from core.models import is_bgh
+    eff_assigned = _build_effective_assigned_teacher(inp)
+    slot_teacher = {s.slot_id: eff_assigned.get((assignment[s.slot_id], s.class_id))
+                    for s in inp.slots if s.slot_id in assignment}
+    bgh_ids = frozenset(t.teacher_id for t in inp.teachers if is_bgh(t))
+    expected_penalty = _teacher_quality_penalty(inp.slots, assignment, slot_teacher, inp.config, exempt_teacher_ids=bgh_ids)
+    assert int(solver.ObjectiveValue()) == expected_penalty
+
+
+
+def test_lone_session_exempt_teacher_receives_no_lone_penalty():
+    """Test 2 (Task 6): GV trong lone_session_exempt_teacher_ids không bị phạt buổi lẻ."""
+    ts = [TimeSlot(1, 2, "S", 1), TimeSlot(2, 3, "S", 1)]
+    slots = [Slot(i + 1, 101, t) for i, t in enumerate(ts)]
+    subjects = [Subject(1, "Toan", ROLE_THUONG), Subject(2, "HDTN", ROLE_HDTN)]
+    inp = SchedulingInput(
+        classes=[ClassRoom(101, "6A1")], subjects=subjects,
+        teachers=[Teacher(10, "GV Toan")],
+        need={(1, 101): 2},
+        assigned_teacher={(1, 101): 10},
+        ban_busy=set(), slots=slots, timeslots=ts,
+        config=SchedulingConfig(
+            teacher_off_sessions_per_week=0,
+            lone_session_exempt_teacher_ids=frozenset({10}),
+            min_weekly_periods_for_lone_penalty=1,
+        ),
+    )
+    built = cpsat.build_model(inp)
+    assert hasattr(built, "penalty_terms")
+    # Vì GV 10 được miễn trừ, danh sách phạt II.4 cho GV 10 phải rỗng
+    assert len(built.penalty_terms.get("II.4", [])) == 0
+
+
+def test_bgh_exempt_from_strict_morning_rule():
+    """Test 3 (Task 6): BGH được miễn luật strict T2/T6, GV thường thì không."""
+    ts = [TimeSlot(1, 3, "S", 1)]  # Chỉ có Thứ 3, cả hai GV đều thiếu sáng Thứ 2 (strict)
+    slots = [Slot(1, 101, ts[0]), Slot(2, 102, ts[0])]
+    subjects = [Subject(1, "Toan", ROLE_THUONG), Subject(2, "HDTN", ROLE_HDTN)]
+    inp = SchedulingInput(
+        classes=[ClassRoom(101, "6A1"), ClassRoom(102, "6A2")], subjects=subjects,
+        teachers=[
+            Teacher(10, "Thay Hieu Truong", role="Hiệu trưởng"),
+            Teacher(20, "GV Binh Thuong"),
+        ],
+        need={(1, 101): 1, (1, 102): 1},
+        assigned_teacher={(1, 101): 10, (1, 102): 20},
+        ban_busy=set(), slots=slots, timeslots=ts,
+        config=SchedulingConfig(
+            teacher_off_sessions_per_week=0,
+            strict_morning_weekdays=(2,),  # Sáng Thứ 2 strict
+        ),
+    )
+    built = cpsat.build_model(inp)
+    assert hasattr(built, "penalty_terms")
+    from ortools.sat.python import cp_model
+    solver = cp_model.CpSolver()
+    status = solver.Solve(built.model)
+    assert status in (cp_model.OPTIMAL, cp_model.FEASIBLE)
+    # II.3 phạt cho GV thường (20) nhưng KHÔNG phạt cho BGH (10)
+    ii3_penalties = [solver.Value(v) for v in built.penalty_terms.get("II.3", [])]
+    # Phải có đúng 1 lần phạt (của GV 20), không phạt GV 10
+    assert sum(ii3_penalties) == 1
+
+
+def test_flag_avoid_teacher_lone_periods_disabled():
+    """Test 4 (Task 6): Cờ avoid_teacher_lone_periods=False thì không sinh biến phạt II.4."""
+    ts = [TimeSlot(1, 2, "S", 1)]
+    slots = [Slot(1, 101, ts[0])]
+    subjects = [Subject(1, "Toan", ROLE_THUONG), Subject(2, "HDTN", ROLE_HDTN)]
+    inp = SchedulingInput(
+        classes=[ClassRoom(101, "6A1")], subjects=subjects,
+        teachers=[Teacher(10, "GV Toan")],
+        need={(1, 101): 1},
+        assigned_teacher={(1, 101): 10},
+        ban_busy=set(), slots=slots, timeslots=ts,
+        config=SchedulingConfig(
+            teacher_off_sessions_per_week=0,
+            avoid_teacher_lone_periods=False,
+        ),
+    )
+    built = cpsat.build_model(inp)
+    assert hasattr(built, "penalty_terms")
+    assert len(built.penalty_terms.get("II.4", [])) == 0
+
+
+
