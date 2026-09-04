@@ -1,8 +1,8 @@
 import pytest
 
 from core.models import (
-    ROLE_GDTC, ROLE_HDTN, ROLE_NANG, ROLE_THUONG, ClassRoom, SchedulingConfig,
-    SchedulingInput, Slot, Subject, Teacher, TimeSlot,
+    ROLE_GDTC, ROLE_HDTN, ROLE_KEP, ROLE_NANG, ROLE_THUONG, ClassRoom,
+    SchedulingConfig, SchedulingInput, Slot, Subject, Teacher, TimeSlot,
 )
 from core.validation import compute_quota_diff
 
@@ -10,12 +10,23 @@ cpsat = pytest.importorskip("core.scheduler.cpsat_model")
 
 
 def _tiny_input():
-    """1 lớp, 6 ô sáng, MỖI ô một ngày riêng (Thứ 2..Chủ nhật=8, tiết 1), 2 môn
+    """1 lớp, 6 ô sáng, MỖI ô một ngày riêng (Thứ 2 -> Thứ 7, tiết 1), 2 môn
     cần 3 tiết mỗi môn. Vừa khít 6 ô = 6 tiết, nên mọi ô đều phải có môn. Dùng
     6 ngày RIÊNG (thay vì 2 ngày x 3 tiết như bản cũ trước Task 4) để tương
     thích với luật khung LỚP mới (task-4-brief.md luật 1: trần 1 tiết/môn/
     ngày/lớp cho môn thường -- xếp 3 tiết Toán trong CÙNG 1 ngày giờ là bất
-    hợp lệ)."""
+    hợp lệ).
+
+    Side effect (đáng chú ý cho người đọc sau): với cấu hình mặc định
+    (chao_co_weekday=2, chao_co_period=1) và lớp này không có buổi chiều nào
+    (SHL rơi Thứ 7 -- ngày cuối cùng trong 6 ngày trên), ô slot1 (Thứ 2, tiết
+    1) và slot6 (Thứ 7, tiết 1 -- cũng là tiết CUỐI buổi sáng hôm đó vì mỗi
+    ngày chỉ có 1 tiết) bị 2 luật ghim mới của Task 4 (chào cờ + SHL) ép cứng
+    thành HĐTN bất cứ khi nào need HĐTN > 0 cho lớp này -- KHÔNG phải do luật
+    này (Task 1) chủ động chọn. Vô hại với 2 test dùng need HĐTN=3 (chỉ còn
+    lại đúng 1 tiết HĐTN "tự do" cần xếp vào 1 trong 4 ô giữa), và không ảnh
+    hưởng `test_leaves_cells_empty_when_there_is_slack` (ghi đè need thành chỉ
+    còn Toán, HĐTN need=0 nên không ô nào bị ghim)."""
     ts = [TimeSlot(i + 1, wd, "S", 1) for i, wd in enumerate([2, 3, 4, 5, 6, 7])]
     slots = [Slot(i + 1, 101, t) for i, t in enumerate(ts)]
     subjects = [Subject(1, "Toan", ROLE_THUONG), Subject(2, "HDTN", ROLE_HDTN)]
@@ -113,34 +124,60 @@ def test_teacher_respects_busy_slots():
 
 
 def test_teacher_respects_daily_cap():
-    """1 lớp, 4 ô: 3 ô sáng T2 (tiết 1-3) + 1 ô sáng T3 (tiết 1); 1 GV dạy 1
-    môn cần đúng 3/4 tiết, max_teacher_periods_per_day=2. Nếu thiếu ràng buộc
-    trần tiết/ngày CỦA GV, bộ giải có thể dồn cả 3 tiết vào T2, vượt trần 2
-    tiết/ngày -- trong khi vẫn còn ô T3 để dùng thay. Dùng HĐTN tuần chuyên đề
-    (block_size=3, xem task-4-brief.md luật 1+4) làm môn thử thay vì môn
-    thường, vì luật khung LỚP mới của Task 4 tự nó đã cấm môn thường xếp 3
-    tiết cùng ngày -- cần một môn được PHÉP 3 tiết/ngày ở cấp LỚP để phép thử
-    còn cô lập đúng luật trần GV (Task 2), không lẫn với luật trần lớp mới."""
+    """1 lớp, 5 ô: 3 ô sáng T2 (tiết 1-3) + 2 ô sáng T3 (tiết 1-2); 1 GV dạy 1
+    môn cần đúng 3/5 tiết. Dùng HĐTN tuần chuyên đề (block_size=3, xem
+    task-4-brief.md luật 1+4) làm môn thử thay vì môn thường, vì luật khung
+    LỚP mới của Task 4 tự nó đã cấm môn thường xếp 3 tiết cùng ngày -- cần một
+    môn được PHÉP 3 tiết/ngày ở cấp LỚP để phép thử còn cô lập đúng luật trần
+    GV (Task 2), không lẫn với luật trần lớp mới.
+
+    QUAN TRỌNG (fix sau review): với luật "không hở tiết" (5) + "buổi không
+    lẻ" (7) đã bật, MỌI cách chia 3 tiết này ra 2 ngày đều để lại đúng 1 ngày
+    còn "buổi lẻ" 1 tiết (2+1 hoặc 1+2 đều vi phạm luật 7 vì cả 2 buổi ở đây
+    đều có >=2 ô) -- tức {Thứ 2: 3, Thứ 3: 0} (dồn cả 3 tiết vào 1 ngày) là
+    cấu hình hợp lệ DUY NHẤT theo các luật KHÁC luật trần GV, không phụ thuộc
+    giá trị trần. Bản test trước (dùng T3 chỉ 1 ô, được luật 7 miễn trừ) hoá
+    ra có 2 cấu hình hợp lệ ngang nhau ({2,1} lẫn {3,0}) và bộ giải CP-SAT
+    luôn tự chọn {2,1} bất kể trần GV là bao nhiêu -- verify bằng
+    disable-and-rerun (tạm comment dòng ràng buộc luật 4 trong
+    `_add_teacher_constraints`, chạy lại với trần=2): kết quả GIỐNG HỆT nhau
+    có/không có ràng buộc, tức test cũ không thật sự kiểm được gì. Bản này
+    (Thứ 3 có 2 ô, không được miễn trừ luật 7) không còn đường "lách" đó, nên
+    trần GV=2 (< 3) BẮT BUỘC bài toán KHÔNG THỂ GIẢI -- đã verify lại bằng
+    disable-and-rerun: tắt ràng buộc luật 4 thì trần=2 giải được (dồn cả 3
+    tiết vào T2), bật lại thì trần=2 vô nghiệm như assert dưới đây mong đợi.
+    Trần=3 (đủ) thì giải được, đúng cấu hình dồn hết vào T2 và không vi phạm."""
     ts = [TimeSlot(1, 2, "S", 1), TimeSlot(2, 2, "S", 2), TimeSlot(3, 2, "S", 3),
-          TimeSlot(4, 3, "S", 1)]
+          TimeSlot(4, 3, "S", 1), TimeSlot(5, 3, "S", 2)]
     slots = [Slot(i + 1, 101, t) for i, t in enumerate(ts)]
     subjects = [Subject(1, "HDTN", ROLE_HDTN)]
-    config = SchedulingConfig(max_teacher_periods_per_day=2)
-    inp = SchedulingInput(
-        classes=[ClassRoom(101, "6A1")],
-        subjects=subjects,
-        teachers=[Teacher(10, "GV A")],
-        need={(1, 101): 3},
-        assigned_teacher={(1, 101): 10},
-        ban_busy=set(), slots=slots, timeslots=ts, config=config,
-        hdtn_thematic_week=True,
+
+    def _build(cap):
+        config = SchedulingConfig(max_teacher_periods_per_day=cap)
+        return SchedulingInput(
+            classes=[ClassRoom(101, "6A1")],
+            subjects=subjects,
+            teachers=[Teacher(10, "GV A")],
+            need={(1, 101): 3},
+            assigned_teacher={(1, 101): 10},
+            ban_busy=set(), slots=slots, timeslots=ts, config=config,
+            hdtn_thematic_week=True,
+        )
+
+    inp_tight = _build(2)
+    blocked = cpsat.solve(cpsat.build_model(inp_tight), time_limit_s=10.0)
+    assert blocked is None, (
+        "trần GV=2/ngày phải làm bài toán KHÔNG THỂ GIẢI ở đây: cấu hình hợp "
+        "lệ DUY NHẤT theo các luật khác là dồn cả 3 tiết vào 1 ngày (Thứ 2)"
     )
-    built = cpsat.build_model(inp)
+
+    inp_ok = _build(3)
+    built = cpsat.build_model(inp_ok)
     assignment = cpsat.solve(built, time_limit_s=10.0)
     assert assignment is not None
     from core.validation import find_teacher_day_cap_violations
     assert find_teacher_day_cap_violations(
-        inp.slots, assignment, inp.assigned_teacher, max_per_day=2) == []
+        inp_ok.slots, assignment, inp_ok.assigned_teacher, max_per_day=3) == []
 
 
 # ---------------------------------------------------------------------------
@@ -203,30 +240,47 @@ def test_heavy_subject_morning_only_when_enabled():
 
 
 def test_gdtc_respects_allowed_periods():
-    """GDTC chỉ được tiết 1-4 sáng. Cho lớp 5 ô sáng CÙNG 1 buổi (tiết 1-5) và
-    cần đúng 1 tiết GDTC -> bộ giải không được chọn tiết 5. 4 ô còn lại của
-    buổi này được lấp bằng 4 MÔN THƯỜNG khác nhau (thay vì 1 môn Toán x4 như
-    bản trước Task 4) vì luật trần 1 tiết/môn/ngày/lớp của Task 4 cấm 1 môn
-    thường xuất hiện 4 lần cùng ngày; dùng 4 môn riêng vẫn giữ nguyên bản chất
-    phép thử (buổi đủ 5 ô, GDTC phải né tiết 5)."""
-    ts = [TimeSlot(i + 1, 2, "S", i + 1) for i in range(5)]
+    """GDTC chỉ được các tiết trong `gdtc_morning_allowed_periods`.
+
+    QUAN TRỌNG (fix sau review): bản trước (5 ô cùng buổi, tiết 1-5, GDTC +
+    4 môn thường lấp đầy -- vừa khít) hoá ra KHÔNG hề kiểm được luật này: đã
+    verify bằng disable-and-rerun (tạm sửa dòng ràng buộc luật 3 trong
+    `_add_subject_constraints` thành `if False and ...`, chạy lại) thì GDTC
+    vẫn tự nhiên rơi vào tiết 4 (không bao giờ thử tiết 5) -- tức bộ giải
+    CP-SAT với 5 môn khác nhau lấp khít 5 ô có xu hướng nội tại không đụng ô
+    cuối cùng cho môn "distinguished" (GDTC), hoàn toàn không liên quan gì
+    đến ràng buộc đang kiểm. Gốc rễ: `find_invalid_gdtc_periods` không phát
+    hiện được vì có/không luật, GDTC vẫn ở tiết 4 (hợp lệ cả hai trường hợp).
+
+    Bản này dùng khung TỐI THIỂU 2 ô (tiết 1, 2), GDTC + 1 môn thường, vừa
+    khít -- luật "không hở tiết" (5) buộc CHỈ CÓ đúng 1 cấu hình hợp lệ mỗi
+    lần (GDTC và môn kia hoán đổi vị trí 2 ô đó). Đã verify bằng
+    disable-and-rerun: KHÔNG giới hạn (`gdtc_morning_allowed_periods=(1,2)`)
+    thì GDTC tự nhiên rơi tiết 2 (`{1: Toan, 2: GDTC}`); ép
+    `gdtc_morning_allowed_periods=(1,)` (chỉ tiết 1) buộc bộ giải phải HOÁN
+    ĐỔI để GDTC nhận tiết 1 (`{1: GDTC, 2: Toan}`) -- một kết quả THỰC SỰ
+    khác nhau tuỳ luật bật/tắt, không phải trùng lặp ngẫu nhiên."""
+    ts = [TimeSlot(1, 2, "S", 1), TimeSlot(2, 2, "S", 2)]
     slots = [Slot(i + 1, 101, t) for i, t in enumerate(ts)]
     subjects = [Subject(1, "GDTC", ROLE_GDTC), Subject(2, "HDTN", ROLE_HDTN),
-                Subject(3, "Toan", ROLE_THUONG), Subject(4, "Van", ROLE_THUONG),
-                Subject(5, "Anh", ROLE_THUONG), Subject(6, "Su", ROLE_THUONG)]
+                Subject(3, "Toan", ROLE_THUONG)]
     inp = SchedulingInput(
         classes=[ClassRoom(101, "6A1")], subjects=subjects,
         teachers=[Teacher(10, "GV")],
-        need={(1, 101): 1, (3, 101): 1, (4, 101): 1, (5, 101): 1, (6, 101): 1},
-        assigned_teacher={(1, 101): 10, (3, 101): 10, (4, 101): 10,
-                           (5, 101): 10, (6, 101): 10},
+        need={(1, 101): 1, (3, 101): 1},
+        assigned_teacher={(1, 101): 10, (3, 101): 10},
         ban_busy=set(), slots=slots, timeslots=ts,
-        config=SchedulingConfig(gdtc_morning_allowed_periods=(1, 2, 3, 4),
-                                 max_periods_per_session=5),
+        config=SchedulingConfig(gdtc_morning_allowed_periods=(1,)),
     )
     built = cpsat.build_model(inp)
     assignment = cpsat.solve(built, time_limit_s=10.0)
     assert assignment is not None
+    slot_by_id = {s.slot_id: s for s in inp.slots}
+    gdtc_slot = next(sid for sid, subj in assignment.items() if subj == 1)
+    assert slot_by_id[gdtc_slot].ts.period == 1, (
+        "GDTC bị ép chỉ được tiết 1 (gdtc_morning_allowed_periods=(1,)) nhưng "
+        f"lại rơi vào tiết {slot_by_id[gdtc_slot].ts.period}"
+    )
     from core.validation import find_invalid_gdtc_periods
     assert find_invalid_gdtc_periods(inp.slots, assignment, 1,
                                       inp.config.gdtc_morning_allowed_periods,
@@ -259,59 +313,64 @@ def test_subject_not_scheduled_on_consecutive_days():
 
 
 def test_max_heavy_per_session():
-    """Luật 5, cô lập thật sự khỏi luật 6 (review round: bản trước dùng cấu
-    hình mặc định max_heavy_per_session=3 == max_heavy_consecutive=3 trên 1
-    buổi đúng 4 ô -- cửa sổ trượt của luật 6 (kích thước 4) khi đó trùng khít
-    CẢ buổi, nên tự luật 6 đã ép "tổng buổi <= 3" giống hệt luật 5; xoá luật 5
-    đi test đó vẫn PASS, không chứng minh được gì).
+    """Luật 5, cô lập thật sự khỏi luật 6.
 
-    Bản này dùng max_heavy_consecutive=2 (< max_heavy_per_session=2, để công
-    thức max(...) không đội trần buổi lên theo luật 6) và 3 buổi RIÊNG cho
-    lớp: Thứ 3 (2 ô), Thứ 2 (4 ô), Thứ 4 (1 ô) -- tổng trần-theo-luật-5 vừa
-    đúng bằng nhu cầu (2+2+1=5), buộc lời giải hợp lệ gần như duy nhất.
+    QUAN TRỌNG (fix sau review): bản trước (5 môn Nặng riêng H1..H5 + 2 môn
+    thường F1/F2 trải 3 buổi Thứ 3/Thứ 2/Thứ 4, so sánh PHÂN BỐ tiết Nặng
+    giữa "luật bật" và "luật tắt/nới trần") hoá ra KHÔNG kiểm được gì: đã
+    verify bằng disable-and-rerun + nới `max_heavy_per_session`/
+    `max_heavy_consecutive` lên 100 -- CP-SAT dùng 8 worker song song nên
+    KHÔNG quyết định (chạy lại nhiều lần ra nhiều phân bố KHÁC NHAU ngay cả
+    khi CÙNG một cấu hình, vì có nhiều lời giải hợp lệ ngang nhau và không có
+    hàm mục tiêu để phá thế cân bằng) -- so sánh "phân bố A có giống phân bố
+    B không" là phép thử không đáng tin với mô hình không có objective.
 
-    Dùng 5 MÔN NẶNG RIÊNG (H1..H5, mỗi môn need=1) thay vì 1 môn Nặng duy
-    nhất cần 5 tiết như bản trước Task 4: luật trần 1 tiết/môn/ngày/lớp mới
-    (task-4-brief.md luật 1) cấm 1 môn xuất hiện 2 lần cùng ngày (ở đây Thứ 3
-    và Thứ 2 đều cần 2 tiết Nặng/ngày), trong khi luật 5 (max_heavy_per_
-    session) vốn kiểm TỔNG số tiết Nặng trong 1 buổi CỘNG DỒN từ nhiều môn
-    Nặng khác nhau -- đúng cách môn Nặng vận hành trong dữ liệu trường thật
-    (nhiều môn Nặng khác nhau cùng chia sẻ 1 buổi), không phải 1 môn lặp lại.
-    Tương tự, 2 tiết Toán tách thành F1/F2 (mỗi môn need=1) vì cả 2 đều rơi
-    cùng buổi Thứ 2."""
-    ts = [TimeSlot(1, 3, "S", 1), TimeSlot(2, 3, "S", 2),
-          TimeSlot(3, 2, "S", 1), TimeSlot(4, 2, "S", 2), TimeSlot(5, 2, "S", 3), TimeSlot(6, 2, "S", 4),
-          TimeSlot(7, 4, "S", 1)]
+    Bản này chuyển sang so sánh KHẢ THI/KHÔNG KHẢ THI (nhị phân, đáng tin cậy
+    hơn nhiều so với "lời giải nào được chọn"): 1 buổi DUY NHẤT (Thứ 2, 4 ô),
+    3 môn Nặng riêng (H1-H3, need=1) + 1 môn thường (F1, need=1) -- vừa khít,
+    KHÔNG có buổi/ngày nào khác để 3 tiết Nặng "trốn" đi. max_heavy_consecutive
+    =2 (đủ thấp để 2 mẫu xen kẽ hợp lệ theo luật 6 vẫn tồn tại: H-F-H-H hoặc
+    H-H-F-H, mỗi mẫu có chuỗi liên tiếp tối đa = 2, không phạm luật 6) NHƯNG
+    max_heavy_per_session=2 (< 3 tiết Nặng cần xếp) khiến CẢ 2 mẫu đó (và mọi
+    mẫu khác) đều vượt trần TỔNG môn Nặng/buổi -- tức bài toán này chỉ
+    KHÔNG THỂ GIẢI được vì luật 5, không phải vì luật 6 (luật 6 đã bị cô lập
+    ra khỏi nguyên nhân). Verify bằng disable-and-rerun: tạm comment dòng ràng
+    buộc luật 5 trong `_add_subject_constraints` (giữ luật 6 nguyên), bài toán
+    NÀY chuyển từ vô nghiệm -> giải được (ra đúng mẫu H-F-H-H hoặc tương tự,
+    thoả luật 6 một mình) -- khôi phục lại, xác nhận vô nghiệm trở lại như cũ.
+    Đối chứng thêm: trần rộng hơn (max_heavy_per_session=3, đủ cho 3 tiết
+    Nặng) làm bài toán giải được và không vi phạm gì."""
+    ts = [TimeSlot(i + 1, 2, "S", i + 1) for i in range(4)]
     slots = [Slot(i + 1, 101, t) for i, t in enumerate(ts)]
-    heavy_ids = {1, 2, 3, 4, 5}
+    heavy_ids = {1, 2, 3}
     subjects = [Subject(1, "H1", ROLE_NANG), Subject(2, "H2", ROLE_NANG),
-                Subject(3, "H3", ROLE_NANG), Subject(4, "H4", ROLE_NANG),
-                Subject(5, "H5", ROLE_NANG), Subject(6, "F1", ROLE_THUONG),
-                Subject(7, "F2", ROLE_THUONG), Subject(8, "HDTN", ROLE_HDTN)]
-    inp = SchedulingInput(
-        classes=[ClassRoom(101, "6A1")], subjects=subjects,
-        teachers=[Teacher(10, "GV A"), Teacher(20, "GV B")],
-        need={(sid, 101): 1 for sid in (1, 2, 3, 4, 5, 6, 7)},
-        assigned_teacher={(sid, 101): (10 if sid in heavy_ids else 20) for sid in (1, 2, 3, 4, 5, 6, 7)},
-        ban_busy=set(), slots=slots, timeslots=ts,
-        config=SchedulingConfig(max_heavy_per_session=2, max_heavy_consecutive=2),
+                Subject(3, "H3", ROLE_NANG), Subject(4, "F1", ROLE_THUONG),
+                Subject(5, "HDTN", ROLE_HDTN)]
+
+    def _build(max_per_sess, max_consec=2):
+        config = SchedulingConfig(max_heavy_per_session=max_per_sess, max_heavy_consecutive=max_consec)
+        return SchedulingInput(
+            classes=[ClassRoom(101, "6A1")], subjects=subjects,
+            teachers=[Teacher(10, "GV A"), Teacher(20, "GV B")],
+            need={(1, 101): 1, (2, 101): 1, (3, 101): 1, (4, 101): 1},
+            assigned_teacher={(1, 101): 10, (2, 101): 10, (3, 101): 10, (4, 101): 20},
+            ban_busy=set(), slots=slots, timeslots=ts, config=config,
+        )
+
+    inp_tight = _build(max_per_sess=2)
+    blocked = cpsat.solve(cpsat.build_model(inp_tight), time_limit_s=10.0)
+    assert blocked is None, (
+        "trần môn Nặng/buổi=2 (< 3 tiết Nặng cần xếp trong 1 buổi duy nhất) "
+        "phải làm bài toán KHÔNG THỂ GIẢI -- mọi mẫu xen kẽ hợp lệ theo luật 6 "
+        "(vd H-F-H-H) đều vẫn có TỔNG 3 tiết Nặng, vượt trần luật 5"
     )
-    built = cpsat.build_model(inp)
+
+    inp_ok = _build(max_per_sess=3)
+    built = cpsat.build_model(inp_ok)
     assignment = cpsat.solve(built, time_limit_s=10.0)
     assert assignment is not None
-    # Kiểm trực tiếp tổng số tiết Nặng/buổi (điều luật 5 THỰC SỰ khống chế) --
-    # find_max_heavy_violations chỉ đếm chuỗi liên tiếp nên mù trước mẫu rời
-    # rạc như {1,3,4}; giữ lại nó như một kiểm tra bổ sung, không thay thế.
-    slot_by_id = {s.slot_id: s for s in inp.slots}
-    per_session = {}
-    for sid, subj in assignment.items():
-        if subj in heavy_ids:
-            key = (slot_by_id[sid].ts.weekday, slot_by_id[sid].ts.session)
-            per_session[key] = per_session.get(key, 0) + 1
-    over_cap = {k: v for k, v in per_session.items() if v > inp.config.max_heavy_per_session}
-    assert over_cap == {}, f"buổi vượt trần môn Nặng ({inp.config.max_heavy_per_session}/buổi): {over_cap}"
     from core.validation import find_max_heavy_violations
-    assert find_max_heavy_violations(inp.slots, assignment, heavy_ids) == []
+    assert find_max_heavy_violations(inp_ok.slots, assignment, heavy_ids, max_consecutive=2) == []
 
 
 def test_max_heavy_consecutive_sliding_window():
@@ -352,26 +411,33 @@ def test_max_heavy_consecutive_sliding_window():
 
 
 def test_heavy_subject_avoids_afternoon_period3():
-    """Luật 7: môn Nặng cần 1 tiết, phải né tiết 3 buổi chiều. Toán cần 3 tiết
-    trải trên 3 NGÀY riêng (tiết 1 sáng mỗi ngày -- tương thích luật trần 1
-    tiết/môn/ngày/lớp của Task 4). Ô "bẫy" (chiều tiết 3) nằm ở 1 ngày RIÊNG,
-    cùng buổi chiều đó còn có tiết 1 (Văn) và tiết 2 (Sử) để luật "không hở
-    tiết" (luật 5) có đủ tiết 1, 2 hợp lệ đứng trước tiết 3 -- nếu không, một
-    buổi chiều chỉ có mỗi tiết 3 (không có tiết 1, 2) sẽ bị luật 5 cấm cứng
-    (ô không có "tiết liền trước" thì luôn phải để trống), che mất hoàn toàn
-    ý định phép thử này (né luật 7, không phải bị luật 5 chặn hộ). Vừa khít 6
-    ô = 6 tiết (Nặng=1, Toán=3, Văn=1, Sử=1)."""
-    ts = [TimeSlot(1, 2, "S", 1), TimeSlot(2, 3, "S", 1), TimeSlot(3, 4, "S", 1),
-          TimeSlot(4, 5, "C", 1), TimeSlot(5, 5, "C", 2), TimeSlot(6, 5, "C", 3)]
+    """Luật 7: môn Nặng phải né tiết 3 buổi chiều.
+
+    QUAN TRỌNG (fix sau review): bản trước (Nặng=1 + 3 môn thường riêng trải
+    nhiều ngày, môn Nặng "khan hiếm" cạnh tranh ô cuối cùng) hoá ra KHÔNG kiểm
+    được gì: đã verify bằng disable-and-rerun (`avoid_heavy_afternoon_period3=
+    False`) -- môn Nặng vẫn tự nhiên tránh tiết 3 (rơi vào tiết 2) dù luật đã
+    tắt, tức việc nó né tiết 3 không phải nhờ ràng buộc này.
+
+    Bản này khôi phục lại đúng kiểu bất đối xứng "môn khan hiếm (need nhỏ)
+    tranh chỗ với môn lấp đầy (need lớn)" đã dùng thành công ở các test Task 3
+    khác -- nhưng dùng môn Văn KÉP (ROLE_KEP, need=2, được luật trần lớp mới
+    của Task 4 cho phép 2 tiết/ngày vì `block_size[Văn]=2`) làm môn "lấp đầy"
+    thay vì Toán (môn thường, giờ chỉ được 1 tiết/ngày). 1 buổi chiều DUY NHẤT
+    (3 ô, tiết 1-3), vừa khít (Nặng=1 + Văn=2 = 3 ô). Đã verify bằng
+    disable-and-rerun (lặp lại 3 lần, ổn định): `avoid_heavy_afternoon_period3
+    =False` -> môn Nặng CHỌN đúng tiết 3 (ô "bẫy"); bật lại (`True`, mặc định)
+    -> môn Nặng bị đẩy sang tiết 2 -- một kết quả THỰC SỰ khác nhau tuỳ luật
+    bật/tắt, không phải trùng lặp ngẫu nhiên."""
+    ts = [TimeSlot(1, 2, "C", 1), TimeSlot(2, 2, "C", 2), TimeSlot(3, 2, "C", 3)]
     slots = [Slot(i + 1, 101, t) for i, t in enumerate(ts)]
-    subjects = [Subject(1, "KHTN", ROLE_NANG), Subject(2, "Toan", ROLE_THUONG),
-                Subject(3, "Van", ROLE_THUONG), Subject(4, "Su", ROLE_THUONG),
-                Subject(5, "HDTN", ROLE_HDTN)]
+    subjects = [Subject(1, "KHTN", ROLE_NANG), Subject(2, "Van", ROLE_KEP),
+                Subject(3, "HDTN", ROLE_HDTN)]
     inp = SchedulingInput(
         classes=[ClassRoom(101, "6A1")], subjects=subjects,
-        teachers=[Teacher(10, "GV A"), Teacher(20, "GV B"), Teacher(30, "GV C"), Teacher(40, "GV D")],
-        need={(1, 101): 1, (2, 101): 3, (3, 101): 1, (4, 101): 1},
-        assigned_teacher={(1, 101): 10, (2, 101): 20, (3, 101): 30, (4, 101): 40},
+        teachers=[Teacher(10, "GV A"), Teacher(20, "GV B")],
+        need={(1, 101): 1, (2, 101): 2},
+        assigned_teacher={(1, 101): 10, (2, 101): 20},
         ban_busy=set(), slots=slots, timeslots=ts,
         config=SchedulingConfig(),
     )
@@ -502,15 +568,78 @@ def test_no_gap_within_session_when_slack_available():
                 assert (p - 1) in periods, f"hở tiết {p - 1} trong buổi {key} (tiết {p} có môn nhưng {p - 1} thì không)"
 
 
+def test_no_gap_defensive_branch_when_predecessor_slot_absent_from_frame():
+    """Nhánh phòng thủ của luật 5 (cpsat_model.py, đoạn `else: m.Add(sum(vars_p)
+    == 0)`) -- trước fix sau review, nhánh này chưa có test riêng. Ô tiết p-1
+    KHÔNG TỒN TẠI trong khung của lớp (khác với "tồn tại nhưng bỏ trống") thì
+    ô tiết p phải bị cấm cứng, mirror `feasibility.py`'s `state.occupied.get(...,
+    False)` (mặc định False khi tra khoá không có, không phân biệt "chưa xếp"
+    với "không có ô").
+
+    Khung: Thứ 3 sáng CHỈ có tiết 3 (không có tiết 1, 2 nào cho lớp này ngày
+    đó -- không phải để trống, mà KHÔNG TỒN TẠI trong `inp.slots`) + Thứ 4
+    sáng tiết 1 (buổi bình thường). Cả 2 đều là buổi 1-ô-duy-nhất nên không bị
+    luật 7 (buổi không lẻ) chi phối, cô lập đúng luật 5. Toán need=1 -> chỉ
+    tiết Thứ 4 dùng được, đúng như assert dưới. Toán need=2 -> KHÔNG THỂ GIẢI
+    vì chỉ có 1 ô thực sự dùng được trong khi cần 2. Đã verify bằng
+    disable-and-rerun (tạm comment dòng `m.Add(sum(vars_p) == 0)`): need=2 lúc
+    đó giải được (dùng cả tiết 3 Thứ 3), khôi phục lại thì vô nghiệm như cũ."""
+    ts = [TimeSlot(1, 3, "S", 3), TimeSlot(2, 4, "S", 1)]
+    slots = [Slot(1, 101, ts[0]), Slot(2, 101, ts[1])]
+    subjects = [Subject(1, "Toan", ROLE_THUONG), Subject(2, "HDTN", ROLE_HDTN)]
+
+    inp_ok = SchedulingInput(
+        classes=[ClassRoom(101, "6A1")], subjects=subjects,
+        teachers=[Teacher(10, "GV A")],
+        need={(1, 101): 1},
+        assigned_teacher={(1, 101): 10},
+        ban_busy=set(), slots=slots, timeslots=ts,
+        config=SchedulingConfig(),
+    )
+    built = cpsat.build_model(inp_ok)
+    assignment = cpsat.solve(built, time_limit_s=10.0)
+    assert assignment == {2: 1}, (
+        "chỉ ô Thứ 4 tiết 1 dùng được -- ô Thứ 3 tiết 3 (không có tiết 1, 2 "
+        f"cùng buổi/ngày đó) phải bị cấm cứng: {assignment}"
+    )
+
+    inp_tight = SchedulingInput(
+        classes=[ClassRoom(101, "6A1")], subjects=subjects,
+        teachers=[Teacher(10, "GV A")],
+        need={(1, 101): 2},
+        assigned_teacher={(1, 101): 10},
+        ban_busy=set(), slots=slots, timeslots=ts,
+        config=SchedulingConfig(),
+    )
+    blocked = cpsat.solve(cpsat.build_model(inp_tight), time_limit_s=10.0)
+    assert blocked is None, "cần 2 tiết nhưng chỉ có 1 ô thực sự dùng được -- phải KHÔNG THỂ GIẢI"
+
+
 def test_class_has_no_lone_single_period_session_when_slack_available():
-    """1 lớp, 2 buổi RIÊNG (Thứ 2 sáng 2 ô + Thứ 2 chiều 2 ô = 4 ô), 2 môn
-    need=1 mỗi môn -> 2 dư địa. Không ràng buộc thì bộ giải (đã xác nhận thực
-    nghiệm) tự nhiên tách 2 môn ra 2 buổi khác nhau, mỗi buổi chỉ 1 tiết --
-    đúng "buổi lẻ" luật 7 cấm. Với luật bật, 2 môn buộc phải dồn vào CÙNG 1
-    buổi (buổi kia để trống hẳn), vì buổi nào ĐƯỢC DÙNG cũng phải có >= 2
-    tiết."""
-    ts = [TimeSlot(1, 2, "S", 1), TimeSlot(2, 2, "S", 2),
-          TimeSlot(3, 2, "C", 1), TimeSlot(4, 2, "C", 2)]
+    """1 lớp, 2 buổi RIÊNG (Thứ 2 sáng 3 ô + Thứ 2 chiều 3 ô = 6 ô), 2 môn
+    need=1 mỗi môn -> 4 dư địa.
+
+    QUAN TRỌNG (fix sau review): bản trước (không ràng buộc gì thêm ngoài 2
+    môn need=1) hoá ra KHÔNG kiểm được luật 7: đã verify bằng disable-and-rerun
+    (tạm comment 2 dòng ràng buộc luật 7 trong `_add_class_constraints`, giữ
+    nguyên luật 1/2/3/5/6) -- kết quả VẪN dồn cả 2 môn vào CÙNG 1 buổi
+    (`{3: Van, 4: Toan}`, cả hai ở buổi chiều), tức các luật KHÁC (rất có thể
+    luật 5 -- không hở tiết -- kết hợp xu hướng nội tại của CP-SAT) đã vô
+    tình tạo ra đúng kết quả "trông giống" luật 7 đang hoạt động, dù luật 7
+    hoàn toàn vắng mặt.
+
+    Bản này ép 2 môn vào 2 buổi RIÊNG BIỆT bằng luật môn-lớp-buổi
+    (`subject_class_allowed_cells`, Task 3 luật 8 -- không liên quan gì tới
+    luật 7 đang kiểm) -- Toán CHỈ được xếp buổi sáng, Văn CHỈ được xếp buổi
+    chiều, mỗi môn need=1. Vì bị tách buộc, MỖI buổi trong 2 buổi (3 ô/buổi,
+    >=2) sẽ có ĐÚNG 1 tiết -- vi phạm luật 7 ở CẢ HAI buổi, không cách nào
+    tránh được (không có lựa chọn "dồn vào 1 buổi" nữa vì luật 8 đã cấm).
+    Do đó bài toán này CHỈ khả thi nếu luật 7 KHÔNG được thực thi -- verify
+    bằng disable-and-rerun: bật luật 7 (bình thường) -> KHÔNG THỂ GIẢI; tạm
+    tắt luật 7 -> giải được, ra đúng mẫu buổi-lẻ `{Toán@sáng tiết1, Văn@chiều
+    tiết1}` -- khôi phục lại, xác nhận vô nghiệm trở lại như cũ."""
+    ts = [TimeSlot(1, 2, "S", 1), TimeSlot(2, 2, "S", 2), TimeSlot(3, 2, "S", 3),
+          TimeSlot(4, 2, "C", 1), TimeSlot(5, 2, "C", 2), TimeSlot(6, 2, "C", 3)]
     slots = [Slot(i + 1, 101, t) for i, t in enumerate(ts)]
     subjects = [Subject(1, "Toan", ROLE_THUONG), Subject(2, "Van", ROLE_THUONG),
                 Subject(3, "HDTN", ROLE_HDTN)]
@@ -521,19 +650,19 @@ def test_class_has_no_lone_single_period_session_when_slack_available():
         assigned_teacher={(1, 101): 10, (2, 101): 20},
         ban_busy=set(), slots=slots, timeslots=ts,
         config=SchedulingConfig(),
+        subject_class_allowed_cells={
+            (1, 101): frozenset({(2, "S")}),
+            (2, 101): frozenset({(2, "C")}),
+        },
     )
     built = cpsat.build_model(inp)
     assignment = cpsat.solve(built, time_limit_s=10.0)
-    assert assignment is not None
-
-    slot_by_id = {s.slot_id: s for s in inp.slots}
-    filled_count = {}
-    for sid in assignment:
-        ts_ = slot_by_id[sid].ts
-        key = (slot_by_id[sid].class_id, ts_.weekday, ts_.session)
-        filled_count[key] = filled_count.get(key, 0) + 1
-    bad = {k: v for k, v in filled_count.items() if v == 1}
-    assert bad == {}, f"buổi lẻ 1 tiết (trong khi buổi đó có >=2 ô): {bad}"
+    assert assignment is None, (
+        "Toán bị ép chỉ được buổi sáng, Văn chỉ được buổi chiều (luật môn-lớp-"
+        "buổi) -- mỗi buổi 3 ô nhưng chỉ 1 môn cần xếp, nên buộc phải để lại "
+        "đúng 1 tiết ở CẢ HAI buổi. Nếu luật 7 (không buổi lẻ) hoạt động đúng, "
+        "đây phải là bài toán KHÔNG THỂ GIẢI"
+    )
 
 
 def test_subject_class_allowed_cells_rule():
