@@ -46,7 +46,10 @@ def _check_hard_post_generation_rules(inp: SchedulingInput, state: _State, confi
     violated = []
     total = 0
     mand_morns = getattr(config, "mandatory_morning_weekdays", (2, 5, 6))
-    missing = _count_teacher_missing_mandatory_mornings(inp.slots, state.assigned, state.slot_teacher, mand_morns)
+    missing = _count_teacher_missing_mandatory_mornings(
+        inp.slots, state.assigned, state.slot_teacher, mand_morns,
+        min_weekly_periods=getattr(config, "min_weekly_periods_for_mandatory_morning", 10),
+    )
     if missing > 0:
         violated.append("II.3")
     total += missing

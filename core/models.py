@@ -113,6 +113,11 @@ class SchedulingConfig:
     avoid_teacher_lone_periods: bool = True  # Tránh GV chỉ có 1 tiết/ngày hoặc sáng 1 tiết + chiều 1 tiết
     balance_afternoon_teachers: bool = True  # Cân đối buổi chiều, tránh GV nghỉ full chiều khi dạy lớp có tiết chiều
     mandatory_morning_weekdays: tuple = (2, 5, 6)  # Các sáng bắt buộc toàn thể GV có mặt/đi làm
+    min_weekly_periods_for_mandatory_morning: int = 10
+    # Tiêu chí II.3 chỉ ép GV có tải >= ngưỡng này phải có mặt các sáng bắt buộc.
+    # Trước 2026-09-04 số 10 nằm cứng trong quality.py; tách ra thành cấu hình vì đo
+    # thấy ~3.75 GV vẫn vắng sáng Thứ 5 do tải dưới ngưỡng nên luật không chạm tới.
+    # 0 = áp dụng cho mọi GV.
     avoid_gdtc_consecutive_days: bool = True  # GDTC của 1 lớp không xếp ở 2 hôm liền kề
     max_teacher_periods_per_day: int = 5  # Tiêu chí II.2: Mỗi GV không quá tải vượt 5 tiết/ngày
     max_heavy_per_session: int = 3  # Tiêu chí I.2 & II.13: Tối đa 3 tiết môn nặng trong 1 buổi của 1 lớp

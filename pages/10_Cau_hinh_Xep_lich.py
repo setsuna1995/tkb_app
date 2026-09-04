@@ -180,6 +180,14 @@ mandatory_morning_selection = st.multiselect(
     format_func=lambda w: f"{WEEKDAY_NAMES[w]} Sáng",
     help="Các buổi sáng này (mặc định Thứ 2, Thứ 5, Thứ 6) toàn thể GV bắt buộc có mặt, cấm chọn làm buổi nghỉ và ưu tiên xếp tiết dạy.",
 )
+min_weekly_periods_for_mandatory_morning = st.number_input(
+    "Sáng bắt buộc: chỉ áp dụng cho GV có tải từ mấy tiết/tuần trở lên",
+    0, 30, getattr(config, "min_weekly_periods_for_mandatory_morning", 10),
+    help="GV có tải DƯỚI ngưỡng này được miễn, không bắt buộc phải có mặt các sáng ở trên. "
+         "Đặt 0 = áp dụng cho mọi GV. Lưu ý: ngưỡng càng cao thì càng nhiều GV vắng mặt "
+         "mà không bị báo vi phạm — đo trên dữ liệu thật với ngưỡng 10 cho thấy vẫn có "
+         "khoảng 4 GV vắng sáng Thứ 5 vì tải dưới ngưỡng.",
+)
 avoid_gdtc_consecutive = st.checkbox(
     "GDTC (Thể dục) không xếp vào 2 ngày liên tiếp",
     value=getattr(config, "avoid_gdtc_consecutive_days", True),
@@ -280,6 +288,7 @@ if st.button("💾 Lưu cấu hình", type="primary"):
         avoid_teacher_gaps=bool(avoid_teacher_gaps),
         avoid_teacher_lone_periods=bool(avoid_teacher_lone_periods),
         balance_afternoon_teachers=bool(balance_afternoon_teachers),
+        min_weekly_periods_for_mandatory_morning=int(min_weekly_periods_for_mandatory_morning),
         lone_session_exempt_teacher_ids=frozenset(lone_exempt_selection),
         compact_schedule_teacher_ids=frozenset(compact_sched_selection),
         mandatory_morning_weekdays=tuple(sorted(mandatory_morning_selection)),

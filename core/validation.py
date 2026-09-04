@@ -238,12 +238,15 @@ def find_heavy_afternoon_period3_violations(slots: list, assignment: dict, heavy
 
 
 def find_teacher_missing_mandatory_morning_violations(slots: list, assignment: dict, assigned_teacher: dict,
-                                                        mandatory_mornings: tuple = (2, 5, 6)) -> list:
-    """Returns [(teacher_id, weekday), ...] for teachers (>=10 periods/week) who end up
-    with zero periods on a mandatory morning -- Tiêu chí II.3: catches an accidental
-    empty forbidden morning beyond the teacher's one designated off-slot. Mirrors
-    core.scheduler.quality._count_teacher_missing_mandatory_mornings exactly, so this
-    check and the engine's post-generation gate (core/scheduler/engine.py) never disagree."""
+                                                        mandatory_mornings: tuple = (2, 5, 6),
+                                                        min_weekly_periods: int = 10) -> list:
+    """Returns [(teacher_id, weekday), ...] for teachers at/above min_weekly_periods
+    who end up with zero periods on a mandatory morning -- Tiêu chí II.3: catches an
+    accidental empty forbidden morning beyond the teacher's one designated off-slot.
+    Mirrors core.scheduler.quality._count_teacher_missing_mandatory_mornings exactly,
+    so this check and the engine's post-generation gate (core/scheduler/engine.py)
+    never disagree -- INCLUDING the threshold, which callers must pass through from
+    config.min_weekly_periods_for_mandatory_morning (2026-09-04)."""
     teacher_morns = defaultdict(lambda: defaultdict(int))
     teacher_totals = defaultdict(int)
     for slot in slots:
@@ -259,7 +262,7 @@ def find_teacher_missing_mandatory_morning_violations(slots: list, assignment: d
 
     violations = []
     for teacher_id, total in teacher_totals.items():
-        if total >= 10:
+        if total >= min_weekly_periods:
             for wd in mandatory_mornings:
                 if teacher_morns[teacher_id][wd] == 0:
                     violations.append((teacher_id, wd))

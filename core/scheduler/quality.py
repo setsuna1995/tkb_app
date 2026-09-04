@@ -128,7 +128,12 @@ def _count_teacher_4_consecutive_mornings(slots: list[Slot], assigned: dict, slo
     return count_4
 
 
-def _count_teacher_missing_mandatory_mornings(slots: list[Slot], assigned: dict, slot_teacher: dict, mandatory_mornings: tuple = (2, 5, 6)) -> int:
+def _count_teacher_missing_mandatory_mornings(slots: list[Slot], assigned: dict, slot_teacher: dict,
+                                               mandatory_mornings: tuple = (2, 5, 6),
+                                               min_weekly_periods: int = 10) -> int:
+    """min_weekly_periods: chỉ ép GV có tải >= ngưỡng này phải có mặt các sáng bắt
+    buộc. Mặc định 10 = đúng hằng số cũ nằm cứng trong hàm này; nay cấu hình được
+    trên trang Cấu hình xếp lịch (2026-09-04)."""
     teacher_morns = defaultdict(lambda: defaultdict(int))
     teacher_totals = defaultdict(int)
     for s in slots:
@@ -142,7 +147,7 @@ def _count_teacher_missing_mandatory_mornings(slots: list[Slot], assigned: dict,
 
     missing = 0
     for tid, total in teacher_totals.items():
-        if total >= 10:  # Chỉ ép sáng bắt buộc với GV có tải từ 10 tiết/tuần trở lên
+        if total >= min_weekly_periods:  # Chỉ ép sáng bắt buộc với GV đủ tải
             for wd in mandatory_mornings:
                 if teacher_morns[tid][wd] == 0:
                     missing += 1
@@ -197,7 +202,10 @@ def _teacher_quality_penalty(slots: list[Slot], assigned: dict, slot_teacher: di
         ) * TEACHER_LONE_SESSION_SPREAD_PENALTY
     if getattr(config, "avoid_teacher_4_consecutive_morning", True):
         penalty += _count_teacher_4_consecutive_mornings(slots, assigned, slot_teacher, max_load_for_penalty=20) * 300
-    penalty += _count_teacher_missing_mandatory_mornings(slots, assigned, slot_teacher, mand_morns) * 800
+    penalty += _count_teacher_missing_mandatory_mornings(
+        slots, assigned, slot_teacher, mand_morns,
+        min_weekly_periods=getattr(config, "min_weekly_periods_for_mandatory_morning", 10),
+    ) * 800
     if getattr(config, "balance_afternoon_teachers", True):
         penalty += _count_teacher_missing_afternoon_duty(slots, assigned, slot_teacher) * 200
     return penalty

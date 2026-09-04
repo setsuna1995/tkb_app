@@ -366,6 +366,7 @@ if result is not None:
         missing_morning = find_teacher_missing_mandatory_morning_violations(
             inp.slots, result.assignment, inp.assigned_teacher,
             getattr(inp.config, "mandatory_morning_weekdays", (2, 5, 6)),
+            getattr(inp.config, "min_weekly_periods_for_mandatory_morning", 10),
         )
         if missing_morning:
             hard_rule_violations["II.3"] = missing_morning
@@ -611,6 +612,7 @@ with st.expander("📅 Xếp nhiều tuần cùng lúc (tạm thời tắt)", ex
                 b_missing_morning = find_teacher_missing_mandatory_morning_violations(
                     b_inp.slots, b_result.assignment, b_inp.assigned_teacher,
                     getattr(b_inp.config, "mandatory_morning_weekdays", (2, 5, 6)),
+                    getattr(b_inp.config, "min_weekly_periods_for_mandatory_morning", 10),
                 )
                 if b_missing_morning:
                     b_hard_rule_violations["II.3"] = b_missing_morning
