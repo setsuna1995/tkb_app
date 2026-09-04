@@ -120,6 +120,15 @@ class SchedulingConfig:
     avoid_heavy_afternoon_period3: bool = True  # Tiêu chí II.15: Hạn chế môn nặng tiết 3 chiều
     avoid_teacher_4_consecutive_morning: bool = True  # Tiêu chí II.14: Hạn chế GV dạy 4 tiết sáng liên tục nếu tải <= 20
     min_weekly_periods_for_lone_penalty: int = 8  # Tiêu chí II.4: miễn trừ GV có tải < ngưỡng này; 0 = áp dụng phạt lẻ cho tất cả
+    lone_session_exempt_teacher_ids: frozenset = field(default_factory=frozenset)
+    # GV được MIỄN TRỪ luật buổi lẻ (II.4/II.8) theo tên cụ thể, không theo ngưỡng tải:
+    # dành cho GV vốn đã có mặt ở trường vì nhiệm vụ khác (phụ trách thiết bị, thư viện...),
+    # nên việc họ chỉ dạy 1 tiết trong một buổi không khiến họ phải đi lại thêm.
+    compact_schedule_teacher_ids: frozenset = field(default_factory=frozenset)
+    # GV được ƯU TIÊN MỀM gom tiết vào ÍT BUỔI NHẤT có thể, để họ được nghỉ trọn
+    # nhiều buổi (sáng hay chiều đều tính) -- vd GV Thể dục cần nghỉ 2 buổi bất kỳ.
+    # Chỉ là điểm phạt khi chấm chọn, không phải luật cứng: nếu không còn chỗ thì
+    # vẫn xếp bình thường chứ không làm hỏng các tiêu chí khác.
 
 
 

@@ -186,6 +186,29 @@ avoid_gdtc_consecutive = st.checkbox(
     help="Ràng buộc CỨNG: GDTC của 1 lớp không bao giờ được xếp vào 2 ngày liền kề trong tuần.",
 )
 
+_all_teachers = repo.list_teachers(conn)
+_teacher_names = {t.teacher_id: t.name for t in _all_teachers}
+_teacher_ids = [t.teacher_id for t in _all_teachers]
+
+lone_exempt_selection = st.multiselect(
+    "GV được miễn luật 'không dạy 1 tiết/buổi'",
+    options=_teacher_ids,
+    default=[t for t in getattr(config, "lone_session_exempt_teacher_ids", frozenset()) if t in _teacher_names],
+    format_func=lambda t: _teacher_names.get(t, str(t)),
+    help="Dành cho GV vốn đã có mặt ở trường vì nhiệm vụ khác (phụ trách thiết bị, thư viện, văn phòng...). "
+         "Với những GV này, một buổi chỉ có 1 tiết KHÔNG bị tính là vi phạm, vì họ không phải đi lại thêm. "
+         "Khác với ngưỡng tải bên dưới: đây là miễn trừ theo TỪNG NGƯỜI, không theo số tiết.",
+)
+compact_sched_selection = st.multiselect(
+    "GV ưu tiên được nghỉ trọn nhiều buổi",
+    options=_teacher_ids,
+    default=[t for t in getattr(config, "compact_schedule_teacher_ids", frozenset()) if t in _teacher_names],
+    format_func=lambda t: _teacher_names.get(t, str(t)),
+    help="Thuật toán sẽ cố gom tiết của những GV này vào ÍT BUỔI NHẤT có thể, để họ được nghỉ trọn "
+         "nhiều buổi trong tuần (sáng hay chiều đều tính) — ví dụ GV Thể dục muốn nghỉ 2 buổi bất kỳ. "
+         "Đây là ƯU TIÊN MỀM: nếu không còn chỗ thì vẫn xếp bình thường, không làm hỏng các tiêu chí khác.",
+)
+
 st.subheader("Tiêu chuẩn BGD & Tiêu chí HĐSP Nhà Trường")
 st.caption(
     "Các ràng buộc sư phạm chuẩn GDPT 2018 và 15 tiêu chí của Hội đồng Sư phạm nhằm đảm bảo sức khỏe học sinh và tối ưu lịch công tác giáo viên."
@@ -257,6 +280,8 @@ if st.button("💾 Lưu cấu hình", type="primary"):
         avoid_teacher_gaps=bool(avoid_teacher_gaps),
         avoid_teacher_lone_periods=bool(avoid_teacher_lone_periods),
         balance_afternoon_teachers=bool(balance_afternoon_teachers),
+        lone_session_exempt_teacher_ids=frozenset(lone_exempt_selection),
+        compact_schedule_teacher_ids=frozenset(compact_sched_selection),
         mandatory_morning_weekdays=tuple(sorted(mandatory_morning_selection)),
         avoid_gdtc_consecutive_days=bool(avoid_gdtc_consecutive),
         max_teacher_periods_per_day=int(max_teacher_periods_per_day),

@@ -81,7 +81,8 @@ def _repair_teacher_lone_sessions(inp, state: _State, role_index,
                                    config: Optional[SchedulingConfig] = None,
                                    subject_class_allowed_cells: Optional[dict] = None,
                                    slot_by_coord: Optional[dict] = None,
-                                   min_weekly_periods: int = 0) -> None:
+                                   min_weekly_periods: int = 0,
+                                   exempt_teacher_ids: frozenset = frozenset()) -> None:
     """Finds all teacher sessions with exactly 1 period, and attempts to eliminate them
     either by:
     1. Evacuate: Moving that 1 period to another session where the teacher already teaches,
@@ -124,6 +125,7 @@ def _repair_teacher_lone_sessions(inp, state: _State, role_index,
             for (tid, wd, sess), periods in list(state.teacher_session_periods.items())
             if len(periods) == 1 and tid > 0
             and (min_weekly_periods <= 0 or teacher_totals[tid] >= min_weekly_periods)
+            and tid not in exempt_teacher_ids
         ]
         if not lone_teacher_sessions:
             break

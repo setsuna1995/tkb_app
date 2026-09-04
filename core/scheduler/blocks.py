@@ -180,8 +180,7 @@ def _try_place_block_atomically(class_id: int, slot: Slot, state: _State, role_i
             continue
         if state.placed[(class_id, subj.subject_id, ts.weekday)]:
             continue
-        if subj.subject_id == role_index.hdtn_id and (class_id, ts.weekday) in state.shl_days:
-            continue
+        # HĐTN may share the SHL day (see heuristics.py) -- no exclusion here either.
         teacher_id = assigned_teacher[key]
         if not _feasible(class_id, ts, subj.subject_id, teacher_id, state, role_index, day_capacity, config,
                           subject_class_allowed_cells):

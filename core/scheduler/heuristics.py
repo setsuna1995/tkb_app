@@ -8,6 +8,7 @@ from core.scheduler.constants import (
     AFTERNOON_MISMATCH_PENALTY, BLOCK_COMPLETE_BONUS, HEAVY_MORNING_BONUS,
     IDLE_DAY_BONUS, TEACHER_AFTERNOON_BALANCE_BONUS, TEACHER_CONSECUTIVE_BONUS,
     TEACHER_GAP_PENALTY, TEACHER_LONE_SESSION_HEURISTIC_PENALTY,
+    TEACHER_COMPACT_SCHEDULE_PENALTY,
     TEACHER_MANDATORY_MORNING_BONUS, TEACHER_SESSION_PAIR_BONUS,
     TEACHER_SPLIT_DAY_PENALTY,
 )
@@ -53,8 +54,10 @@ def _pick_best_scored(class_id: int, slot: Slot, state: _State, role_index,
         key = (subj.subject_id, class_id)
         if state.remaining_need.get(key, 0) <= 0:
             continue
-        if subj.subject_id == role_index.hdtn_id and (class_id, ts.weekday) in state.shl_days:
-            continue
+        # NOTE: HĐTN is deliberately NOT excluded from the SHL day any more -- the
+        # free 3rd period is allowed to share a day with chào cờ/SHL (rule confirmed
+        # 2026-09-04). The SHL cell itself stays protected by its reservation, and the
+        # HĐTN quota is already spent down to 1 free period by then.
         block_n = role_index.block_size.get(subj.subject_id, 1)
         if (block_n >= 2 and not state.placed[(class_id, subj.subject_id, ts.weekday)]
                 and state.remaining_need[key] >= block_n):
@@ -129,6 +132,26 @@ def _pick_best_scored(class_id: int, slot: Slot, state: _State, role_index,
             if state.teacher_week_afternoon_count.get(teacher_id, 0) == 0:
                 score += TEACHER_AFTERNOON_BALANCE_BONUS
 
+        # GV được cấu hình "ưu tiên nghỉ nhiều buổi": phạt việc MỞ THÊM MỘT BUỔI MỚI
+        # (sáng hay chiều đều tính), để tiết của họ gom vào ít buổi nhất -> càng nhiều
+        # buổi rảnh trọn vẹn càng tốt. Yêu cầu thực tế là "nghỉ 2 buổi bất kỳ", không
+        # phải "nghỉ 2 buổi chiều": trường chỉ có 3 buổi chiều (T5, T6 chiều nghỉ sẵn)
+        # nên ép rảnh 2 chiều là ép dồn cả tải vào 1 chiều duy nhất -- gần như bất khả thi.
+        #
+        # Phạt vào lúc buổi còn TRỐNG chứ không phạt từng tiết: bản đầu phạt tăng dần
+        # theo tiết nên tiết đầu lọt vào rẻ, rồi TEACHER_SESSION_PAIR_BONUS (320) lại
+        # thưởng cho tiết thứ 2 cùng buổi -> buổi vừa mở ra lại được lấp đầy, ngược ý đồ
+        # (đo trên dữ liệu thật: GV Thể dục có ngày sáng trống trơn mà chiều 2 tiết).
+        # Nhân theo số buổi GV đã dùng nên buổi rảnh cuối cùng được giữ đắt nhất.
+        compact_list = getattr(config, "compact_schedule_teacher_ids", None)
+        if compact_list and teacher_id in compact_list:
+            if len(state.teacher_session_periods.get((teacher_id, ts.weekday, ts.session), [])) == 0:
+                sessions_used = sum(
+                    1 for (t, _wd, _sess), pers in state.teacher_session_periods.items()
+                    if t == teacher_id and pers
+                )
+                score -= TEACHER_COMPACT_SCHEDULE_PENALTY * (1 + sessions_used)
+
         mandatory_mornings = getattr(config, "mandatory_morning_weekdays", (2, 5, 6))
         if ts.session == "S" and ts.weekday in mandatory_mornings:
             if len(state.teacher_session_periods.get((teacher_id, ts.weekday, "S"), [])) == 0:
@@ -160,8 +183,6 @@ def _pick_best_simple(class_id: int, slot: Slot, state: _State, role_index,
         key = (subj.subject_id, class_id)
         remaining = state.remaining_need.get(key, 0)
         if remaining <= 0:
-            continue
-        if subj.subject_id == role_index.hdtn_id and (class_id, ts.weekday) in state.shl_days:
             continue
         teacher_id = assigned_teacher[key]
         if not _feasible(class_id, ts, subj.subject_id, teacher_id, state, role_index, day_capacity, config,

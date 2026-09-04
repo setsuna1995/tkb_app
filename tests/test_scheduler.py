@@ -1285,10 +1285,11 @@ def test_shl_supports_hdtn_quota_3_with_third_free():
     assert result.success is True
     assert _subject_at(inp, result, 1, 2, "S", 1) == 2   # chào cờ
     assert _subject_at(inp, result, 1, 7, "S", 2) == 2   # SHL
-    # tiết HĐTN thứ 3 (chủ đề) xếp linh hoạt -> nằm ở Thứ 3
-    assert _subject_at(inp, result, 1, 3, "S", 1) == 2 or _subject_at(inp, result, 1, 3, "S", 2) == 2
-    # trên NGÀY SHL (Thứ 7) HĐTN chỉ ở đúng ô ghim, không nơi khác
-    assert _subject_at(inp, result, 1, 7, "S", 1) != 2
+    # Tiết HĐTN thứ 3 (chủ đề) xếp linh hoạt: được phép nằm ở BẤT KỲ ngày/buổi nào
+    # còn trống, KỂ CẢ cùng ngày với chào cờ hoặc SHL và không cần liền kề chúng
+    # (quy định xác nhận 2026-09-04). Trước đây nó bị ép sang ngày khác, khiến GVCN
+    # có ngày chỉ đến trường đúng 1 tiết chào cờ hoặc 1 tiết SHL. Vì vậy test chỉ
+    # khoá 2 ô GHIM + tổng hạn ngạch, không khoá vị trí của tiết thứ 3.
     hdtn_cells = sum(1 for s in inp.slots if result.assignment.get(s.slot_id) == 2)
     assert hdtn_cells == 3
 

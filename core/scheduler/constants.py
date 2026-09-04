@@ -48,6 +48,11 @@ TEACHER_LONE_SESSION_SPREAD_PENALTY = 600  # điểm phạt cộng thêm cho M�
                                   # hai của một GV luôn đắt hơn việc mở buổi lẻ ở GV khác.
 TEACHER_AFTERNOON_BALANCE_BONUS = 0  # không ép rải tiết chiều trong greedy gây lẻ 1 tiết; đánh giá cân đối qua _teacher_quality_penalty
 TEACHER_MANDATORY_MORNING_BONUS = 280  # điểm thưởng khi xếp tiết vào các sáng bắt buộc (T2, T5, T6) cho GV tải cao
+TEACHER_COMPACT_SCHEDULE_PENALTY = 400  # điểm phạt khi MỞ THÊM một buổi chiều mới cho GV
+                                  # thuộc danh sách "ưu tiên nghỉ chiều" (cấu hình trên web,
+                                  # vd GV Thể dục). Phải lớn hơn TEACHER_SESSION_PAIR_BONUS=320,
+                                  # nếu không thì buổi chiều vừa mở ra sẽ bị thưởng ghép cặp
+                                  # kéo tiếp tiết thứ 2 vào. Nhân theo số buổi chiều GV đã dùng.
 
 # Buổi không được chọn làm buổi nghỉ của GV: sáng Thứ 2/5/6 (hoạt động cố định
 # buổi sáng những ngày này), và chiều Thứ 5/6 (đã bị khoá hẳn khỏi TKB ở

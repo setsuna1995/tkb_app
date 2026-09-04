@@ -61,13 +61,22 @@ def _feasible(class_id: int, ts: TimeSlot, subject_id: int, teacher_id: int,
             return False
     positions = state.placed[(class_id, subject_id, ts.weekday)]
     cap_d = role_index.block_size.get(subject_id, 1)
-    if len(positions) >= cap_d:
+    # HĐTN tuần thường = chào cờ (ghim) + SHL (ghim) + 1 tiết chủ đề tự do. Tiết chủ
+    # đề ĐƯỢC PHÉP nằm cùng ngày với chào cờ/SHL và không cần liền kề chúng (xác nhận
+    # quy định 2026-09-04) -- trước đây nó bị luật chung "1 tiết/môn/ngày/lớp" ép sang
+    # ngày khác, khiến GVCN có ngày chỉ đến trường đúng 1 tiết chào cờ hoặc 1 tiết SHL.
+    # Tuần chuyên đề (hdtn_thematic_week) đặt block_size[hdtn]=3 nên không rơi vào đây.
+    hdtn_free_period = (subject_id == role_index.hdtn_id and cap_d == 1)
+    if hdtn_free_period:
+        if len(positions) >= 2:
+            return False
+    elif len(positions) >= cap_d:
         return False
     if getattr(role_index, "single_pair_ids", None) and subject_id in role_index.single_pair_ids and len(positions) == 1:
         other_pair_days = [wd for wd in WEEKDAYS if wd != ts.weekday and len(state.placed[(class_id, subject_id, wd)]) >= 2]
         if other_pair_days:
             return False
-    if positions:
+    if positions and not hdtn_free_period:
         if any(p_session != ts.session for p_session, _p_period in positions):
             return False
         periods = sorted(p_period for _p_session, p_period in positions)

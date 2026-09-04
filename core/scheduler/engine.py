@@ -52,12 +52,19 @@ def _check_hard_post_generation_rules(inp: SchedulingInput, state: _State, confi
     total += missing
     if getattr(config, "avoid_teacher_lone_periods", True):
         min_lone_load = getattr(config, "min_weekly_periods_for_lone_penalty", 8)
-        lone_sessions = _count_teacher_lone_sessions(inp.slots, state.assigned, state.slot_teacher, min_weekly_periods=min_lone_load)
-        lone_days = _count_teacher_lone_days(inp.slots, state.assigned, state.slot_teacher, min_weekly_periods=min_lone_load)
+        # GV được miễn trừ theo tên (vốn có mặt ở trường vì nhiệm vụ khác) phải được
+        # bỏ qua ở CẢ cổng cứng này lẫn điểm phạt mềm trong quality.py -- nếu chỉ miễn
+        # một bên thì engine vẫn loại phương án vì họ, dù không còn tính điểm phạt.
+        lone_exempt = getattr(config, "lone_session_exempt_teacher_ids", frozenset()) or frozenset()
+        lone_sessions = _count_teacher_lone_sessions(inp.slots, state.assigned, state.slot_teacher,
+                                                     min_weekly_periods=min_lone_load, exempt_teacher_ids=lone_exempt)
+        lone_days = _count_teacher_lone_days(inp.slots, state.assigned, state.slot_teacher,
+                                              min_weekly_periods=min_lone_load, exempt_teacher_ids=lone_exempt)
         if lone_sessions > 0 or lone_days > 0:
             violated.append("II.4")
         total += lone_sessions + lone_days
-        split = _count_teacher_split_sessions(inp.slots, state.assigned, state.slot_teacher, min_weekly_periods=min_lone_load)
+        split = _count_teacher_split_sessions(inp.slots, state.assigned, state.slot_teacher,
+                                               min_weekly_periods=min_lone_load, exempt_teacher_ids=lone_exempt)
         if split > 0:
             violated.append("II.8")
         total += split
@@ -283,7 +290,9 @@ def run(inp: SchedulingInput, *, max_attempts: int = SO_LAN_THU,
         if done:
             _repair_teacher_lone_sessions(inp, state, role_index, assigned_teacher, slots_by_class,
                                           day_capacity, config, subject_class_allowed_cells, slot_by_coord,
-                                          min_weekly_periods=getattr(config, "min_weekly_periods_for_lone_penalty", 8))
+                                          min_weekly_periods=getattr(config, "min_weekly_periods_for_lone_penalty", 8),
+                                          exempt_teacher_ids=getattr(config, "lone_session_exempt_teacher_ids",
+                                                                      frozenset()) or frozenset())
 
         if done and (avoid_gdtc or non_consecutive):
             for (cid, sid, wd), pos_list in state.placed.items():
