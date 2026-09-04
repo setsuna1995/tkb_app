@@ -152,6 +152,8 @@ class SchedulingConfig:
     # nhiều buổi (sáng hay chiều đều tính) -- vd GV Thể dục cần nghỉ 2 buổi bất kỳ.
     # Chỉ là điểm phạt khi chấm chọn, không phải luật cứng: nếu không còn chỗ thì
     # vẫn xếp bình thường chứ không làm hỏng các tiêu chí khác.
+    use_cpsat: bool = False  # Bật bộ giải tối ưu hóa toàn cục CP-SAT (thử nghiệm)
+    cpsat_time_limit_seconds: int = 30  # Giới hạn thời gian giải cho CP-SAT (giây)
 
 
 
@@ -185,3 +187,4 @@ class ScheduleResult:
     relaxed_rules: list = field(default_factory=list)  # [{"rule_id": "II.3", ...}] rules that could not be
                                                           # fully satisfied even in the best available attempt
                                                           # (see core/scheduler/engine.py's post-generation gate)
+    solver_name: str = "heuristic"

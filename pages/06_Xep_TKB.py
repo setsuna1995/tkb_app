@@ -104,6 +104,11 @@ if result is not None:
     if not result.success:
         st.error(result.failure_reason)
     else:
+        if getattr(result, "solver_name", "") == "cpsat":
+            st.info("✨ Tối ưu hóa bằng CP-SAT (toàn cục)")
+        elif inp and getattr(inp.config, "use_cpsat", False):
+            st.warning("⚠️ CP-SAT quá giờ hoặc không khả thi, đã tự động chuyển sang bộ giải dự phòng.")
+
         if result.successes_found > 0:
             st.success(
                 f"Xếp thành công sau {result.attempts_tried} lần thử "

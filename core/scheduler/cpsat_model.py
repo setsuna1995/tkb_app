@@ -660,13 +660,15 @@ def _add_objective(built: CpSatModel) -> None:
     config = inp.config
     x = built.x
     teacher_of = built.teacher_of
+    effective_assigned = _build_effective_assigned_teacher(inp)
 
     # Tải tuần của từng giáo viên cố định theo bảng phân công (need)
     load = defaultdict(int)
-    for (slot_id, subject_id) in x:
-        t = teacher_of.get((slot_id, subject_id))
-        if t is not None and t > 0:
-            load[t] += 1
+    for (subj_id, cls_id), n in inp.need.items():
+        if n > 0:
+            tid = effective_assigned.get((subj_id, cls_id))
+            if tid is not None and tid > 0:
+                load[tid] += n
 
     teachers = sorted(load.keys())
     sessions = sorted({(s.ts.weekday, s.ts.session) for s in inp.slots})
@@ -967,6 +969,7 @@ def build_result(built: CpSatModel, solver: cp_model.CpSolver) -> ScheduleResult
         attempts_tried=1,
         successes_found=successes_found,
         relaxed_rules=relaxed_rules,
+        solver_name="cpsat",
     )
 
 
@@ -976,9 +979,16 @@ def solve_to_result(built: CpSatModel, time_limit_s: float = 30.0,
     if not _HAS_ORTOOLS:
         raise CpSatUnavailable("ortools chưa được cài")
 
+    import os
+    if os.environ.get("PYTEST_XDIST_WORKER") or os.environ.get("PYTEST_CURRENT_TEST"):
+        workers = min(workers, 2)
+
     solver = cp_model.CpSolver()
     solver.parameters.max_time_in_seconds = float(time_limit_s)
     solver.parameters.num_search_workers = int(workers)
+    if getattr(built.inp, "seed", None):
+        solver.parameters.random_seed = int(built.inp.seed)
+
     status = solver.Solve(built.model)
     if status not in (cp_model.OPTIMAL, cp_model.FEASIBLE):
         return None
@@ -993,9 +1003,16 @@ def solve(built: CpSatModel, time_limit_s: float = 10.0,
     if not _HAS_ORTOOLS:
         raise CpSatUnavailable("ortools chưa được cài")
 
+    import os
+    if os.environ.get("PYTEST_XDIST_WORKER") or os.environ.get("PYTEST_CURRENT_TEST"):
+        workers = min(workers, 2)
+
     solver = cp_model.CpSolver()
     solver.parameters.max_time_in_seconds = float(time_limit_s)
     solver.parameters.num_search_workers = int(workers)
+    if getattr(built.inp, "seed", None):
+        solver.parameters.random_seed = int(built.inp.seed)
+
     status = solver.Solve(built.model)
     if status not in (cp_model.OPTIMAL, cp_model.FEASIBLE):
         return None

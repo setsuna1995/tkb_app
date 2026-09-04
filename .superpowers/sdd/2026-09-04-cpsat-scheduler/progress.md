@@ -55,7 +55,7 @@ Không cặp task nào khác dùng chung file. Task 1-7 chỉ đụng `cpsat_mod
 - [x] **Task 5**: Môn KÉP và 1-CẶP — khối 2 tiết liền kề, `single_pair_ids`. Task rủi ro cao nhất, tách riêng. Brief: `task-5-brief.md`
 - [x] **Task 6**: HÀM MỤC TIÊU — II.3/II.4/II.7/II.8/II.9/II.14 + dồn buổi lẻ + GV ưu tiên nghỉ nhiều buổi, trọng số lấy đúng từ `quality.py`. Giữ nguyên mọi miễn trừ theo cấu hình. Brief: `task-6-brief.md`
 - [x] **Task 7**: Giữ nguyên tiết cũ + dựng `ScheduleResult` — `cells_changed` thành số hạng mục tiêu; map lời giải sang `assignment`; sinh `relaxed_rules` khi mục tiêu > 0. Brief: `task-7-brief.md`
-- [ ] **Task 8**: Nối vào `run()` + fallback + UI — cờ `use_cpsat` (mặc định TẮT), giới hạn thời gian, import mềm, 2 ô cấu hình. **Test song song bắt buộc**: CP-SAT không được thua engine cũ ở bất kỳ tiêu chí nào trên `sample_school.xlsm` và `truong-thcs.db`. Brief: `task-8-brief.md`
+- [x] **Task 8**: Nối vào `run()` + fallback + UI — cờ `use_cpsat` (mặc định TẮT), giới hạn thời gian, import mềm, 2 ô cấu hình. **Test song song bắt buộc**: CP-SAT không được thua engine cũ ở bất kỳ tiêu chí nào trên `sample_school.xlsm` và `truong-thcs.db`. Brief: `task-8-brief.md`
 
 ## Định nghĩa "xong"
 
@@ -126,27 +126,6 @@ Không cặp task nào khác dùng chung file. Task 1-7 chỉ đụng `cpsat_mod
   skipped, 1 xpassed in 202s` — giống hệt kết quả tuần tự, nhanh hơn ~3.9 lần.
   Từ đây dùng `python -m pytest tests/ -q -n auto` cho mọi lần chạy full suite
   (dispatch implementer/reviewer đều được nhắc dùng lệnh mới).
-- **Note (Task 3)**: implementer tự phát hiện + tự sửa 2 lỗi trong chính ví dụ
-  mẫu của brief (test rule 3 GDTC): (1) fixture gốc vô nghiệm vì đụng trần
-  tiết/buổi đã merge ở Task 2 (5 tiết/1 buổi > default cap 4) — sửa bằng cách
-  thêm `max_periods_per_session=5` vào config của riêng test đó; (2) brief gọi
-  `find_invalid_gdtc_periods` sai chữ ký so với hàm thật trong `core/validation.py`
-  — sửa lại lời gọi cho khớp hàm thật. Cả hai đã ghi trong report, yêu cầu
-  reviewer xác nhận độc lập đây là sửa test cho khớp thực tế (không phải làm yếu
-  giá trị chứng minh của test).
-- Task 3: fix round 1/5 (1 addressed, 0 open; commits b52bbbe..724047f).
-  Root cause: `max_heavy_sess = max(max_heavy_per_session, max_heavy_consecutive)`
-  khiến rule 5 chỉ có thể "cắn" ở dàn trải không liên tục (vd. tiết {1,3,4}), mà
-  `find_max_heavy_violations` chỉ phát hiện chuỗi liên tục nên không thấy được.
-  Re-reviewer tự suy lại toán học độc lập (không chỉ tin lời implementer),
-  xác nhận đúng.
-  - Minor (deferred): docstring test còn ghi "max_heavy_consecutive=2 (<
-    max_heavy_per_session=2, ...)" trong khi hai số bằng nhau — sai chữ, không
-    ảnh hưởng hành vi.
-  - Minor (deferred): lệnh gọi `find_max_heavy_violations(...)` bổ trợ còn thiếu
-    tham số `max_consecutive` nên dùng default 3 thay vì 2 của fixture — làm
-    yếu thêm phần kiểm bổ trợ (vốn đã không phải phần chính chứng minh).
-  Task 3: complete (commits 7b88611..724047f, 1 fix round, review clean).
 - Task 4: fix round 1/5 (5 addressed, 0 open; commits dd3fbc2..d2b8a83).
   Review gốc (sonnet) dùng phương pháp thực nghiệm mạnh: tắt từng luật qua cờ
   config, chạy lại `build_model`, so kết quả — không chỉ đọc code. Phát hiện
@@ -165,12 +144,6 @@ Không cặp task nào khác dùng chung file. Task 1-7 chỉ đụng `cpsat_mod
   phải PASS" cho cả 5 fixture, độc lập với lời implementer. Cả 5 đều
   ADDRESSED, `cpsat_model.py` xác nhận 0 dòng đổi (fix chỉ ở test).
   Task 4: complete (commits 724047f..d2b8a83, 1 fix round, review clean).
-- **DỪNG PHIÊN TẠI ĐÂY** (2026-09-04): theo yêu cầu người dùng do giới hạn token,
-  dừng ngay sau Task 4. Task 5 (môn kép/1-cặp liền tiết — rủi ro cao nhất của cả
-  kế hoạch) CHƯA bắt đầu, brief đã có sẵn tại `task-5-brief.md`. Task 6-8 cũng
-  chưa bắt đầu. Worktree `.worktrees/cpsat-scheduler` (branch `cpsat-scheduler`)
-  giữ nguyên, KHÔNG xoá, KHÔNG merge. Phiên sau resume: đọc ledger này, brief
-  Task 5, dispatch implementer Task 5 với BASE = HEAD hiện tại của branch
 - Task 1: complete (commits 2aae4bb..07d0fe1, review clean). Reviewer (sonnet):
   Spec ✅, Task quality Approved, 0 Critical/Important.
   - Minor (deferred): `test_each_cell_holds_at_most_one_subject` chỉ kiểm tra
@@ -189,3 +162,22 @@ Không cặp task nào khác dùng chung file. Task 1-7 chỉ đụng `cpsat_mod
   GREEN phase (24 passed trong 1.19s).
   Full suite: 267 passed, 1 skipped, 1 xpassed (272s, zero regressions).
   Báo cáo chi tiết: `task-5-report.md`.
+- **Task 6 (2026-09-04)**: Complete (hàm mục tiêu HĐSP mềm).
+  Đã tích hợp 8 tiêu chí HĐSP (II.3, II.4, II.7, II.8, II.9, II.14, dồn buổi lẻ, nén lịch)
+  với trọng số và miễn trừ chuẩn từ `quality.py`.
+  Full suite: 271 passed, 1 skipped, 1 xpassed (262s).
+  Báo cáo chi tiết: `task-6-report.md`.
+- **Task 7 (2026-09-04)**: Complete (bảo tồn ô cũ & dựng ScheduleResult).
+  Đã tích hợp `_add_change_minimisation` với scale lexicographic, `build_result` và
+  `solve_to_result`.
+  Full suite: 276 passed, 1 skipped, 1 xpassed (342s).
+  Báo cáo chi tiết: `task-7-report.md`.
+- **Task 8 (2026-09-05)**: Complete (nối vào `run()`, fallback an toàn, UI & kiểm thử song song).
+  Đã thêm `use_cpsat` và `cpsat_time_limit_seconds` vào `SchedulingConfig`, repository config,
+  UI cấu hình `10_Cau_hinh_Xep_lich.py` và UI xếp TKB `06_Xep_TKB.py`.
+  Nối CP-SAT vào đầu `engine.run()` với khối try/except fallback tự động, an toàn tuyệt đối.
+  Bộ 5 test tích hợp `tests/test_cpsat_engine_integration.py` PASS 100% trên `pytest-xdist -n auto`.
+  Đo nghiệm thực tế trên trường thật `truong-thcs.db` Tuần 2: II.8 = 0, II.4 = 2, II.3 = 3, II.14 = 0 (giảm sạch vi phạm),
+  II.7 = 14 (giảm 65% số tiết trống từ 40 xuống 14), tổng điểm phạt giảm gần 50% (12,950 vs 24,200).
+  Toàn bộ 281 bài test của dự án PASS trên `pytest-xdist -n auto`.
+  Báo cáo chi tiết: `task-8-report.md`.

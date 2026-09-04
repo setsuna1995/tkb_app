@@ -267,6 +267,21 @@ min_weekly_periods_for_lone_penalty = c_hdsp6.number_input(
     help="Tiêu chí II.4: Hạn chế tối đa GV dạy 1 tiết/buổi hoặc 1 tiết/ngày, nhưng miễn trừ cho GV ít tiết (< 15 tiết/tuần).",
 )
 
+st.subheader("Bộ giải thuật toán")
+c_solver1, c_solver2 = st.columns(2)
+use_cpsat = c_solver1.checkbox(
+    "Dùng bộ giải tối ưu toàn cục CP-SAT (thử nghiệm)",
+    value=getattr(config, "use_cpsat", False),
+    help="Bật lên thì TKB được tối ưu hóa toàn cục bằng ràng buộc toán học (CP-SAT) thay vì thuật toán dò tìm ngẫu nhiên. "
+         "Nếu bộ giải không tìm được lời giải hoặc quá giờ, hệ thống sẽ tự động chuyển sang bộ giải dự phòng."
+)
+cpsat_time_limit_seconds = c_solver2.number_input(
+    "Giới hạn thời gian giải cho CP-SAT (giây)",
+    min_value=5, max_value=300,
+    value=int(getattr(config, "cpsat_time_limit_seconds", 30)),
+    help="Thời gian tối đa bộ giải CP-SAT được phép chạy trước khi tự động fallback sang engine cũ."
+)
+
 # --- Kiểm tra cảnh báo xung đột cấu hình ---
 effective_morning_only = set(morning_only_selection)
 if heavy_subjects_morning_only:
@@ -310,6 +325,8 @@ if st.button("💾 Lưu cấu hình", type="primary"):
         avoid_heavy_afternoon_period3=bool(avoid_heavy_afternoon_period3),
         avoid_teacher_4_consecutive_morning=bool(avoid_teacher_4_consecutive_morning),
         min_weekly_periods_for_lone_penalty=int(min_weekly_periods_for_lone_penalty),
+        use_cpsat=bool(use_cpsat),
+        cpsat_time_limit_seconds=int(cpsat_time_limit_seconds),
     )
     repo.set_scheduling_config(conn, new_config)
     st.success("Đã lưu cấu hình xếp lịch.")

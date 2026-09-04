@@ -152,6 +152,22 @@ def run(inp: SchedulingInput, *, max_attempts: int = SO_LAN_THU,
     successes = 0
     attempts_tried = 0
 
+    # Task 8: Tích hợp bộ giải CP-SAT với cơ chế fallback êm ái sang engine cũ
+    if getattr(config, "use_cpsat", False):
+        try:
+            from core.scheduler import cpsat_model
+            built = cpsat_model.build_model(inp)
+            time_limit = getattr(config, "cpsat_time_limit_seconds", 30)
+            result = cpsat_model.solve_to_result(built, time_limit_s=time_limit)
+            if result is not None:
+                return result
+        except cpsat_model.CpSatUnavailable:
+            pass  # Thiếu ortools -> rơi về engine cũ
+        except Exception:
+            import logging
+            logging.exception("Bộ giải CP-SAT gặp ngoại lệ, tự động fallback sang engine cũ.")
+            pass  # Bất kỳ lỗi nào khác -> rơi về engine cũ, không làm hỏng UI
+
     for attempt in range(1, max_attempts + 1):
         attempts_tried = attempt
         pu = 0.0 if attempt <= lock_threshold else min(0.3, (attempt - lock_threshold) / 1200 * 0.3)

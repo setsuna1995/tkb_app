@@ -229,6 +229,15 @@ def get_scheduling_config(conn: sqlite3.Connection) -> SchedulingConfig:
             if get_meta(conn, "sched_min_weekly_periods_for_lone_penalty") is not None
             else default.min_weekly_periods_for_lone_penalty
         ),
+        use_cpsat=(
+            bool(int(get_meta(conn, "sched_use_cpsat"))) if get_meta(conn, "sched_use_cpsat") is not None
+            else default.use_cpsat
+        ),
+        cpsat_time_limit_seconds=(
+            int(get_meta(conn, "sched_cpsat_time_limit_seconds"))
+            if get_meta(conn, "sched_cpsat_time_limit_seconds") is not None
+            else default.cpsat_time_limit_seconds
+        ),
     )
 
 
@@ -264,3 +273,5 @@ def set_scheduling_config(conn: sqlite3.Connection, config: SchedulingConfig) ->
     set_meta(conn, "sched_avoid_heavy_afternoon_period3", str(int(config.avoid_heavy_afternoon_period3)))
     set_meta(conn, "sched_avoid_teacher_4_consecutive_morning", str(int(config.avoid_teacher_4_consecutive_morning)))
     set_meta(conn, "sched_min_weekly_periods_for_lone_penalty", str(config.min_weekly_periods_for_lone_penalty))
+    set_meta(conn, "sched_use_cpsat", str(int(config.use_cpsat)))
+    set_meta(conn, "sched_cpsat_time_limit_seconds", str(config.cpsat_time_limit_seconds))
