@@ -54,7 +54,7 @@ Không cặp task nào khác dùng chung file. Task 1-7 chỉ đụng `cpsat_mod
 - [x] **Task 4**: Khung LỚP + ghim — ≤1 tiết/môn/ngày (HĐTN 2), chào cờ, SHL, tuần chuyên đề, không hở tiết giữa buổi, trần tiết/ngày của lớp, lớp không có buổi 1 tiết. Brief: `task-4-brief.md`
 - [x] **Task 5**: Môn KÉP và 1-CẶP — khối 2 tiết liền kề, `single_pair_ids`. Task rủi ro cao nhất, tách riêng. Brief: `task-5-brief.md`
 - [x] **Task 6**: HÀM MỤC TIÊU — II.3/II.4/II.7/II.8/II.9/II.14 + dồn buổi lẻ + GV ưu tiên nghỉ nhiều buổi, trọng số lấy đúng từ `quality.py`. Giữ nguyên mọi miễn trừ theo cấu hình. Brief: `task-6-brief.md`
-- [ ] **Task 7**: Giữ nguyên tiết cũ + dựng `ScheduleResult` — `cells_changed` thành số hạng mục tiêu; map lời giải sang `assignment`; sinh `relaxed_rules` khi mục tiêu > 0. Brief: `task-7-brief.md`
+- [x] **Task 7**: Giữ nguyên tiết cũ + dựng `ScheduleResult` — `cells_changed` thành số hạng mục tiêu; map lời giải sang `assignment`; sinh `relaxed_rules` khi mục tiêu > 0. Brief: `task-7-brief.md`
 - [ ] **Task 8**: Nối vào `run()` + fallback + UI — cờ `use_cpsat` (mặc định TẮT), giới hạn thời gian, import mềm, 2 ô cấu hình. **Test song song bắt buộc**: CP-SAT không được thua engine cũ ở bất kỳ tiêu chí nào trên `sample_school.xlsm` và `truong-thcs.db`. Brief: `task-8-brief.md`
 
 ## Định nghĩa "xong"

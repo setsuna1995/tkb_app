@@ -1016,4 +1016,143 @@ def test_flag_avoid_teacher_lone_periods_disabled():
     assert len(built.penalty_terms.get("II.4", [])) == 0
 
 
+# =============================================================================
+# Task 7 tests: Giữ nguyên tiết cũ + dựng ScheduleResult
+# =============================================================================
+
+def test_old_subject_id_preserved_when_valid():
+    """Test 1 (Task 7): Ô có old_subject_id và vẫn hợp lệ -> lời giải giữ nguyên môn cũ."""
+    ts = [TimeSlot(1, 3, "S", 1), TimeSlot(2, 4, "S", 1)]
+    slots = [
+        Slot(1, 101, ts[0], old_subject_id=1),
+        Slot(2, 101, ts[1], old_subject_id=2),
+    ]
+    subjects = [
+        Subject(1, "Toan", ROLE_THUONG),
+        Subject(2, "Van", ROLE_THUONG),
+        Subject(99, "HDTN", ROLE_HDTN),
+    ]
+    inp = SchedulingInput(
+        classes=[ClassRoom(101, "6A1")], subjects=subjects,
+        teachers=[Teacher(10, "GV Toan"), Teacher(20, "GV Van")],
+        need={(1, 101): 1, (2, 101): 1},
+        assigned_teacher={(1, 101): 10, (2, 101): 20},
+        ban_busy=set(), slots=slots, timeslots=ts,
+        config=SchedulingConfig(teacher_off_sessions_per_week=0),
+    )
+    built = cpsat.build_model(inp)
+    res = cpsat.solve_to_result(built)
+    assert res is not None
+    assert res.assignment[1] == 1
+    assert res.assignment[2] == 2
+    assert res.cells_changed == 0
+
+
+def test_cells_changed_matches_manual_count():
+    """Test 2 (Task 7): cells_changed khớp với đếm thủ công."""
+    ts = [TimeSlot(1, 3, "S", 1), TimeSlot(2, 4, "S", 1), TimeSlot(3, 5, "S", 1)]
+    slots = [
+        Slot(1, 101, ts[0], old_subject_id=1),
+        Slot(2, 101, ts[1], old_subject_id=2),
+        Slot(3, 101, ts[2], old_subject_id=1),
+    ]
+    subjects = [
+        Subject(1, "Toan", ROLE_THUONG),
+        Subject(2, "Van", ROLE_THUONG),
+        Subject(99, "HDTN", ROLE_HDTN),
+    ]
+    # Nhu cầu: Toan cần 1, Van cần 2 => bắt buộc ít nhất 1 ô từng là Toan (1) phải đổi thành Van (2)
+    inp = SchedulingInput(
+        classes=[ClassRoom(101, "6A1")], subjects=subjects,
+        teachers=[Teacher(10, "GV Toan"), Teacher(20, "GV Van")],
+        need={(1, 101): 1, (2, 101): 2},
+        assigned_teacher={(1, 101): 10, (2, 101): 20},
+        ban_busy=set(), slots=slots, timeslots=ts,
+        config=SchedulingConfig(teacher_off_sessions_per_week=0),
+    )
+    built = cpsat.build_model(inp)
+    res = cpsat.solve_to_result(built)
+    assert res is not None
+    expected_changed = sum(1 for s in inp.slots if res.assignment[s.slot_id] != s.old_subject_id)
+    assert res.cells_changed == expected_changed
+    assert res.cells_changed > 0
+    assert res.cells_total == len(inp.slots)
+
+
+def test_schedule_result_perfect_has_successes_found_1_and_no_relaxed_rules():
+    """Test 3 (Task 7): Lời giải hoàn hảo -> successes_found == 1, relaxed_rules == []."""
+    ts = [TimeSlot(1, 3, "S", 1), TimeSlot(2, 4, "S", 1)]
+    slots = [Slot(1, 101, ts[0]), Slot(2, 101, ts[1])]
+    subjects = [Subject(1, "Toan", ROLE_THUONG), Subject(99, "HDTN", ROLE_HDTN)]
+    inp = SchedulingInput(
+        classes=[ClassRoom(101, "6A1")], subjects=subjects,
+        teachers=[Teacher(10, "GV Toan")],
+        need={(1, 101): 2},
+        assigned_teacher={(1, 101): 10},
+        ban_busy=set(), slots=slots, timeslots=ts,
+        config=SchedulingConfig(
+            teacher_off_sessions_per_week=0,
+            mandatory_morning_weekdays=(),
+            min_weekly_periods_for_lone_penalty=5,
+        ),
+    )
+    built = cpsat.build_model(inp)
+    res = cpsat.solve_to_result(built)
+    assert res is not None
+    assert res.success is True
+    assert res.successes_found == 1
+    assert res.relaxed_rules == []
+
+
+def test_schedule_result_with_lone_session_has_relaxed_rule_ii4():
+    """Test 4 (Task 7): Lời giải có buổi lẻ -> successes_found == 0 và II.4 in relaxed_rules."""
+    ts = [TimeSlot(1, 3, "S", 1)]
+    slots = [Slot(1, 101, ts[0])]
+    subjects = [Subject(1, "Toan", ROLE_THUONG), Subject(99, "HDTN", ROLE_HDTN)]
+    inp = SchedulingInput(
+        classes=[ClassRoom(101, "6A1")], subjects=subjects,
+        teachers=[Teacher(10, "GV Toan")],
+        need={(1, 101): 1},
+        assigned_teacher={(1, 101): 10},
+        ban_busy=set(), slots=slots, timeslots=ts,
+        config=SchedulingConfig(
+            teacher_off_sessions_per_week=0,
+            mandatory_morning_weekdays=(),
+            avoid_teacher_lone_periods=True,
+            min_weekly_periods_for_lone_penalty=1,
+        ),
+    )
+    built = cpsat.build_model(inp)
+    res = cpsat.solve_to_result(built)
+    assert res is not None
+    assert res.success is True
+    assert res.successes_found == 0
+    relaxed_ids = [r.get("rule_id") for r in res.relaxed_rules]
+    assert "II.4" in relaxed_ids
+
+
+def test_schedule_result_assignment_contains_all_slots_and_none_for_empty():
+    """Test 5 (Task 7): assignment chứa đủ mọi slot_id, ô trống là None chứ không phải -1."""
+    ts = [TimeSlot(1, 3, "S", 1), TimeSlot(2, 4, "S", 1), TimeSlot(3, 5, "S", 1)]
+    slots = [Slot(1, 101, ts[0]), Slot(2, 101, ts[1]), Slot(3, 101, ts[2])]
+    subjects = [Subject(1, "Toan", ROLE_THUONG), Subject(99, "HDTN", ROLE_HDTN)]
+    inp = SchedulingInput(
+        classes=[ClassRoom(101, "6A1")], subjects=subjects,
+        teachers=[Teacher(10, "GV Toan")],
+        need={(1, 101): 1},  # Chỉ cần 1 tiết, còn lại 2 ô để trống
+        assigned_teacher={(1, 101): 10},
+        ban_busy=set(), slots=slots, timeslots=ts,
+        config=SchedulingConfig(teacher_off_sessions_per_week=0),
+    )
+    built = cpsat.build_model(inp)
+    res = cpsat.solve_to_result(built)
+    assert res is not None
+    assert len(res.assignment) == len(inp.slots)
+    for s in inp.slots:
+        assert s.slot_id in res.assignment
+    assert None in res.assignment.values()
+    assert -1 not in res.assignment.values()
+
+
+
 

@@ -15,8 +15,9 @@ from dataclasses import dataclass, field
 from typing import Optional
 
 from core.frame import MAX_PERIODS_PER_SESSION
-from core.models import SchedulingInput, is_bgh
+from core.models import SchedulingInput, ScheduleResult, is_bgh
 from core.roles import resolve_roles
+from core.rules_registry import HARD_POST_GENERATION_IDS
 from core.scheduler.constants import (
     CAP_TIET_NGAY,
     TEACHER_COMPACT_SCHEDULE_PENALTY,
@@ -48,6 +49,7 @@ class CpSatModel:
     teacher_of: dict = field(default_factory=dict)     # Task 2: (slot_id, subject_id) -> teacher_id
     role_index: object = None                          # Task 3: kết quả resolve_roles()
     penalty_terms: dict = field(default_factory=dict)  # Task 6: mã tiêu chí -> list biến phạt
+    changed_terms: list = field(default_factory=list)  # Task 7: biến đổi ô so với tiết cũ
 
 
 def build_model(inp: SchedulingInput) -> CpSatModel:
@@ -861,6 +863,9 @@ def _add_objective(built: CpSatModel) -> None:
 
     built.penalty_terms = dict(penalty_terms)
 
+    # 7. Theo dõi và tối thiểu hóa thay đổi ô cũ (task-7-brief.md)
+    _add_change_minimisation(built)
+
     # Tổng hợp hàm mục tiêu
     obj_terms = []
     if penalty_terms.get("II.3"):
@@ -882,8 +887,103 @@ def _add_objective(built: CpSatModel) -> None:
     if penalty_terms.get("II.9"):
         obj_terms.append(200 * sum(penalty_terms["II.9"]))
 
+    has_changes = bool(getattr(built, "changed_terms", None))
+    scale = max(1000, len(inp.slots) + 1) if has_changes else 1
+
+    total_terms = []
     if obj_terms:
-        m.Minimize(sum(obj_terms))
+        total_terms.append(scale * sum(obj_terms))
+    if has_changes:
+        total_terms.append(sum(built.changed_terms))
+
+    if total_terms:
+        m.Minimize(sum(total_terms))
+
+
+def _add_change_minimisation(built: CpSatModel) -> None:
+    """Theo dõi các ô bị thay đổi so với old_subject_id (task-7-brief.md).
+    Chỉ xét các ô có old_subject_id is not None.
+    changed[slot_id] = 1 khi ô không mang đúng môn cũ."""
+    m = built.model
+    inp = built.inp
+    x = built.x
+
+    changed_terms = []
+    for slot in inp.slots:
+        if slot.old_subject_id is not None:
+            old_id = slot.old_subject_id
+            if (slot.slot_id, old_id) in x:
+                ch = m.NewBoolVar(f"changed_{slot.slot_id}")
+                m.Add(ch == 1 - x[slot.slot_id, old_id])
+                changed_terms.append(ch)
+            else:
+                changed_terms.append(m.NewConstant(1))
+
+    built.changed_terms = changed_terms
+
+
+def build_result(built: CpSatModel, solver: cp_model.CpSolver) -> ScheduleResult:
+    """Dựng đối tượng ScheduleResult hoàn chỉnh từ một lời giải CP-SAT (task-7-brief.md).
+    - assignment: mọi slot_id đều có mặt, ô trống mang None (không phải -1).
+    - cells_changed: số ô khác old_subject_id.
+    - cells_total: len(inp.slots).
+    - successes_found: 1 nếu các hard gate (II.3, II.4, II.8) = 0, ngược lại 0.
+    - relaxed_rules: [{"rule_id": rid}] cho các hard gate có vi phạm > 0.
+    - attempts_tried: 1.
+    """
+    inp = built.inp
+    x = built.x
+
+    assignment = {}
+    for slot in inp.slots:
+        assigned_subj = None
+        for subj in inp.subjects:
+            key = (slot.slot_id, subj.subject_id)
+            if key in x and solver.Value(x[key]) == 1:
+                assigned_subj = subj.subject_id
+                break
+        assignment[slot.slot_id] = assigned_subj
+
+    cells_changed = 0
+    for slot in inp.slots:
+        if assignment[slot.slot_id] != slot.old_subject_id:
+            cells_changed += 1
+
+    cells_total = len(inp.slots)
+
+    relaxed_rules = []
+    for rid in HARD_POST_GENERATION_IDS:
+        terms = built.penalty_terms.get(rid, [])
+        if any(solver.Value(v) > 0 for v in terms):
+            relaxed_rules.append({"rule_id": rid})
+
+    successes_found = 1 if not relaxed_rules else 0
+
+    return ScheduleResult(
+        success=True,
+        assignment=assignment,
+        cells_changed=cells_changed,
+        cells_total=cells_total,
+        attempts_tried=1,
+        successes_found=successes_found,
+        relaxed_rules=relaxed_rules,
+    )
+
+
+def solve_to_result(built: CpSatModel, time_limit_s: float = 30.0,
+                    workers: int = 8) -> Optional[ScheduleResult]:
+    """Giải mô hình và trả về ScheduleResult hoàn chỉnh, hoặc None nếu không giải được (task-7-brief.md)."""
+    if not _HAS_ORTOOLS:
+        raise CpSatUnavailable("ortools chưa được cài")
+
+    solver = cp_model.CpSolver()
+    solver.parameters.max_time_in_seconds = float(time_limit_s)
+    solver.parameters.num_search_workers = int(workers)
+    status = solver.Solve(built.model)
+    if status not in (cp_model.OPTIMAL, cp_model.FEASIBLE):
+        return None
+
+    return build_result(built, solver)
 
 
 def solve(built: CpSatModel, time_limit_s: float = 10.0,
