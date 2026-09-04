@@ -17,6 +17,7 @@ from typing import Optional
 from core.frame import MAX_PERIODS_PER_SESSION
 from core.models import SchedulingInput
 from core.roles import resolve_roles
+from core.scheduler.constants import CAP_TIET_NGAY
 from core.scheduler.placement import _build_effective_assigned_teacher
 
 try:
@@ -87,6 +88,7 @@ def build_model(inp: SchedulingInput) -> CpSatModel:
                         slots_by_ts=dict(slots_by_ts))
     _add_teacher_constraints(built)
     _add_subject_constraints(built)
+    _add_class_constraints(built)
     return built
 
 
@@ -364,6 +366,141 @@ def _add_subject_constraints(built: CpSatModel) -> None:
                 key = (s.slot_id, subject_id)
                 if key in x:
                     m.Add(x[key] == 0)
+
+
+def _add_class_constraints(built: CpSatModel) -> None:
+    """7 ràng buộc "khung LỚP" (task-4-brief.md) cộng 2 tiết ghim theo chính
+    sách trường (chào cờ, sinh hoạt lớp -- SHL):
+
+    1. Trần tiết/môn/ngày/lớp = role_index.block_size.get(subject_id, 1).
+       Riêng HĐTN ở tuần THƯỜNG (không phải tuần chuyên đề, tức không nằm
+       trong block_size) được nâng trần lên 2: chào cờ (ghim, luật 2) + SHL
+       (ghim, luật 3) + đúng 1 tiết "chủ đề" tự do. Xác nhận trường
+       2026-09-04: tiết tự do này ĐƯỢC PHÉP rơi cùng ngày với 1 trong 2 tiết
+       ghim và KHÔNG cần liền kề chúng -- xem feasibility.py's hdtn_free_period
+       và "Ghi chú quan trọng" của brief. Việc ép các môn khối (KEP, HĐTN tuần
+       chuyên đề với block_size=3) thành khối LIỀN KỀ là việc của Task 5, cố
+       tình không làm ở đây.
+    2. Ghim chào cờ: ô (chao_co_weekday, "S", chao_co_period) = HĐTN, mọi lớp
+       có ô đó và có nhu cầu HĐTN > 0 (else không tạo biến, tự bỏ qua).
+    3. Ghim SHL: tiết CUỐI (max period) của buổi sáng ngày SHL. Ngày SHL suy
+       ra từ khung riêng từng lớp, KHÔNG hardcode: lớp có ít nhất 1 ô buổi
+       chiều bất kỳ trong tuần -> Thứ 6; lớp chỉ học sáng -> Thứ 7 (mirror
+       engine.py:87-94, KHÔNG phải "Thứ 6 vì có tiết chiều hôm đó" -- chỉ cần
+       CÓ buổi chiều ở đâu đó trong tuần).
+       Luật 2 + 3 chỉ áp dụng khi KHÔNG phải tuần chuyên đề
+       (inp.hdtn_thematic_week) -- mirror "if not inp.hdtn_thematic_week" của
+       engine.py.
+    4. Tuần chuyên đề: không có ràng buộc riêng ở đây ngoài việc BỎ ghim (2+3
+       ở trên) -- luật 1 tự đọc block_size[hdtn_id]=3 do resolve_roles() đã
+       ghi đè, nâng trần lên 3/ngày mà không cần code riêng. Phần "xếp thành
+       khối 3 tiết LIỀN KỀ" là Task 5.
+    5. Không hở tiết giữa buổi của lớp (BAT_LIEN_MACH, feasibility.py:59-61):
+       tiết p có môn ⟹ tiết (p-1) cùng buổi/ngày/lớp cũng phải có môn. Trường
+       này hiện dư địa = 0 (mọi ô đều có tiết) nên luật tự thoả, nhưng vẫn
+       viết tường minh cho trường/khung khác có dư ô.
+    6. Trần tiết/ngày/lớp = đúng số ô lớp đó có trong ngày (day_capacity của
+       engine.py, luôn = đếm số ô, KHÔNG phải một giá trị cấu hình riêng) --
+       luôn tự thoả trong mô hình này (AtMostOne mỗi ô => số tiết xếp được
+       trong ngày không thể vượt số ô ngày đó), viết tường minh để khớp bảng
+       luật + phòng trường hợp sau này day_capacity không còn = đúng số ô.
+    7. Lớp không có buổi chỉ 1 tiết (swaps.py's _has_lone_period): biến phụ
+       class_used[cid, wd, sess], ràng buộc count >= 2*used và
+       count <= (số ô buổi đó)*used -- buộc count là 0 hoặc >= 2. Chỉ áp dụng
+       cho buổi có >= 2 ô (buổi 1-ô-duy-nhất không thể "lẻ" theo nghĩa này).
+    """
+    m = built.model
+    inp = built.inp
+    config = inp.config
+    x = built.x
+    role_index = built.role_index
+    hdtn_id = role_index.hdtn_id
+    slot_by_id = {s.slot_id: s for s in inp.slots}
+
+    # 1. Trần tiết/môn/ngày/lớp.
+    vars_by_class_subject_day = defaultdict(list)
+    for (slot_id, subject_id), var in x.items():
+        s = slot_by_id[slot_id]
+        vars_by_class_subject_day[s.class_id, subject_id, s.ts.weekday].append(var)
+    for (class_id, subject_id, weekday), vs in vars_by_class_subject_day.items():
+        cap_d = role_index.block_size.get(subject_id, 1)
+        if subject_id == hdtn_id and cap_d == 1:
+            cap_d = 2
+        m.Add(sum(vs) <= cap_d)
+
+    if not inp.hdtn_thematic_week and hdtn_id is not None:
+        # 2. Ghim chào cờ.
+        for s in inp.slots:
+            if (s.ts.weekday == config.chao_co_weekday and s.ts.session == "S"
+                    and s.ts.period == config.chao_co_period):
+                key = (s.slot_id, hdtn_id)
+                if key in x:
+                    m.Add(x[key] == 1)
+
+        # 3. Ghim SHL -- ngày suy ra từ khung riêng của lớp (có buổi chiều ở
+        # bất kỳ đâu trong tuần -> Thứ 6, chỉ học sáng -> Thứ 7), tiết ghim là
+        # tiết CUỐI (period lớn nhất) của buổi sáng ngày đó.
+        class_has_chieu = defaultdict(bool)
+        for s in inp.slots:
+            if s.ts.session == "C":
+                class_has_chieu[s.class_id] = True
+        for class_id, class_slots in built.slots_by_class.items():
+            target_wd = 6 if class_has_chieu[class_id] else 7
+            day_slots = [s for s in class_slots if s.ts.session == "S" and s.ts.weekday == target_wd]
+            if not day_slots:
+                continue
+            target = max(day_slots, key=lambda s: s.ts.period)
+            key = (target.slot_id, hdtn_id)
+            if key in x:
+                m.Add(x[key] == 1)
+
+    # 5. Không hở tiết giữa buổi của lớp.
+    slot_by_coord = {(s.class_id, s.ts.weekday, s.ts.session, s.ts.period): s for s in inp.slots}
+    for s in inp.slots:
+        if s.ts.period <= 1:
+            continue
+        vars_p = [x[s.slot_id, subj.subject_id] for subj in inp.subjects if (s.slot_id, subj.subject_id) in x]
+        if not vars_p:
+            continue
+        prev = slot_by_coord.get((s.class_id, s.ts.weekday, s.ts.session, s.ts.period - 1))
+        vars_prev = ([x[prev.slot_id, subj.subject_id] for subj in inp.subjects
+                      if (prev.slot_id, subj.subject_id) in x] if prev is not None else [])
+        if vars_prev:
+            m.Add(sum(vars_p) <= sum(vars_prev))
+        else:
+            # Ô tiết p-1 không tồn tại trong khung của lớp -- không có gì để
+            # "liền mạch" theo, nên ô p không được có môn (mirror
+            # feasibility.py: occupied.get(...) mặc định False => return False).
+            m.Add(sum(vars_p) == 0)
+
+    # 6. Trần tiết/ngày/lớp = đúng số ô lớp đó có trong ngày.
+    count_by_class_day = defaultdict(int)
+    for s in inp.slots:
+        count_by_class_day[s.class_id, s.ts.weekday] += 1
+    vars_by_class_day = defaultdict(list)
+    for (slot_id, subject_id), var in x.items():
+        s = slot_by_id[slot_id]
+        vars_by_class_day[s.class_id, s.ts.weekday].append(var)
+    for key, vs in vars_by_class_day.items():
+        cap = count_by_class_day.get(key, CAP_TIET_NGAY)
+        m.Add(sum(vs) <= cap)
+
+    # 7. Lớp không có buổi chỉ 1 tiết.
+    groups = defaultdict(list)
+    for s in inp.slots:
+        groups[s.class_id, s.ts.weekday, s.ts.session].append(s)
+    for (class_id, weekday, session), group_slots in groups.items():
+        if len(group_slots) < 2:
+            continue
+        vs = []
+        for s in group_slots:
+            vs.extend(x[s.slot_id, subj.subject_id] for subj in inp.subjects
+                      if (s.slot_id, subj.subject_id) in x)
+        if not vs:
+            continue
+        used = m.NewBoolVar(f"class_used_c{class_id}_wd{weekday}_{session}")
+        m.Add(sum(vs) >= 2 * used)
+        m.Add(sum(vs) <= len(group_slots) * used)
 
 
 def solve(built: CpSatModel, time_limit_s: float = 10.0,
