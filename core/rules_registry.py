@@ -42,7 +42,7 @@ RULES: dict[str, RuleSpec] = {
         # no rule_id of its own; its shortfall is no longer reported at all (user
         # decision 2026-09-03, second revision -- not a hard requirement).
         title_vi="GV tải >=10 tiết/tuần phải có mặt dạy vào sáng Thứ 2, Thứ 5, Thứ 6",
-        tier=RuleTier.SOFT,
+        tier=RuleTier.HARD_POST_GENERATION,
         config_flag=None,
     ),
     "II.4": RuleSpec(

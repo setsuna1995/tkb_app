@@ -26,7 +26,7 @@ from core.scheduler.blocks import (
 )
 from core.scheduler.swaps import (
     _has_lone_period, _repair_lone_periods, _repair_teacher_lone_sessions,
-    _try_swap_repair,
+    _repair_teacher_missing_mandatory_mornings, _try_swap_repair,
 )
 from core.scheduler.teacher_off import _assign_off_slots
 from core.scheduler.quality import (
@@ -55,6 +55,7 @@ __all__ = [
     "_try_swap_repair",
     "_repair_lone_periods",
     "_repair_teacher_lone_sessions",
+    "_repair_teacher_missing_mandatory_mornings",
     "_has_lone_period",
     "_assign_off_slots",
     "_teacher_quality_penalty",

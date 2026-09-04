@@ -80,18 +80,20 @@ def test_check_hard_post_generation_rules_gates_ii8_split_day_again():
     assert "II.8" in violations
 
 
-def test_check_hard_post_generation_rules_never_gates_ii3_missing_mandatory_morning():
-    """User decision 2026-09-03: II.3 (missing mandatory-morning teaching presence)
-    is demoted from hard-gate to soft. A teacher with a heavy load (>=10 periods,
-    the _count_teacher_missing_mandatory_mornings threshold) and ZERO periods on
-    any mandatory morning (wd 2, 5, 6) must previously have been flagged II.3;
-    now it must never appear, and with no lone/split/consecutive-morning shape in
-    this fixture, the gate must report fully compliant."""
+def test_check_hard_post_generation_rules_gates_ii3_missing_mandatory_morning_again():
+    """User decision 2026-09-03 (third revision, same day): II.3 (missing
+    mandatory-morning teaching presence, after its title_vi mislabeling was
+    corrected -- it checks teaching presence, NOT the off-slot rest mechanism)
+    is back to hard-gate ("bắt buộc phải có mặt sáng T2 T5 T6"). A teacher with
+    a heavy load (>=10 periods, the _count_teacher_missing_mandatory_mornings
+    threshold) and ZERO periods on any mandatory morning (wd 2, 5, 6) must be
+    flagged II.3; this fixture has no lone/split/consecutive-morning shape, so
+    II.3 is the only rule that can fire."""
     slots = []
     slot_id = 1
     # 12 periods on weekday 3 (not a mandatory morning) across 4 sessions of 3
-    # each, spread over S/C so no session/day is ever lone and II.14 never
-    # triggers (never >=4 consecutive AM periods in one day here).
+    # each, spread over S/C so no session/day is ever lone and II.14-shaped
+    # placement never matters here (this gate doesn't check II.14 anyway).
     for wd, sess in ((3, "S"), (3, "C"), (4, "S"), (4, "C")):
         for p in (1, 2, 3):
             slots.append(Slot(slot_id, 101, TimeSlot(slot_id, wd, sess, p)))
@@ -107,8 +109,8 @@ def test_check_hard_post_generation_rules_never_gates_ii3_missing_mandatory_morn
         state.slot_teacher[slot.slot_id] = 1
 
     violations, total = _check_hard_post_generation_rules(inp, state, inp.config)
-    assert violations == []
-    assert total == 0
+    assert violations == ["II.3"]
+    assert total == 3
 
 
 def test_check_hard_post_generation_rules_never_gates_ii14_four_consecutive_mornings():

@@ -18,12 +18,13 @@ from core.scheduler.placement import (
 )
 from core.scheduler.quality import (
     _count_teacher_lone_days, _count_teacher_lone_sessions,
-    _count_teacher_split_sessions, _teacher_quality_penalty,
+    _count_teacher_missing_mandatory_mornings, _count_teacher_split_sessions,
+    _teacher_quality_penalty,
 )
 from core.scheduler.state import _State
 from core.scheduler.swaps import (
     _has_lone_period, _repair_lone_periods, _repair_teacher_lone_sessions,
-    _try_swap_repair,
+    _repair_teacher_missing_mandatory_mornings, _try_swap_repair,
 )
 from core.scheduler.teacher_off import _assign_off_slots
 
@@ -31,21 +32,24 @@ from core.scheduler.teacher_off import _assign_off_slots
 def _check_hard_post_generation_rules(inp: SchedulingInput, state: _State, config: SchedulingConfig) -> tuple[list, int]:
     """Post-generation hard gate for the HĐSP rules that need full-schedule
     visibility (see core/rules_registry.py for tier classification -- as of
-    2026-09-03 (second revision, same day), II.4 and II.8 are
-    HARD_POST_GENERATION; II.3/II.14 are soft. II.8 was briefly demoted to
-    soft earlier the same day but the user asked for it back as mandatory).
-    Reuses the same per-teacher counters quality.py uses for soft scoring,
-    but as boolean reject-or-keep gates instead of penalty accumulators.
-    Returns (violated_rule_ids, total) where violated_rule_ids is a list of
-    *distinct* violated rule IDs, e.g. ["II.4", "II.8"] (or [] when fully
-    compliant), and total is the total count of individual violation
-    instances across both rules -- callers that rank candidates by "how bad"
-    must use total, not len(violated_rule_ids): a candidate with 3
-    lone-session teachers is objectively worse than one with 1 lone-session +
-    1 split-day teacher, even though the latter spans more distinct rule IDs
-    (fix-wave Important #2/#3, 2026-09-03)."""
+    2026-09-03 (third revision, same day), II.3, II.4 and II.8 are
+    HARD_POST_GENERATION; II.14 is soft). Reuses the same per-teacher counters
+    quality.py uses for soft scoring, but as boolean reject-or-keep gates
+    instead of penalty accumulators. Returns (violated_rule_ids, total) where
+    violated_rule_ids is a list of *distinct* violated rule IDs, e.g. ["II.4",
+    "II.8"] (or [] when fully compliant), and total is the total count of
+    individual violation instances across all three rules -- callers that
+    rank candidates by "how bad" must use total, not len(violated_rule_ids):
+    a candidate with 3 lone-session teachers is objectively worse than one
+    with 1 lone-session + 1 split-day teacher, even though the latter spans
+    more distinct rule IDs (fix-wave Important #2/#3, 2026-09-03)."""
     violated = []
     total = 0
+    mand_morns = getattr(config, "mandatory_morning_weekdays", (2, 5, 6))
+    missing = _count_teacher_missing_mandatory_mornings(inp.slots, state.assigned, state.slot_teacher, mand_morns)
+    if missing > 0:
+        violated.append("II.3")
+    total += missing
     if getattr(config, "avoid_teacher_lone_periods", True):
         min_lone_load = getattr(config, "min_weekly_periods_for_lone_penalty", 15)
         lone_sessions = _count_teacher_lone_sessions(inp.slots, state.assigned, state.slot_teacher, min_weekly_periods=min_lone_load)
@@ -251,6 +255,13 @@ def run(inp: SchedulingInput, *, max_attempts: int = SO_LAN_THU,
                                      subject_class_allowed_cells)
             if _has_unpaired_block(inp, state, role_index):
                 done = False
+
+        if done:
+            _repair_teacher_missing_mandatory_mornings(
+                inp, state, role_index, assigned_teacher, slots_by_class,
+                day_capacity, config, subject_class_allowed_cells, slot_by_coord,
+                mandatory_mornings=getattr(config, "mandatory_morning_weekdays", (2, 5, 6)),
+            )
 
         if done:
             _repair_teacher_lone_sessions(inp, state, role_index, assigned_teacher, slots_by_class,

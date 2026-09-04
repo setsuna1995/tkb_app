@@ -1,4 +1,5 @@
 import random
+from collections import defaultdict
 import pytest
 
 from core import scheduler as sched
@@ -543,6 +544,289 @@ def test_repair_teacher_lone_sessions_skips_exempt_low_load_teacher():
     tue_count_30 = len(state.teacher_session_periods.get((30, 3, "S"), []))
     assert mon_count_30 in (0, 2), f"Mon count for Teacher 30 should be 0 or 2, got {mon_count_30}"
     assert tue_count_30 in (0, 2), f"Tue count for Teacher 30 should be 0 or 2, got {tue_count_30}"
+
+
+def test_repair_teacher_missing_mandatory_mornings_fills_via_same_class_swap():
+    """_repair_teacher_missing_mandatory_mornings should fill a teacher's missing
+    mandatory morning (Fri, wd 6) by swapping one of their periods on a
+    non-mandatory day (Tue, wd 3) into the missing mandatory-morning slot,
+    same class, trading places with whoever else is teaching there."""
+    ts_mon = TimeSlot(1, 2, "S", 1)
+    ts_thu = TimeSlot(2, 5, "S", 1)
+    ts_tue = TimeSlot(3, 3, "S", 1)   # source: teacher 10's period to move
+    ts_fri = TimeSlot(4, 6, "S", 1)   # destination: currently teacher 20
+
+    slot_mon = Slot(1, 101, ts_mon)
+    slot_thu = Slot(2, 101, ts_thu)
+    slot_tue = Slot(3, 101, ts_tue)
+    slot_fri = Slot(4, 101, ts_fri)
+
+    subj1 = Subject(1, "Toan", ROLE_THUONG)
+    subj2 = Subject(2, "Van", ROLE_THUONG)
+    subj_hdtn = Subject(3, "HDTN", ROLE_HDTN)
+    subjects = [subj1, subj2, subj_hdtn]
+    role_index = resolve_roles(subjects)
+
+    # Padding so teacher 10's total weekly load hits the II.3 threshold (>=10)
+    # without touching any mandatory morning (wd 2, 5, 6) or class 101.
+    padding_slots = []
+    padding_ts = []
+    slot_id = 5
+    for cid, wd, periods in ((102, 4, range(1, 5)), (103, 7, range(1, 4))):
+        for p in periods:
+            ts = TimeSlot(slot_id, wd, "S", p)
+            padding_slots.append(Slot(slot_id, cid, ts))
+            padding_ts.append(ts)
+            slot_id += 1
+
+    assigned_teacher = {(1, 101): 10, (2, 101): 20, (1, 102): 10, (1, 103): 10}
+    slots_by_class = {
+        101: [slot_mon, slot_thu, slot_tue, slot_fri],
+        102: [s for s in padding_slots if s.class_id == 102],
+        103: [s for s in padding_slots if s.class_id == 103],
+    }
+
+    state = sched._State(remaining_need=defaultdict(int), busy=set())
+    sched._put_at(state, slot_mon, 1, 10, role_index)
+    sched._put_at(state, slot_thu, 1, 10, role_index)
+    sched._put_at(state, slot_tue, 1, 10, role_index)
+    sched._put_at(state, slot_fri, 2, 20, role_index)
+    for s in padding_slots:
+        sched._put_at(state, s, 1, 10, role_index)
+
+    teacher_10_total = sum(len(v) for (tid, _wd, _sess), v in state.teacher_session_periods.items() if tid == 10)
+    assert teacher_10_total == 10  # exactly at the II.3 threshold
+
+    # Sanity check before repair: Friday morning (wd 6) is missing for teacher 10.
+    assert len(state.teacher_session_periods.get((10, 6, "S"), [])) == 0
+
+    classes = [ClassRoom(101, "6A1"), ClassRoom(102, "6A2"), ClassRoom(103, "6A3")]
+    inp = SchedulingInput(
+        classes=classes, subjects=subjects,
+        teachers=[Teacher(10, "GV Toan"), Teacher(20, "GV Van")],
+        need={}, assigned_teacher=assigned_teacher, ban_busy=set(),
+        slots=[slot_mon, slot_thu, slot_tue, slot_fri] + padding_slots,
+        timeslots=[ts_mon, ts_thu, ts_tue, ts_fri] + padding_ts,
+    )
+
+    sched._repair_teacher_missing_mandatory_mornings(
+        inp, state, role_index, assigned_teacher, slots_by_class,
+        config=SchedulingConfig(), min_weekly_periods=10,
+    )
+
+    # Friday morning is now covered, via a swap (Tue is now empty for teacher 10).
+    assert len(state.teacher_session_periods.get((10, 6, "S"), [])) == 1
+    assert len(state.teacher_session_periods.get((10, 3, "S"), [])) == 0
+    assert state.assigned[slot_fri.slot_id] == 1  # Toan now taught by teacher 10 on Fri
+    assert state.assigned[slot_tue.slot_id] == 2  # Van (teacher 20) moved into Tue
+    assert state.pinned.get(slot_fri.slot_id) is True
+
+    # A straight swap must not change the teacher's total weekly load.
+    teacher_10_total_after = sum(len(v) for (tid, _wd, _sess), v in state.teacher_session_periods.items() if tid == 10)
+    assert teacher_10_total_after == 10
+
+
+def test_repair_teacher_missing_mandatory_mornings_skips_exempt_low_load_teacher():
+    """Same as II.4's exemption precedent (test_repair_teacher_lone_sessions_
+    skips_exempt_low_load_teacher above): a teacher below min_weekly_periods
+    (the II.3 threshold, default 10) must be left completely untouched even
+    when the identical fillable structure is present, while a teacher at/above
+    the threshold with the same structure must still get repaired -- proving
+    the exemption is selective, not a global no-op."""
+    # Teacher 10 (total=9, exempt): class 101, same Mon/Thu/Tue/Fri shape as
+    # the test above, padded to 9 (not 10).
+    ts_mon_a = TimeSlot(1, 2, "S", 1)
+    ts_thu_a = TimeSlot(2, 5, "S", 1)
+    ts_tue_a = TimeSlot(3, 3, "S", 1)
+    ts_fri_a = TimeSlot(4, 6, "S", 1)
+    slot_mon_a = Slot(1, 101, ts_mon_a)
+    slot_thu_a = Slot(2, 101, ts_thu_a)
+    slot_tue_a = Slot(3, 101, ts_tue_a)
+    slot_fri_a = Slot(4, 101, ts_fri_a)
+
+    # Teacher 30 (total=10, non-exempt): identical shape, class 201.
+    ts_mon_b = TimeSlot(5, 2, "S", 1)
+    ts_thu_b = TimeSlot(6, 5, "S", 1)
+    ts_tue_b = TimeSlot(7, 3, "S", 1)
+    ts_fri_b = TimeSlot(8, 6, "S", 1)
+    slot_mon_b = Slot(5, 201, ts_mon_b)
+    slot_thu_b = Slot(6, 201, ts_thu_b)
+    slot_tue_b = Slot(7, 201, ts_tue_b)
+    slot_fri_b = Slot(8, 201, ts_fri_b)
+
+    subj1 = Subject(1, "Toan", ROLE_THUONG)
+    subj2 = Subject(2, "Van", ROLE_THUONG)
+    subj_hdtn = Subject(3, "HDTN", ROLE_HDTN)
+    subjects = [subj1, subj2, subj_hdtn]
+    role_index = resolve_roles(subjects)
+
+    padding_slots = []
+    padding_ts = []
+    slot_id = 9
+    # Teacher 10: 3 real periods + 6 padding = 9 (< 10, exempt).
+    padding_specs = [
+        (102, 4, range(1, 5), 10),   # +4 -> teacher 10 total = 3+4+2 = 9 (with next line)
+        (103, 7, range(1, 3), 10),   # +2
+        (202, 4, range(1, 5), 30),   # +4 -> teacher 30 total = 3+4+3 = 10 (with next line)
+        (203, 7, range(1, 4), 30),   # +3
+    ]
+    for cid, wd, periods, tid in padding_specs:
+        for p in periods:
+            ts = TimeSlot(slot_id, wd, "S", p)
+            padding_slots.append((Slot(slot_id, cid, ts), tid))
+            padding_ts.append(ts)
+            slot_id += 1
+
+    assigned_teacher = {
+        (1, 101): 10, (2, 101): 20, (1, 102): 10, (1, 103): 10,
+        (1, 201): 30, (2, 201): 40, (1, 202): 30, (1, 203): 30,
+    }
+    slots_by_class = {
+        101: [slot_mon_a, slot_thu_a, slot_tue_a, slot_fri_a],
+        201: [slot_mon_b, slot_thu_b, slot_tue_b, slot_fri_b],
+        102: [s for s, tid in padding_slots if s.class_id == 102],
+        103: [s for s, tid in padding_slots if s.class_id == 103],
+        202: [s for s, tid in padding_slots if s.class_id == 202],
+        203: [s for s, tid in padding_slots if s.class_id == 203],
+    }
+
+    state = sched._State(remaining_need=defaultdict(int), busy=set())
+    sched._put_at(state, slot_mon_a, 1, 10, role_index)
+    sched._put_at(state, slot_thu_a, 1, 10, role_index)
+    sched._put_at(state, slot_tue_a, 1, 10, role_index)
+    sched._put_at(state, slot_fri_a, 2, 20, role_index)
+    sched._put_at(state, slot_mon_b, 1, 30, role_index)
+    sched._put_at(state, slot_thu_b, 1, 30, role_index)
+    sched._put_at(state, slot_tue_b, 1, 30, role_index)
+    sched._put_at(state, slot_fri_b, 2, 40, role_index)
+    for s, tid in padding_slots:
+        sched._put_at(state, s, 1, tid, role_index)
+
+    teacher_10_total = sum(len(v) for (tid, _wd, _sess), v in state.teacher_session_periods.items() if tid == 10)
+    teacher_30_total = sum(len(v) for (tid, _wd, _sess), v in state.teacher_session_periods.items() if tid == 30)
+    assert teacher_10_total == 9
+    assert teacher_30_total == 10
+
+    classes = [
+        ClassRoom(101, "6A1"), ClassRoom(102, "6A2"), ClassRoom(103, "6A3"),
+        ClassRoom(201, "7A1"), ClassRoom(202, "7A2"), ClassRoom(203, "7A3"),
+    ]
+    inp = SchedulingInput(
+        classes=classes, subjects=subjects,
+        teachers=[Teacher(10, "GV A"), Teacher(20, "GV B"), Teacher(30, "GV C"), Teacher(40, "GV D")],
+        need={}, assigned_teacher=assigned_teacher, ban_busy=set(),
+        slots=[slot_mon_a, slot_thu_a, slot_tue_a, slot_fri_a,
+               slot_mon_b, slot_thu_b, slot_tue_b, slot_fri_b] + [s for s, _t in padding_slots],
+        timeslots=[ts_mon_a, ts_thu_a, ts_tue_a, ts_fri_a,
+                   ts_mon_b, ts_thu_b, ts_tue_b, ts_fri_b] + padding_ts,
+    )
+
+    sched._repair_teacher_missing_mandatory_mornings(
+        inp, state, role_index, assigned_teacher, slots_by_class,
+        config=SchedulingConfig(), min_weekly_periods=10,
+    )
+
+    # Teacher 10 (exempt, total=9 < 10): left EXACTLY as originally placed.
+    assert len(state.teacher_session_periods.get((10, 6, "S"), [])) == 0
+    assert len(state.teacher_session_periods.get((10, 3, "S"), [])) == 1
+    assert state.assigned[slot_tue_a.slot_id] == 1
+    assert state.assigned[slot_fri_a.slot_id] == 2
+
+    # Teacher 30 (non-exempt, total=10 >= 10): must still get repaired.
+    assert len(state.teacher_session_periods.get((30, 6, "S"), [])) == 1
+    assert len(state.teacher_session_periods.get((30, 3, "S"), [])) == 0
+
+
+def test_repair_teacher_missing_mandatory_mornings_survives_lone_session_repair():
+    """The pin guard must actually work: after _repair_teacher_missing_mandatory_
+    mornings fills a teacher's missing Friday morning, _repair_teacher_lone_sessions
+    (which runs right after it in engine.py's real call order) must NOT be able to
+    evacuate that newly-filled period, even when the teacher's total load (>=15)
+    makes them non-exempt from II.4 and an evacuate target genuinely exists."""
+    ts_mon = TimeSlot(1, 2, "S", 1)
+    ts_thu = TimeSlot(2, 5, "S", 1)
+    ts_tue = TimeSlot(3, 3, "S", 1)     # source for II.3 repair
+    ts_fri = TimeSlot(4, 6, "S", 1)     # destination for II.3 repair
+    ts_sat1 = TimeSlot(5, 7, "S", 1)    # teacher 10's existing 1-period Sat session
+    ts_sat2 = TimeSlot(6, 7, "S", 2)    # Strategy-1 evacuate swap partner (teacher 50)
+
+    slot_mon = Slot(1, 101, ts_mon)
+    slot_thu = Slot(2, 101, ts_thu)
+    slot_tue = Slot(3, 101, ts_tue)
+    slot_fri = Slot(4, 101, ts_fri)
+    slot_sat1 = Slot(5, 101, ts_sat1)
+    slot_sat2 = Slot(6, 101, ts_sat2)
+
+    subj1 = Subject(1, "Toan", ROLE_THUONG)
+    subj2 = Subject(2, "Van", ROLE_THUONG)
+    subj3 = Subject(3, "Ly", ROLE_THUONG)
+    subj_hdtn = Subject(4, "HDTN", ROLE_HDTN)
+    subjects = [subj1, subj2, subj3, subj_hdtn]
+    role_index = resolve_roles(subjects)
+
+    # Padding so teacher 10's total reaches the II.4 threshold too (>=15), not
+    # just the II.3 threshold (>=10) -- otherwise they'd be exempt from II.4's
+    # lone-session gate and the scenario this test guards against couldn't arise.
+    padding_slots = []
+    padding_ts = []
+    slot_id = 7
+    for cid, wd, periods in ((102, 4, range(1, 6)), (103, 4, range(1, 6))):
+        for p in periods:
+            ts = TimeSlot(slot_id, wd, "S", p)
+            padding_slots.append(Slot(slot_id, cid, ts))
+            padding_ts.append(ts)
+            slot_id += 1
+
+    assigned_teacher = {
+        (1, 101): 10, (2, 101): 20, (3, 101): 50, (1, 102): 10, (1, 103): 10,
+    }
+    slots_by_class = {
+        101: [slot_mon, slot_thu, slot_tue, slot_fri, slot_sat1, slot_sat2],
+        102: [s for s in padding_slots if s.class_id == 102],
+        103: [s for s in padding_slots if s.class_id == 103],
+    }
+
+    state = sched._State(remaining_need=defaultdict(int), busy=set())
+    sched._put_at(state, slot_mon, 1, 10, role_index)
+    sched._put_at(state, slot_thu, 1, 10, role_index)
+    sched._put_at(state, slot_tue, 1, 10, role_index)
+    sched._put_at(state, slot_fri, 2, 20, role_index)
+    sched._put_at(state, slot_sat1, 1, 10, role_index)
+    sched._put_at(state, slot_sat2, 3, 50, role_index)
+    for s in padding_slots:
+        sched._put_at(state, s, 1, 10, role_index)
+
+    teacher_10_total = sum(len(v) for (tid, _wd, _sess), v in state.teacher_session_periods.items() if tid == 10)
+    assert teacher_10_total == 14  # Mon1+Thu1+Tue1+Sat1 + 10 padding
+
+    classes = [ClassRoom(101, "6A1"), ClassRoom(102, "6A2"), ClassRoom(103, "6A3")]
+    inp = SchedulingInput(
+        classes=classes, subjects=subjects,
+        teachers=[Teacher(10, "GV Toan"), Teacher(20, "GV Van"), Teacher(50, "GV Ly")],
+        need={}, assigned_teacher=assigned_teacher, ban_busy=set(),
+        slots=[slot_mon, slot_thu, slot_tue, slot_fri, slot_sat1, slot_sat2] + padding_slots,
+        timeslots=[ts_mon, ts_thu, ts_tue, ts_fri, ts_sat1, ts_sat2] + padding_ts,
+    )
+
+    config = SchedulingConfig()
+
+    # Exact order used in engine.py's run(): II.3 repair first, then II.4 repair.
+    sched._repair_teacher_missing_mandatory_mornings(
+        inp, state, role_index, assigned_teacher, slots_by_class,
+        config=config, min_weekly_periods=10,
+    )
+    assert len(state.teacher_session_periods.get((10, 6, "S"), [])) == 1  # II.3 fix landed
+    assert state.pinned.get(slot_fri.slot_id) is True
+
+    sched._repair_teacher_lone_sessions(
+        inp, state, role_index, assigned_teacher, slots_by_class,
+        config=config, min_weekly_periods=15,
+    )
+
+    # The pin must have protected Friday morning from being evacuated by the
+    # II.4 repair pass, even though teacher 10 is non-exempt (total >= 15) and
+    # an evacuate target (Sat, 1 period, room to grow) genuinely exists.
+    assert len(state.teacher_session_periods.get((10, 6, "S"), [])) == 1
 
 
 def test_missing_mandatory_mornings_ignores_low_load_teachers():

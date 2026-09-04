@@ -258,3 +258,124 @@ def _repair_teacher_lone_sessions(inp, state: _State, role_index,
 
         if not improved:
             break
+
+
+def _repair_teacher_missing_mandatory_mornings(inp, state: _State, role_index,
+                                                assigned_teacher: dict, slots_by_class: dict,
+                                                day_capacity: Optional[dict] = None,
+                                                config: Optional[SchedulingConfig] = None,
+                                                subject_class_allowed_cells: Optional[dict] = None,
+                                                slot_by_coord: Optional[dict] = None,
+                                                mandatory_mornings: tuple = (2, 5, 6),
+                                                min_weekly_periods: int = 10) -> None:
+    """Finds every teacher whose total weekly load is >= min_weekly_periods (the
+    II.3 hard-gate threshold -- see quality.py:_count_teacher_missing_mandatory_mornings)
+    and who has ZERO periods on one of the mandatory mornings (mandatory_mornings,
+    default Mon/Thu/Fri), and attempts to fill it by swapping ONE of that teacher's
+    existing periods on a NON-mandatory weekday into the missing mandatory morning
+    slot -- a same-class swap with whoever else is teaching that (weekday, session)
+    cell, mirroring _repair_teacher_lone_sessions's Strategy 1 (Evacuate).
+
+    After a successful swap, the destination slot is PINNED. Rationale: the
+    swapped-in period can be the teacher's only period in that (weekday, session)
+    -- a fresh "lone session" by II.4's definition if the teacher's total load is
+    also >= the II.4 threshold -- and _repair_teacher_lone_sessions (which already
+    skips pinned slots at both the lone-slot and target-slot checks) runs right
+    after this one in engine.py; without the pin it would be free to evacuate the
+    exact period this repair just placed, silently undoing the II.3 fix.
+
+    A straight 1-for-1 swap never changes either teacher's total weekly period
+    count, so teacher_totals (computed once up front, same convention as the
+    sibling function above) stays valid for the whole repair pass.
+    """
+    config = config or SchedulingConfig()
+
+    teacher_totals: dict = defaultdict(int)
+    for (tid, _wd, _sess), periods in state.teacher_session_periods.items():
+        teacher_totals[tid] += len(periods)
+
+    max_rounds = 3
+    for _ in range(max_rounds):
+        missing_pairs = [
+            (tid, wd)
+            for tid, total in teacher_totals.items()
+            if tid > 0 and total >= min_weekly_periods
+            for wd in mandatory_mornings
+            if len(state.teacher_session_periods.get((tid, wd, "S"), [])) == 0
+        ]
+        if not missing_pairs:
+            break
+
+        improved = False
+        for tid, wd_missing in missing_pairs:
+            source_candidates = [
+                (wd_src, period_src)
+                for (t, wd_src, sess_src), periods in list(state.teacher_session_periods.items())
+                if t == tid and sess_src == "S" and wd_src not in mandatory_mornings
+                for period_src in periods
+            ]
+
+            for wd_src, period_src in source_candidates:
+                source_slot = None
+                for slot in inp.slots:
+                    if (slot.ts.weekday == wd_src and slot.ts.session == "S"
+                            and slot.ts.period == period_src and state.slot_teacher.get(slot.slot_id) == tid):
+                        source_slot = slot
+                        break
+
+                if source_slot is None or state.pinned.get(source_slot.slot_id):
+                    continue
+
+                cid = source_slot.class_id
+                sid_src = state.assigned.get(source_slot.slot_id)
+                if sid_src in (None, -1):
+                    continue
+
+                block_n_src = role_index.block_size.get(sid_src, 1)
+                if block_n_src > 1 and len(state.placed.get((cid, sid_src, wd_src), [])) > 1:
+                    continue
+
+                for dest_slot in slots_by_class[cid]:
+                    if (dest_slot.ts.weekday != wd_missing or dest_slot.ts.session != "S"
+                            or state.pinned.get(dest_slot.slot_id)):
+                        continue
+                    sid_dst = state.assigned.get(dest_slot.slot_id)
+                    if sid_dst in (None, -1):
+                        continue
+                    tid_dst = state.slot_teacher.get(dest_slot.slot_id)
+                    if tid_dst is None or tid_dst == tid:
+                        continue
+
+                    block_n_dst = role_index.block_size.get(sid_dst, 1)
+                    if block_n_dst > 1 and len(state.placed.get((cid, sid_dst, wd_missing), [])) > 1:
+                        continue
+
+                    _remove_at(state, source_slot, role_index)
+                    _remove_at(state, dest_slot, role_index)
+
+                    feas_src_at_dest = _feasible(
+                        cid, dest_slot.ts, sid_src, tid, state, role_index,
+                        day_capacity, config, subject_class_allowed_cells
+                    )
+                    feas_dst_at_src = _feasible(
+                        cid, source_slot.ts, sid_dst, tid_dst, state, role_index,
+                        day_capacity, config, subject_class_allowed_cells
+                    )
+
+                    if feas_src_at_dest and feas_dst_at_src:
+                        _put_at(state, dest_slot, sid_src, tid, role_index)
+                        _put_at(state, source_slot, sid_dst, tid_dst, role_index)
+                        state.pinned[dest_slot.slot_id] = True
+                        improved = True
+                        break
+                    else:
+                        _put_at(state, source_slot, sid_src, tid, role_index)
+                        _put_at(state, dest_slot, sid_dst, tid_dst, role_index)
+
+                if improved:
+                    break
+            if improved:
+                break
+
+        if not improved:
+            break

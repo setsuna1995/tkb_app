@@ -355,10 +355,10 @@ if result is not None:
             if heavy_p3_violations:
                 st.error(f"❌ Phát hiện {len(heavy_p3_violations)} tiết môn Nặng bị xếp vào tiết 3 buổi chiều.")
 
-        # Kiểm tra tiêu chí HĐSP hard-gate (II.4 + II.8 -- chặn nút lưu, per quyết định
-        # 2026-09-03 [bản sửa thứ 2 trong ngày]). II.3/II.14 là cảnh báo mềm (không
-        # chặn lưu) -- engine vẫn cố tránh chúng khi có thể qua điểm trừ mềm sẵn có
-        # trong quality.py, chỉ là không còn reject/relax vì chúng nữa.
+        # Kiểm tra tiêu chí HĐSP hard-gate (II.3 + II.4 + II.8 -- chặn nút lưu, per
+        # quyết định 2026-09-03 [bản sửa thứ 3 trong ngày]). II.14 là cảnh báo mềm
+        # (không chặn lưu) -- engine vẫn cố tránh khi có thể qua điểm trừ mềm sẵn có
+        # trong quality.py, chỉ là không còn reject/relax vì nó nữa.
         teacher_map = {t.teacher_id: t.name for t in inp.teachers}
         hard_rule_violations = {}
         soft_rule_warnings = {}
@@ -368,7 +368,7 @@ if result is not None:
             getattr(inp.config, "mandatory_morning_weekdays", (2, 5, 6)),
         )
         if missing_morning:
-            soft_rule_warnings["II.3"] = missing_morning
+            hard_rule_violations["II.3"] = missing_morning
 
         min_lone_load = getattr(inp.config, "min_weekly_periods_for_lone_penalty", 15)
         if getattr(inp.config, "avoid_teacher_lone_periods", True):
@@ -471,224 +471,227 @@ if result is not None:
             st.rerun()
 
 st.write("---")
-with st.expander("📅 Xếp nhiều tuần cùng lúc", expanded=False):
-    st.caption("Xếp tự động hàng loạt tuần theo đúng định lượng số tiết của từng tuần tương ứng.")
+with st.expander("📅 Xếp nhiều tuần cùng lúc (tạm thời tắt)", expanded=False):
+    st.info("Tính năng xếp nhiều tuần cùng lúc đang tạm thời tắt theo yêu cầu. Dùng chế độ xếp từng tuần ở trên.")
+    _batch_scheduling_enabled = False
+    if _batch_scheduling_enabled:
+        st.caption("Xếp tự động hàng loạt tuần theo đúng định lượng số tiết của từng tuần tương ứng.")
     
-    preset_choice = st.radio(
-        "Chọn nhanh nhóm tuần:",
-        ["Tùy chọn", "Toàn bộ Học kỳ I (Tuần 1 - 18)", "Toàn bộ Học kỳ II (Tuần 19 - 35)", "Tất cả 35 tuần trong năm"],
-        horizontal=True,
-        key="batch_preset_radio",
-    )
+        preset_choice = st.radio(
+            "Chọn nhanh nhóm tuần:",
+            ["Tùy chọn", "Toàn bộ Học kỳ I (Tuần 1 - 18)", "Toàn bộ Học kỳ II (Tuần 19 - 35)", "Tất cả 35 tuần trong năm"],
+            horizontal=True,
+            key="batch_preset_radio",
+        )
 
-    if preset_choice == "Toàn bộ Học kỳ I (Tuần 1 - 18)":
-        default_batch = list(range(1, 19))
-    elif preset_choice == "Toàn bộ Học kỳ II (Tuần 19 - 35)":
-        default_batch = list(range(19, 36))
-    elif preset_choice == "Tất cả 35 tuần trong năm":
-        default_batch = list(range(1, 36))
-    else:
-        default_batch = [1, 2]
+        if preset_choice == "Toàn bộ Học kỳ I (Tuần 1 - 18)":
+            default_batch = list(range(1, 19))
+        elif preset_choice == "Toàn bộ Học kỳ II (Tuần 19 - 35)":
+            default_batch = list(range(19, 36))
+        elif preset_choice == "Tất cả 35 tuần trong năm":
+            default_batch = list(range(1, 36))
+        else:
+            default_batch = [1, 2]
 
-    batch_week_nos = st.multiselect(
-        "Danh sách các tuần cần xếp:",
-        options=list(range(1, 36)),
-        default=default_batch,
-        format_func=lambda wn: f"Tuần {wn} ({'Chẵn' if wn % 2 == 0 else 'Lẻ'})",
-        key="batch_week_select",
-    )
+        batch_week_nos = st.multiselect(
+            "Danh sách các tuần cần xếp:",
+            options=list(range(1, 36)),
+            default=default_batch,
+            format_func=lambda wn: f"Tuần {wn} ({'Chẵn' if wn % 2 == 0 else 'Lẻ'})",
+            key="batch_week_select",
+        )
 
-    batch_extra_kep_names = st.multiselect(
-        "Môn cần xếp 2 tiết liền kề (kép) CHỈ cho các tuần này",
-        extra_kep_options,
-        key="batch_extra_kep_select",
-    )
-    batch_extra_kep_ids = frozenset(s.subject_id for s in subjects if s.name in batch_extra_kep_names)
-    batch_over_warnings = []
-    for wn in batch_week_nos:
-        b_par = "C" if wn % 2 == 0 else "L"
-        b_qv = repo.get_teacher_quota_view(conn, parity=b_par, week_no=wn)
-        b_over = [q for q in b_qv if q["cap"] > 0 and q["over_current"] > 0]
-        if b_over:
-            batch_over_warnings.append(
-                f"**Tuần {wn}** ({'Chẵn' if b_par == 'C' else 'Lẻ'}): "
-                + ", ".join(f"{q['name']} ({q['load']}/{q['cap']})" for q in b_over)
-            )
-
-    batch_proceed_anyway = True
-    if batch_over_warnings:
-        st.warning("Các tuần có GV vượt định mức:\n\n" + "\n\n".join(f"- {w}" for w in batch_over_warnings))
-        batch_proceed_anyway = st.checkbox("Vẫn tiếp tục xếp các tuần dù có GV vượt định mức", key="batch_proceed_anyway")
-
-    if st.button("🚀 Xếp các tuần đã chọn", disabled=not batch_week_nos or not batch_proceed_anyway, type="primary"):
-        batch_results = {}
-        history = repo.list_seed_history(conn)
-        seed_lookup = {h["week_no"]: h["seed"] for h in history}
-        
+        batch_extra_kep_names = st.multiselect(
+            "Môn cần xếp 2 tiết liền kề (kép) CHỈ cho các tuần này",
+            extra_kep_options,
+            key="batch_extra_kep_select",
+        )
+        batch_extra_kep_ids = frozenset(s.subject_id for s in subjects if s.name in batch_extra_kep_names)
+        batch_over_warnings = []
         for wn in batch_week_nos:
-            b_parity = "C" if wn % 2 == 0 else "L"
-            b_seed = seed_lookup.get(wn, (seed + wn) if seed else 0)
-            b_inp = repo.build_scheduling_input(
-                conn, parity=b_parity, seed=b_seed,
-                extra_kep_ids=batch_extra_kep_ids,
-                hdtn_thematic_week=batch_hdtn_thematic_week,
-                week_no=wn,
-            )
-            with st.spinner(f"Đang xếp Tuần {wn} (áp dụng định lượng Tuần {wn})..."):
-                b_result = sched.run(b_inp)
-            batch_results[wn] = (b_seed, b_parity, b_inp, b_result)
-        st.session_state["batch_results"] = batch_results
-
-    def _batch_highlight_nonzero(row):
-        return ["background-color: #ffc7ce" if col != "Môn" and row[col] != 0 else "" for col in row.index]
-
-    batch_results = st.session_state.get("batch_results", {})
-    for wn, (b_seed, b_parity, b_inp, b_result) in list(batch_results.items()):
-        with st.expander(f"Kết quả Tuần {wn} ({'Chẵn' if b_parity == 'C' else 'Lẻ'})", expanded=True):
-            if not b_result.success:
-                st.error(b_result.failure_reason)
-                continue
-
-            b_teacher_map = {t.teacher_id: t.name for t in b_inp.teachers}
-
-            if b_result.successes_found > 0:
-                st.success(
-                    f"Xếp thành công sau {b_result.attempts_tried} lần thử "
-                    f"({b_result.successes_found} phương án hợp lệ). "
-                    f"Giữ nguyên {b_result.cells_total - b_result.cells_changed}/{b_result.cells_total} ô, "
-                    f"thay đổi {b_result.cells_changed} ô."
-                )
-            else:
-                # successes_found == 0 is the ONLY other case where b_result.success is
-                # True (relaxed-fallback path) -- must not read as an unqualified success.
-                st.warning(
-                    f"⚠️ Xếp xong sau {b_result.attempts_tried} lần thử. Lịch được tạo là phương án khả thi tốt "
-                    f"nhất (một số ràng buộc HĐSP đã phải nới lỏng — xem chi tiết bên dưới). "
-                    f"Giữ nguyên {b_result.cells_total - b_result.cells_changed}/{b_result.cells_total} ô, "
-                    f"thay đổi {b_result.cells_changed} ô."
+            b_par = "C" if wn % 2 == 0 else "L"
+            b_qv = repo.get_teacher_quota_view(conn, parity=b_par, week_no=wn)
+            b_over = [q for q in b_qv if q["cap"] > 0 and q["over_current"] > 0]
+            if b_over:
+                batch_over_warnings.append(
+                    f"**Tuần {wn}** ({'Chẵn' if b_par == 'C' else 'Lẻ'}): "
+                    + ", ".join(f"{q['name']} ({q['load']}/{q['cap']})" for q in b_over)
                 )
 
-            if b_result.relaxed_rules:
-                st.warning(f"⚠️ Lịch được tạo là phương án khả thi tốt nhất, nhưng {len(b_result.relaxed_rules)} ràng buộc HĐSP đã phải nới lỏng:")
-                for item in b_result.relaxed_rules:
-                    rule_id = item.get("rule_id")
-                    title = RULES[rule_id].title_vi if rule_id in RULES else rule_id
-                    st.write(f"- {rule_id}: {title}")
+        batch_proceed_anyway = True
+        if batch_over_warnings:
+            st.warning("Các tuần có GV vượt định mức:\n\n" + "\n\n".join(f"- {w}" for w in batch_over_warnings))
+            batch_proceed_anyway = st.checkbox("Vẫn tiếp tục xếp các tuần dù có GV vượt định mức", key="batch_proceed_anyway")
 
-            b_subject_names = {s.subject_id: s.name for s in b_inp.subjects}
-            b_classes_sorted = sorted(b_inp.classes, key=lambda c: c.sort_order)
-            b_tabs = st.tabs([c.name for c in b_classes_sorted])
-            for tab, cls in zip(b_tabs, b_classes_sorted):
-                with tab:
-                    cls_slots = [s for s in b_inp.slots if s.class_id == cls.class_id]
-                    periods = sorted({(s.ts.session, s.ts.period) for s in cls_slots},
-                                      key=lambda sp: (0 if sp[0] == "S" else 1, sp[1]))
-                    grid = {key: {} for key in periods}
-                    for s in cls_slots:
-                        subj_id = b_result.assignment.get(s.slot_id)
-                        grid[(s.ts.session, s.ts.period)][s.ts.weekday] = b_subject_names.get(subj_id, "")
-                    rows = []
-                    for (sess, per) in periods:
-                        row = {"Buổi": "Sáng" if sess == "S" else "Chiều", "Tiết": per}
-                        for wd in WEEKDAYS:
-                            row[WEEKDAY_NAMES[wd]] = grid[(sess, per)].get(wd, "")
-                        rows.append(row)
-                    st.dataframe(pd.DataFrame(rows), hide_index=True, use_container_width=True)
+        if st.button("🚀 Xếp các tuần đã chọn", disabled=not batch_week_nos or not batch_proceed_anyway, type="primary"):
+            batch_results = {}
+            history = repo.list_seed_history(conn)
+            seed_lookup = {h["week_no"]: h["seed"] for h in history}
+        
+            for wn in batch_week_nos:
+                b_parity = "C" if wn % 2 == 0 else "L"
+                b_seed = seed_lookup.get(wn, (seed + wn) if seed else 0)
+                b_inp = repo.build_scheduling_input(
+                    conn, parity=b_parity, seed=b_seed,
+                    extra_kep_ids=batch_extra_kep_ids,
+                    hdtn_thematic_week=batch_hdtn_thematic_week,
+                    week_no=wn,
+                )
+                with st.spinner(f"Đang xếp Tuần {wn} (áp dụng định lượng Tuần {wn})..."):
+                    b_result = sched.run(b_inp)
+                batch_results[wn] = (b_seed, b_parity, b_inp, b_result)
+            st.session_state["batch_results"] = batch_results
 
-            b_conflicts = find_teacher_conflicts(b_inp.slots, b_result.assignment, b_inp.assigned_teacher)
-            if b_conflicts:
-                st.error(f"Phát hiện {len(b_conflicts)} trường hợp GV trùng lịch (không nên xảy ra, báo lỗi này).")
+        def _batch_highlight_nonzero(row):
+            return ["background-color: #ffc7ce" if col != "Môn" and row[col] != 0 else "" for col in row.index]
 
-            # Kiểm tra tiêu chí HĐSP hard-gate (II.4 + II.8) cho Tuần {wn} -- mirrors the
-            # single-week flow's block above. II.3/II.14 là cảnh báo mềm, không chặn
-            # lưu (per quyết định 2026-09-03, bản sửa thứ 2 trong ngày).
-            b_hard_rule_violations = {}
-            b_soft_rule_warnings = {}
+        batch_results = st.session_state.get("batch_results", {})
+        for wn, (b_seed, b_parity, b_inp, b_result) in list(batch_results.items()):
+            with st.expander(f"Kết quả Tuần {wn} ({'Chẵn' if b_parity == 'C' else 'Lẻ'})", expanded=True):
+                if not b_result.success:
+                    st.error(b_result.failure_reason)
+                    continue
 
-            b_missing_morning = find_teacher_missing_mandatory_morning_violations(
-                b_inp.slots, b_result.assignment, b_inp.assigned_teacher,
-                getattr(b_inp.config, "mandatory_morning_weekdays", (2, 5, 6)),
-            )
-            if b_missing_morning:
-                b_soft_rule_warnings["II.3"] = b_missing_morning
+                b_teacher_map = {t.teacher_id: t.name for t in b_inp.teachers}
 
-            b_min_lone_load = getattr(b_inp.config, "min_weekly_periods_for_lone_penalty", 15)
-            if getattr(b_inp.config, "avoid_teacher_lone_periods", True):
-                # Gated the same way engine.py:_check_hard_post_generation_rules gates II.4/II.8.
-                b_lone_sessions = find_teacher_lone_session_violations(b_inp.slots, b_result.assignment, b_inp.assigned_teacher, b_min_lone_load)
-                b_lone_days = find_teacher_lone_day_violations(b_inp.slots, b_result.assignment, b_inp.assigned_teacher, b_min_lone_load)
-                if b_lone_sessions or b_lone_days:
-                    b_hard_rule_violations["II.4"] = b_lone_sessions + [(tid, wd, "cả ngày") for tid, wd in b_lone_days]
+                if b_result.successes_found > 0:
+                    st.success(
+                        f"Xếp thành công sau {b_result.attempts_tried} lần thử "
+                        f"({b_result.successes_found} phương án hợp lệ). "
+                        f"Giữ nguyên {b_result.cells_total - b_result.cells_changed}/{b_result.cells_total} ô, "
+                        f"thay đổi {b_result.cells_changed} ô."
+                    )
+                else:
+                    # successes_found == 0 is the ONLY other case where b_result.success is
+                    # True (relaxed-fallback path) -- must not read as an unqualified success.
+                    st.warning(
+                        f"⚠️ Xếp xong sau {b_result.attempts_tried} lần thử. Lịch được tạo là phương án khả thi tốt "
+                        f"nhất (một số ràng buộc HĐSP đã phải nới lỏng — xem chi tiết bên dưới). "
+                        f"Giữ nguyên {b_result.cells_total - b_result.cells_changed}/{b_result.cells_total} ô, "
+                        f"thay đổi {b_result.cells_changed} ô."
+                    )
 
-                b_split_days = find_teacher_split_day_violations(b_inp.slots, b_result.assignment, b_inp.assigned_teacher, b_min_lone_load)
-                if b_split_days:
-                    b_hard_rule_violations["II.8"] = b_split_days
+                if b_result.relaxed_rules:
+                    st.warning(f"⚠️ Lịch được tạo là phương án khả thi tốt nhất, nhưng {len(b_result.relaxed_rules)} ràng buộc HĐSP đã phải nới lỏng:")
+                    for item in b_result.relaxed_rules:
+                        rule_id = item.get("rule_id")
+                        title = RULES[rule_id].title_vi if rule_id in RULES else rule_id
+                        st.write(f"- {rule_id}: {title}")
 
-            if getattr(b_inp.config, "avoid_teacher_4_consecutive_morning", True):
-                b_consecutive_morning = find_teacher_4_consecutive_morning_violations(b_inp.slots, b_result.assignment, b_inp.assigned_teacher)
-                if b_consecutive_morning:
-                    b_soft_rule_warnings["II.14"] = b_consecutive_morning
+                b_subject_names = {s.subject_id: s.name for s in b_inp.subjects}
+                b_classes_sorted = sorted(b_inp.classes, key=lambda c: c.sort_order)
+                b_tabs = st.tabs([c.name for c in b_classes_sorted])
+                for tab, cls in zip(b_tabs, b_classes_sorted):
+                    with tab:
+                        cls_slots = [s for s in b_inp.slots if s.class_id == cls.class_id]
+                        periods = sorted({(s.ts.session, s.ts.period) for s in cls_slots},
+                                          key=lambda sp: (0 if sp[0] == "S" else 1, sp[1]))
+                        grid = {key: {} for key in periods}
+                        for s in cls_slots:
+                            subj_id = b_result.assignment.get(s.slot_id)
+                            grid[(s.ts.session, s.ts.period)][s.ts.weekday] = b_subject_names.get(subj_id, "")
+                        rows = []
+                        for (sess, per) in periods:
+                            row = {"Buổi": "Sáng" if sess == "S" else "Chiều", "Tiết": per}
+                            for wd in WEEKDAYS:
+                                row[WEEKDAY_NAMES[wd]] = grid[(sess, per)].get(wd, "")
+                            rows.append(row)
+                        st.dataframe(pd.DataFrame(rows), hide_index=True, use_container_width=True)
 
-            if b_hard_rule_violations:
-                st.error(f"❌ Còn {len(b_hard_rule_violations)} tiêu chí HĐSP bắt buộc chưa được thỏa mãn (chặn lưu) cho Tuần {wn}:")
-                for rule_id, items in b_hard_rule_violations.items():
-                    with st.expander(f"{rule_id}: {RULES[rule_id].title_vi} ({len(items)} trường hợp)", expanded=False):
-                        for item in items:
-                            tid = item[0]
-                            tname = b_teacher_map.get(tid, f"GV #{tid}")
-                            rest = ", ".join(str(x) for x in item[1:])
-                            st.write(f"- {tname}: {rest}")
+                b_conflicts = find_teacher_conflicts(b_inp.slots, b_result.assignment, b_inp.assigned_teacher)
+                if b_conflicts:
+                    st.error(f"Phát hiện {len(b_conflicts)} trường hợp GV trùng lịch (không nên xảy ra, báo lỗi này).")
 
-            if b_soft_rule_warnings:
-                with st.expander(
-                    f"⚠️ {sum(len(v) for v in b_soft_rule_warnings.values())} trường hợp thuộc "
-                    f"{len(b_soft_rule_warnings)} tiêu chí HĐSP mềm (không chặn lưu) cho Tuần {wn}", expanded=False,
+                # Kiểm tra tiêu chí HĐSP hard-gate (II.4 + II.8) cho Tuần {wn} -- mirrors the
+                # single-week flow's block above. II.3/II.14 là cảnh báo mềm, không chặn
+                # lưu (per quyết định 2026-09-03, bản sửa thứ 2 trong ngày).
+                b_hard_rule_violations = {}
+                b_soft_rule_warnings = {}
+
+                b_missing_morning = find_teacher_missing_mandatory_morning_violations(
+                    b_inp.slots, b_result.assignment, b_inp.assigned_teacher,
+                    getattr(b_inp.config, "mandatory_morning_weekdays", (2, 5, 6)),
+                )
+                if b_missing_morning:
+                    b_hard_rule_violations["II.3"] = b_missing_morning
+
+                b_min_lone_load = getattr(b_inp.config, "min_weekly_periods_for_lone_penalty", 15)
+                if getattr(b_inp.config, "avoid_teacher_lone_periods", True):
+                    # Gated the same way engine.py:_check_hard_post_generation_rules gates II.4/II.8.
+                    b_lone_sessions = find_teacher_lone_session_violations(b_inp.slots, b_result.assignment, b_inp.assigned_teacher, b_min_lone_load)
+                    b_lone_days = find_teacher_lone_day_violations(b_inp.slots, b_result.assignment, b_inp.assigned_teacher, b_min_lone_load)
+                    if b_lone_sessions or b_lone_days:
+                        b_hard_rule_violations["II.4"] = b_lone_sessions + [(tid, wd, "cả ngày") for tid, wd in b_lone_days]
+
+                    b_split_days = find_teacher_split_day_violations(b_inp.slots, b_result.assignment, b_inp.assigned_teacher, b_min_lone_load)
+                    if b_split_days:
+                        b_hard_rule_violations["II.8"] = b_split_days
+
+                if getattr(b_inp.config, "avoid_teacher_4_consecutive_morning", True):
+                    b_consecutive_morning = find_teacher_4_consecutive_morning_violations(b_inp.slots, b_result.assignment, b_inp.assigned_teacher)
+                    if b_consecutive_morning:
+                        b_soft_rule_warnings["II.14"] = b_consecutive_morning
+
+                if b_hard_rule_violations:
+                    st.error(f"❌ Còn {len(b_hard_rule_violations)} tiêu chí HĐSP bắt buộc chưa được thỏa mãn (chặn lưu) cho Tuần {wn}:")
+                    for rule_id, items in b_hard_rule_violations.items():
+                        with st.expander(f"{rule_id}: {RULES[rule_id].title_vi} ({len(items)} trường hợp)", expanded=False):
+                            for item in items:
+                                tid = item[0]
+                                tname = b_teacher_map.get(tid, f"GV #{tid}")
+                                rest = ", ".join(str(x) for x in item[1:])
+                                st.write(f"- {tname}: {rest}")
+
+                if b_soft_rule_warnings:
+                    with st.expander(
+                        f"⚠️ {sum(len(v) for v in b_soft_rule_warnings.values())} trường hợp thuộc "
+                        f"{len(b_soft_rule_warnings)} tiêu chí HĐSP mềm (không chặn lưu) cho Tuần {wn}", expanded=False,
+                    ):
+                        for rule_id, items in b_soft_rule_warnings.items():
+                            st.write(f"**{rule_id}: {RULES[rule_id].title_vi}** ({len(items)} trường hợp)")
+                            for item in items:
+                                tid = item[0]
+                                tname = b_teacher_map.get(tid, f"GV #{tid}")
+                                rest = ", ".join(str(x) for x in item[1:])
+                                st.write(f"- {tname}: {rest}")
+
+                b_proceed_with_hard_violations = True
+                if b_hard_rule_violations:
+                    b_proceed_with_hard_violations = st.checkbox(
+                        "Vẫn lưu dù còn vi phạm tiêu chí HĐSP bắt buộc ở trên (không khuyến khích)",
+                        key=f"batch_proceed_with_hard_violations_{wn}",
+                    )
+
+                st.caption(f"Kiểm tra định mức Tuần {wn} (thực tế − định mức tuần {wn}, kỳ vọng 0)")
+                b_expected_quota = repo.get_periods_for_week(conn, week_no=wn, parity=b_parity)
+                b_diff = compute_quota_diff(b_inp.slots, b_result.assignment, b_expected_quota, b_parity)
+                b_check_rows = []
+                for subj in sorted(b_inp.subjects, key=lambda s: s.sort_order):
+                    row = {"Môn": subj.name}
+                    for cls in b_classes_sorted:
+                        row[cls.name] = b_diff.get((subj.subject_id, cls.class_id), 0)
+                    b_check_rows.append(row)
+                st.dataframe(
+                    pd.DataFrame(b_check_rows).style.apply(_batch_highlight_nonzero, axis=1),
+                    hide_index=True, use_container_width=True,
+                )
+
+                if st.button(
+                    f"✅ Chấp nhận & Lưu Tuần {wn}", key=f"batch_accept_{wn}",
+                    disabled=bool(b_hard_rule_violations) and not b_proceed_with_hard_violations,
                 ):
-                    for rule_id, items in b_soft_rule_warnings.items():
-                        st.write(f"**{rule_id}: {RULES[rule_id].title_vi}** ({len(items)} trường hợp)")
-                        for item in items:
-                            tid = item[0]
-                            tname = b_teacher_map.get(tid, f"GV #{tid}")
-                            rest = ", ".join(str(x) for x in item[1:])
-                            st.write(f"- {tname}: {rest}")
-
-            b_proceed_with_hard_violations = True
-            if b_hard_rule_violations:
-                b_proceed_with_hard_violations = st.checkbox(
-                    "Vẫn lưu dù còn vi phạm tiêu chí HĐSP bắt buộc ở trên (không khuyến khích)",
-                    key=f"batch_proceed_with_hard_violations_{wn}",
-                )
-
-            st.caption(f"Kiểm tra định mức Tuần {wn} (thực tế − định mức tuần {wn}, kỳ vọng 0)")
-            b_expected_quota = repo.get_periods_for_week(conn, week_no=wn, parity=b_parity)
-            b_diff = compute_quota_diff(b_inp.slots, b_result.assignment, b_expected_quota, b_parity)
-            b_check_rows = []
-            for subj in sorted(b_inp.subjects, key=lambda s: s.sort_order):
-                row = {"Môn": subj.name}
-                for cls in b_classes_sorted:
-                    row[cls.name] = b_diff.get((subj.subject_id, cls.class_id), 0)
-                b_check_rows.append(row)
-            st.dataframe(
-                pd.DataFrame(b_check_rows).style.apply(_batch_highlight_nonzero, axis=1),
-                hide_index=True, use_container_width=True,
-            )
-
-            if st.button(
-                f"✅ Chấp nhận & Lưu Tuần {wn}", key=f"batch_accept_{wn}",
-                disabled=bool(b_hard_rule_violations) and not b_proceed_with_hard_violations,
-            ):
-                b_cells = {
-                    (s.class_id, s.ts.weekday, s.ts.session, s.ts.period): b_result.assignment.get(s.slot_id)
-                    for s in b_inp.slots
-                }
-                repo.bulk_replace_tkb_nhap(conn, b_cells)
-                repo.add_seed_history(conn, wn, b_seed, b_parity)
-                b_run_id = repo.save_run(conn, wn, b_seed, b_parity, b_result.cells_changed, b_result.cells_total,
-                                          True, "OK")
-                repo.save_tkb_result(conn, b_run_id, b_cells)
-                st.success(f"Đã lưu Tuần {wn} làm thời khóa biểu chính thức.")
-                del st.session_state["batch_results"][wn]
-                st.rerun()
+                    b_cells = {
+                        (s.class_id, s.ts.weekday, s.ts.session, s.ts.period): b_result.assignment.get(s.slot_id)
+                        for s in b_inp.slots
+                    }
+                    repo.bulk_replace_tkb_nhap(conn, b_cells)
+                    repo.add_seed_history(conn, wn, b_seed, b_parity)
+                    b_run_id = repo.save_run(conn, wn, b_seed, b_parity, b_result.cells_changed, b_result.cells_total,
+                                              True, "OK")
+                    repo.save_tkb_result(conn, b_run_id, b_cells)
+                    st.success(f"Đã lưu Tuần {wn} làm thời khóa biểu chính thức.")
+                    del st.session_state["batch_results"][wn]
+                    st.rerun()
 
 sidebar_backup_export(conn)
 sidebar_school_switcher()
