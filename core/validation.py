@@ -239,7 +239,9 @@ def find_heavy_afternoon_period3_violations(slots: list, assignment: dict, heavy
 
 def find_teacher_missing_mandatory_morning_violations(slots: list, assignment: dict, assigned_teacher: dict,
                                                         mandatory_mornings: tuple = (2, 5, 6),
-                                                        min_weekly_periods: int = 10) -> list:
+                                                        min_weekly_periods: int = 10,
+                                                        strict_weekdays: tuple = (),
+                                                        exempt_teacher_ids: frozenset = frozenset()) -> list:
     """Returns [(teacher_id, weekday), ...] for teachers at/above min_weekly_periods
     who end up with zero periods on a mandatory morning -- Tiêu chí II.3: catches an
     accidental empty forbidden morning beyond the teacher's one designated off-slot.
@@ -257,13 +259,20 @@ def find_teacher_missing_mandatory_morning_violations(slots: list, assignment: d
         if teacher_id is None or teacher_id <= 0:
             continue
         teacher_totals[teacher_id] += 1
-        if slot.ts.session == "S" and slot.ts.weekday in mandatory_mornings:
+        if slot.ts.session == "S" and (slot.ts.weekday in mandatory_mornings
+                                        or slot.ts.weekday in strict_weekdays):
             teacher_morns[teacher_id][slot.ts.weekday] += 1
 
     violations = []
     for teacher_id, total in teacher_totals.items():
+        if teacher_id not in exempt_teacher_ids:
+            for wd in strict_weekdays:
+                if teacher_morns[teacher_id][wd] == 0:
+                    violations.append((teacher_id, wd))
         if total >= min_weekly_periods:
             for wd in mandatory_mornings:
+                if wd in strict_weekdays:
+                    continue
                 if teacher_morns[teacher_id][wd] == 0:
                     violations.append((teacher_id, wd))
     return violations

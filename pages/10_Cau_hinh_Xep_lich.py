@@ -180,6 +180,16 @@ mandatory_morning_selection = st.multiselect(
     format_func=lambda w: f"{WEEKDAY_NAMES[w]} Sáng",
     help="Các buổi sáng này (mặc định Thứ 2, Thứ 5, Thứ 6) toàn thể GV bắt buộc có mặt, cấm chọn làm buổi nghỉ và ưu tiên xếp tiết dạy.",
 )
+strict_morning_selection = st.multiselect(
+    "Sáng mà MỌI giáo viên đều phải có tiết dạy",
+    options=list(WEEKDAYS),
+    default=list(getattr(config, "strict_morning_weekdays", ()) or ()),
+    format_func=lambda w: f"{WEEKDAY_NAMES[w]} Sáng",
+    help="Các sáng này áp dụng cho TOÀN BỘ giáo viên, KHÔNG xét ngưỡng tải bên dưới — "
+         "vi phạm sẽ chặn nút Lưu. Ngoại lệ duy nhất: Hiệu trưởng / Phó hiệu trưởng "
+         "(nhận diện theo chức vụ ghi trong hồ sơ GV), vì tải của họ quá ít để trải "
+         "đủ các sáng. Để trống = tắt.",
+)
 min_weekly_periods_for_mandatory_morning = st.number_input(
     "Sáng bắt buộc: chỉ áp dụng cho GV có tải từ mấy tiết/tuần trở lên",
     0, 30, getattr(config, "min_weekly_periods_for_mandatory_morning", 10),
@@ -288,6 +298,7 @@ if st.button("💾 Lưu cấu hình", type="primary"):
         avoid_teacher_gaps=bool(avoid_teacher_gaps),
         avoid_teacher_lone_periods=bool(avoid_teacher_lone_periods),
         balance_afternoon_teachers=bool(balance_afternoon_teachers),
+        strict_morning_weekdays=tuple(sorted(strict_morning_selection)),
         min_weekly_periods_for_mandatory_morning=int(min_weekly_periods_for_mandatory_morning),
         lone_session_exempt_teacher_ids=frozenset(lone_exempt_selection),
         compact_schedule_teacher_ids=frozenset(compact_sched_selection),

@@ -130,10 +130,17 @@ def _count_teacher_4_consecutive_mornings(slots: list[Slot], assigned: dict, slo
 
 def _count_teacher_missing_mandatory_mornings(slots: list[Slot], assigned: dict, slot_teacher: dict,
                                                mandatory_mornings: tuple = (2, 5, 6),
-                                               min_weekly_periods: int = 10) -> int:
+                                               min_weekly_periods: int = 10,
+                                               strict_weekdays: tuple = (),
+                                               exempt_teacher_ids: frozenset = frozenset()) -> int:
     """min_weekly_periods: chỉ ép GV có tải >= ngưỡng này phải có mặt các sáng bắt
     buộc. Mặc định 10 = đúng hằng số cũ nằm cứng trong hàm này; nay cấu hình được
-    trên trang Cấu hình xếp lịch (2026-09-04)."""
+    trên trang Cấu hình xếp lịch (2026-09-04).
+
+    strict_weekdays: các sáng mà MỌI GV đều phải có tiết, bỏ qua ngưỡng tải
+    (yêu cầu của trường 2026-09-04: sáng Thứ 2 và Thứ 6 toàn thể GV phải có tiết).
+    exempt_teacher_ids: GV được miễn khỏi phần strict này -- dành cho BGH, tải của
+    họ quá ít để trải đủ các sáng. Danh sách do caller tính từ chức vụ GV."""
     teacher_morns = defaultdict(lambda: defaultdict(int))
     teacher_totals = defaultdict(int)
     for s in slots:
@@ -142,13 +149,22 @@ def _count_teacher_missing_mandatory_mornings(slots: list[Slot], assigned: dict,
             tid = slot_teacher.get(s.slot_id)
             if tid is not None and tid > 0:
                 teacher_totals[tid] += 1
-                if s.ts.session == "S" and s.ts.weekday in mandatory_mornings:
+                if s.ts.session == "S" and (s.ts.weekday in mandatory_mornings
+                                             or s.ts.weekday in strict_weekdays):
                     teacher_morns[tid][s.ts.weekday] += 1
 
     missing = 0
     for tid, total in teacher_totals.items():
-        if total >= min_weekly_periods:  # Chỉ ép sáng bắt buộc với GV đủ tải
+        # Sáng "strict": mọi GV đều phải có tiết, trừ BGH (exempt_teacher_ids).
+        if tid not in exempt_teacher_ids:
+            for wd in strict_weekdays:
+                if teacher_morns[tid][wd] == 0:
+                    missing += 1
+        # Sáng bắt buộc thường: chỉ ép GV đủ tải, và không đếm trùng các sáng strict.
+        if total >= min_weekly_periods:
             for wd in mandatory_mornings:
+                if wd in strict_weekdays:
+                    continue
                 if teacher_morns[tid][wd] == 0:
                     missing += 1
     return missing

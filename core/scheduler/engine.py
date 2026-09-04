@@ -3,7 +3,7 @@ from __future__ import annotations
 
 import random
 from collections import defaultdict
-from core.models import ScheduleResult, SchedulingConfig, SchedulingInput
+from core.models import ScheduleResult, SchedulingConfig, SchedulingInput, is_bgh
 from core.roles import resolve_roles
 from core.scheduler.blocks import (
     _has_unpaired_block, _repair_unpaired_blocks, _try_place_block_atomically,
@@ -49,6 +49,8 @@ def _check_hard_post_generation_rules(inp: SchedulingInput, state: _State, confi
     missing = _count_teacher_missing_mandatory_mornings(
         inp.slots, state.assigned, state.slot_teacher, mand_morns,
         min_weekly_periods=getattr(config, "min_weekly_periods_for_mandatory_morning", 10),
+        strict_weekdays=getattr(config, "strict_morning_weekdays", ()) or (),
+        exempt_teacher_ids=frozenset(t.teacher_id for t in inp.teachers if is_bgh(t)),
     )
     if missing > 0:
         violated.append("II.3")
@@ -288,6 +290,8 @@ def run(inp: SchedulingInput, *, max_attempts: int = SO_LAN_THU,
                 # instead of manufacturing a fresh lone session.
                 min_lone_load=(getattr(config, "min_weekly_periods_for_lone_penalty", 8)
                                 if getattr(config, "avoid_teacher_lone_periods", True) else 0),
+                strict_weekdays=getattr(config, "strict_morning_weekdays", ()) or (),
+                exempt_teacher_ids=frozenset(t.teacher_id for t in inp.teachers if is_bgh(t)),
             )
 
         if done:

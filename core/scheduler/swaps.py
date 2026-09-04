@@ -496,7 +496,9 @@ def _repair_teacher_missing_mandatory_mornings(inp, state: _State, role_index,
                                                 slot_by_coord: Optional[dict] = None,
                                                 mandatory_mornings: tuple = (2, 5, 6),
                                                 min_weekly_periods: int = 10,
-                                                min_lone_load: int = 0) -> None:
+                                                min_lone_load: int = 0,
+                                                strict_weekdays: tuple = (),
+                                                exempt_teacher_ids: frozenset = frozenset()) -> None:
     """Finds every teacher whose total weekly load is >= min_weekly_periods (the
     II.3 hard-gate threshold -- see quality.py:_count_teacher_missing_mandatory_mornings)
     and who has ZERO periods on one of the mandatory mornings (mandatory_mornings,
@@ -545,12 +547,17 @@ def _repair_teacher_missing_mandatory_mornings(inp, state: _State, role_index,
     max_first_tries = 3   # bounds the paired search: at most 3 different "first" exchanges
 
     for _ in range(max_rounds):
+        # Sáng "strict" (mọi GV phải có tiết) được sửa cho MỌI GV trừ nhóm miễn trừ;
+        # các sáng bắt buộc thường vẫn chỉ sửa cho GV đủ tải. Nếu bỏ qua vế strict ở
+        # đây thì luật đó chỉ đếm được vi phạm chứ không có gì cố đạt nó (2026-09-04).
         missing_pairs = [
             (tid, wd)
             for tid, total in teacher_totals.items()
-            if tid > 0 and total >= min_weekly_periods
-            for wd in mandatory_mornings
+            if tid > 0
+            for wd in set(mandatory_mornings) | set(strict_weekdays)
             if len(state.teacher_session_periods.get((tid, wd, "S"), [])) == 0
+            and ((wd in strict_weekdays and tid not in exempt_teacher_ids)
+                 or (wd in mandatory_mornings and total >= min_weekly_periods))
         ]
         if not missing_pairs:
             break
@@ -563,15 +570,24 @@ def _repair_teacher_missing_mandatory_mornings(inp, state: _State, role_index,
             # short (fix 2026-09-04).
             fixed_this = False
 
-            # Candidate same-class exchanges: move one of this teacher's periods
-            # from a non-mandatory weekday morning into the missing morning.
+            # Candidate same-class exchanges: move one of this teacher's periods into
+            # the missing morning. Sources may be from EITHER session -- restricting
+            # them to mornings threw away nearly half the material for afternoon-heavy
+            # teachers (the one teacher left missing both Mon and Fri mornings on real
+            # data had 6 of his 13 periods in the afternoon, all of them ineligible),
+            # and an afternoon period moving to a morning is exactly the move wanted
+            # here. Sources on a mandatory/strict morning stay excluded so a fix never
+            # robs one required morning to satisfy another (2026-09-04).
+            protected_mornings = set(mandatory_mornings) | set(strict_weekdays)
             candidates = []
             for (t, wd_src, sess_src), periods in list(state.teacher_session_periods.items()):
-                if t != tid or sess_src != "S" or wd_src in mandatory_mornings:
+                if t != tid:
+                    continue
+                if sess_src == "S" and wd_src in protected_mornings:
                     continue
                 for period_src in list(periods):
                     source_slot = None
-                    for slot in slots_at.get((wd_src, "S", period_src), ()):
+                    for slot in slots_at.get((wd_src, sess_src, period_src), ()):
                         if state.slot_teacher.get(slot.slot_id) == tid:
                             source_slot = slot
                             break

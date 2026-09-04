@@ -114,6 +114,7 @@ def get_scheduling_config(conn: sqlite3.Connection) -> SchedulingConfig:
     lone_exempt_raw = get_meta(conn, "sched_lone_session_exempt_teacher_ids")
     compact_sched_raw = get_meta(conn, "sched_compact_schedule_teacher_ids")
     mand_morning_min_raw = get_meta(conn, "sched_min_weekly_periods_for_mandatory_morning")
+    strict_morning_raw = get_meta(conn, "sched_strict_morning_weekdays")
     avoid_teacher_gaps_raw = get_meta(conn, "sched_avoid_teacher_gaps")
     avoid_teacher_lone_periods_raw = get_meta(conn, "sched_avoid_teacher_lone_periods")
     balance_afternoon_teachers_raw = get_meta(conn, "sched_balance_afternoon_teachers")
@@ -154,6 +155,10 @@ def get_scheduling_config(conn: sqlite3.Connection) -> SchedulingConfig:
             else default.afternoon_preferred_subject_ids
         ),
         heavy_subjects_morning_only=bool(int(get_meta(conn, "sched_heavy_subjects_morning_only") or 0)),
+        strict_morning_weekdays=(
+            _parse_weekday_tuple(strict_morning_raw) if strict_morning_raw is not None
+            else default.strict_morning_weekdays
+        ),
         min_weekly_periods_for_mandatory_morning=(
             int(mand_morning_min_raw) if mand_morning_min_raw is not None
             else default.min_weekly_periods_for_mandatory_morning
@@ -245,6 +250,7 @@ def set_scheduling_config(conn: sqlite3.Connection, config: SchedulingConfig) ->
     set_meta(conn, "sched_lone_session_exempt_teacher_ids", _format_id_set(config.lone_session_exempt_teacher_ids))
     set_meta(conn, "sched_compact_schedule_teacher_ids", _format_id_set(config.compact_schedule_teacher_ids))
     set_meta(conn, "sched_min_weekly_periods_for_mandatory_morning", str(config.min_weekly_periods_for_mandatory_morning))
+    set_meta(conn, "sched_strict_morning_weekdays", _format_weekday_tuple(config.strict_morning_weekdays))
     set_meta(conn, "sched_non_consecutive_subject_ids", _format_id_set(config.non_consecutive_subject_ids))
     set_meta(conn, "sched_single_pair_subject_ids", _format_id_set(config.single_pair_subject_ids))
     set_meta(conn, "sched_avoid_teacher_gaps", str(int(config.avoid_teacher_gaps)))

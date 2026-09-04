@@ -11,6 +11,18 @@ from dataclasses import dataclass, field
 from typing import Optional
 
 WEEKDAYS = (2, 3, 4, 5, 6, 7)
+
+# Chuỗi chức vụ nhận diện Ban giám hiệu. Dùng chung cho mọi nơi cần biết "GV này
+# là BGH" -- nếu mỗi chỗ tự viết danh sách riêng thì engine và giao diện sẽ lệch
+# nhau khi trường đổi cách ghi chức vụ.
+BGH_ROLE_KEYWORDS = ("Hiệu trưởng", "Phó hiệu trưởng")
+
+
+def is_bgh(teacher) -> bool:
+    """GV thuộc Ban giám hiệu (hiệu trưởng / hiệu phó)? Họ có tải rất ít nên được
+    miễn luật "mọi GV phải có tiết các sáng bắt buộc" -- vẫn có mặt ở trường theo
+    lịch quản lý chứ không qua tiết dạy."""
+    return bool(teacher and any(k in (getattr(teacher, "role", "") or "") for k in BGH_ROLE_KEYWORDS))
 WEEKDAY_NAMES = {2: "Thứ 2", 3: "Thứ 3", 4: "Thứ 4", 5: "Thứ 5", 6: "Thứ 6", 7: "Thứ 7", 8: "Chủ nhật"}
 SESSIONS = ("S", "C")
 
@@ -113,6 +125,12 @@ class SchedulingConfig:
     avoid_teacher_lone_periods: bool = True  # Tránh GV chỉ có 1 tiết/ngày hoặc sáng 1 tiết + chiều 1 tiết
     balance_afternoon_teachers: bool = True  # Cân đối buổi chiều, tránh GV nghỉ full chiều khi dạy lớp có tiết chiều
     mandatory_morning_weekdays: tuple = (2, 5, 6)  # Các sáng bắt buộc toàn thể GV có mặt/đi làm
+    strict_morning_weekdays: tuple = ()
+    # Các sáng mà MỌI GV đều phải có tiết dạy, không xét ngưỡng tải
+    # (min_weekly_periods_for_mandatory_morning không áp dụng cho các sáng này).
+    # Ngoại lệ duy nhất: BGH (Hiệu trưởng / Phó hiệu trưởng) -- tải của họ quá ít
+    # để trải đủ các sáng, và họ vẫn có mặt ở trường theo lịch quản lý.
+    # Rỗng = tắt (mặc định), giữ nguyên hành vi cũ cho các trường chưa cấu hình.
     min_weekly_periods_for_mandatory_morning: int = 10
     # Tiêu chí II.3 chỉ ép GV có tải >= ngưỡng này phải có mặt các sáng bắt buộc.
     # Trước 2026-09-04 số 10 nằm cứng trong quality.py; tách ra thành cấu hình vì đo

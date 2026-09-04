@@ -2,7 +2,7 @@ import pandas as pd
 import streamlit as st
 
 from core import scheduler as sched
-from core.models import ROLE_GDTC, ROLE_HDTN, ROLE_KEP, ROLE_NANG, ROLE_NANG_KEP, WEEKDAY_NAMES, WEEKDAYS
+from core.models import ROLE_GDTC, ROLE_HDTN, ROLE_KEP, ROLE_NANG, ROLE_NANG_KEP, WEEKDAY_NAMES, WEEKDAYS, is_bgh
 from core.validation import (
     compute_quota_diff, find_consecutive_subject_days, find_heavy_afternoon_period3_violations,
     find_invalid_gdtc_periods, find_max_heavy_violations, find_morning_only_violations,
@@ -367,6 +367,8 @@ if result is not None:
             inp.slots, result.assignment, inp.assigned_teacher,
             getattr(inp.config, "mandatory_morning_weekdays", (2, 5, 6)),
             getattr(inp.config, "min_weekly_periods_for_mandatory_morning", 10),
+            getattr(inp.config, "strict_morning_weekdays", ()) or (),
+            frozenset(t.teacher_id for t in inp.teachers if is_bgh(t)),
         )
         if missing_morning:
             hard_rule_violations["II.3"] = missing_morning
@@ -613,6 +615,8 @@ with st.expander("📅 Xếp nhiều tuần cùng lúc (tạm thời tắt)", ex
                     b_inp.slots, b_result.assignment, b_inp.assigned_teacher,
                     getattr(b_inp.config, "mandatory_morning_weekdays", (2, 5, 6)),
                     getattr(b_inp.config, "min_weekly_periods_for_mandatory_morning", 10),
+                    getattr(b_inp.config, "strict_morning_weekdays", ()) or (),
+                    frozenset(t.teacher_id for t in b_inp.teachers if is_bgh(t)),
                 )
                 if b_missing_morning:
                     b_hard_rule_violations["II.3"] = b_missing_morning

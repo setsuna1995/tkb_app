@@ -153,10 +153,17 @@ def _pick_best_scored(class_id: int, slot: Slot, state: _State, role_index,
                 score -= TEACHER_COMPACT_SCHEDULE_PENALTY * (1 + sessions_used)
 
         mandatory_mornings = getattr(config, "mandatory_morning_weekdays", (2, 5, 6))
-        if ts.session == "S" and ts.weekday in mandatory_mornings:
+        strict_mornings = getattr(config, "strict_morning_weekdays", ()) or ()
+        if ts.session == "S" and (ts.weekday in mandatory_mornings or ts.weekday in strict_mornings):
             if len(state.teacher_session_periods.get((teacher_id, ts.weekday, "S"), [])) == 0:
-                teacher_total_need = state.teacher_rem_need.get(teacher_id, 0)
-                if teacher_total_need >= 12:
+                if ts.weekday in strict_mornings:
+                    # Sáng "mọi GV phải có tiết": thưởng cho MỌI GV, không xét tải.
+                    # Ngưỡng >=12 bên dưới là thứ khiến GV tải thấp không bao giờ được
+                    # thưởng -- chính là nhóm hay vắng các sáng này (2026-09-04).
+                    # BGH cũng được thưởng ở đây; họ chỉ được miễn khi ĐẾM vi phạm,
+                    # còn nếu xếp được vào sáng đó thì vẫn tốt.
+                    score += TEACHER_MANDATORY_MORNING_BONUS
+                elif state.teacher_rem_need.get(teacher_id, 0) >= 12:
                     score += TEACHER_MANDATORY_MORNING_BONUS
 
         if slot.old_subject_id == subj.subject_id and rng.random() > pu:
