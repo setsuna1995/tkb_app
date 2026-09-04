@@ -14,7 +14,9 @@ from collections import defaultdict
 from dataclasses import dataclass, field
 from typing import Optional
 
+from core.frame import MAX_PERIODS_PER_SESSION
 from core.models import SchedulingInput
+from core.roles import resolve_roles
 from core.scheduler.placement import _build_effective_assigned_teacher
 
 try:
@@ -84,6 +86,7 @@ def build_model(inp: SchedulingInput) -> CpSatModel:
                         slots_by_class=dict(slots_by_class),
                         slots_by_ts=dict(slots_by_ts))
     _add_teacher_constraints(built)
+    _add_subject_constraints(built)
     return built
 
 
@@ -224,6 +227,143 @@ def _add_off_day_constraints(built: CpSatModel, vars_by_teacher_session: dict) -
             if teach_vars:
                 m.Add(sum(teach_vars) == 0).OnlyEnforceIf(off_var)
         m.Add(sum(off_vars) <= required_total)
+
+
+def _add_subject_constraints(built: CpSatModel) -> None:
+    """8 ràng buộc "môn học" (task-3-brief.md), mirror của `_feasible()` trong
+    feasibility.py:
+
+    1. Môn bắt buộc buổi sáng (config.morning_only_subject_ids).
+    2. Môn Nặng cấm buổi chiều, nếu bật (config.heavy_subjects_morning_only).
+    3. GDTC: khung tiết sáng/chiều được phép + gdtc_avoid_period.
+    4. Môn không xếp liền ngày, gồm cả GDTC nếu avoid_gdtc_consecutive_days.
+    5. Môn nặng tối đa/buổi của lớp (max_heavy_per_session).
+    6. Môn nặng không quá max_heavy_consecutive tiết liên tiếp/buổi.
+    7. Môn nặng tránh tiết 3 buổi chiều (avoid_heavy_afternoon_period3).
+    8. Luật môn-lớp-buổi (inp.subject_class_allowed_cells) -- cấm cứng ô
+       ngoài danh sách cho phép.
+
+    Cũng tính role_index = resolve_roles(...) ĐÚNG MỘT LẦN ở đây và lưu vào
+    built.role_index để Task 4/5/6 dùng lại (đừng gọi lại resolve_roles nhiều
+    lần -- xem task-3-brief.md).
+    """
+    m = built.model
+    inp = built.inp
+    config = inp.config
+    x = built.x
+    slot_by_id = {s.slot_id: s for s in inp.slots}
+
+    role_index = resolve_roles(inp.subjects, inp.extra_kep_ids, inp.hdtn_thematic_week,
+                                config.single_pair_subject_ids)
+    built.role_index = role_index
+    gdtc_id = role_index.gdtc_id
+
+    # 1. Môn bắt buộc buổi sáng: cấm cứng mọi ô buổi chiều.
+    morning_only = set(getattr(config, "morning_only_subject_ids", None) or ())
+    if morning_only:
+        for (slot_id, subject_id), var in x.items():
+            if subject_id in morning_only and slot_by_id[slot_id].ts.session == "C":
+                m.Add(var == 0)
+
+    # 2. Môn Nặng cấm buổi chiều (nếu bật) -- luật riêng, không phụ thuộc luật 1.
+    if getattr(config, "heavy_subjects_morning_only", False):
+        for (slot_id, subject_id), var in x.items():
+            if subject_id in role_index.heavy_ids and slot_by_id[slot_id].ts.session == "C":
+                m.Add(var == 0)
+
+    # 3. GDTC: khung tiết sáng/chiều + gdtc_avoid_period.
+    if gdtc_id is not None:
+        morning_allowed = getattr(config, "gdtc_morning_allowed_periods", (1, 2, 3, 4))
+        afternoon_allowed = getattr(config, "gdtc_afternoon_allowed_periods", (2, 3))
+        for (slot_id, subject_id), var in x.items():
+            if subject_id != gdtc_id:
+                continue
+            ts = slot_by_id[slot_id].ts
+            if ts.session == "S" and morning_allowed and ts.period not in morning_allowed:
+                m.Add(var == 0)
+            elif ts.session == "C" and afternoon_allowed and ts.period not in afternoon_allowed:
+                m.Add(var == 0)
+            if ts.period == config.gdtc_avoid_period:
+                m.Add(var == 0)
+
+    # 4. Môn không xếp liền ngày (gồm GDTC nếu avoid_gdtc_consecutive_days).
+    # Chỉ cần dạng "tổng 2 ngày liền kề <= 1" -- xem ghi chú task-3-brief.md
+    # về vì sao KHÔNG dùng range(2, 8) cứng: cặp ngày phải lấy từ các ngày
+    # THỰC CÓ trong khung của từng lớp, nếu không một lớp không học Thứ 7 sẽ
+    # bị ép "tổng Thứ 6 <= 1" một cách vô lý (vế Thứ 7 luôn = 0).
+    non_consecutive = set(getattr(config, "non_consecutive_subject_ids", None) or ())
+    if getattr(config, "avoid_gdtc_consecutive_days", True) and gdtc_id is not None:
+        non_consecutive.add(gdtc_id)
+    if non_consecutive:
+        vars_by_class_subject_day = defaultdict(list)
+        days_by_class = defaultdict(set)
+        for (slot_id, subject_id), var in x.items():
+            if subject_id not in non_consecutive:
+                continue
+            s = slot_by_id[slot_id]
+            vars_by_class_subject_day[s.class_id, subject_id, s.ts.weekday].append(var)
+            days_by_class[s.class_id].add(s.ts.weekday)
+        for class_id, days in days_by_class.items():
+            for d in days:
+                if (d + 1) not in days:
+                    continue
+                for subject_id in non_consecutive:
+                    vs_today = vars_by_class_subject_day.get((class_id, subject_id, d), [])
+                    vs_next = vars_by_class_subject_day.get((class_id, subject_id, d + 1), [])
+                    if vs_today or vs_next:
+                        m.Add(sum(vs_today) + sum(vs_next) <= 1)
+
+    # 5 + 6. Môn nặng: tối đa/buổi (5) và không quá N tiết liên tiếp (6).
+    if role_index.heavy_ids:
+        vars_by_session = defaultdict(list)                # (class,wd,sess) -> [var]
+        vars_by_session_period = defaultdict(dict)          # (class,wd,sess) -> {period: [var]}
+        for (slot_id, subject_id), var in x.items():
+            if subject_id not in role_index.heavy_ids:
+                continue
+            s = slot_by_id[slot_id]
+            key = (s.class_id, s.ts.weekday, s.ts.session)
+            vars_by_session[key].append(var)
+            vars_by_session_period[key].setdefault(s.ts.period, []).append(var)
+
+        # Luật 5: cùng công thức max(...) với feasibility.py để trần/buổi
+        # không bao giờ nhỏ hơn cửa sổ liên tiếp của luật 6, tránh vô tình
+        # làm luật 6 không bao giờ chạm tới được.
+        max_heavy_sess = max(getattr(config, "max_heavy_per_session", 3), config.max_heavy_consecutive)
+        for vs in vars_by_session.values():
+            m.Add(sum(vs) <= max_heavy_sess)
+
+        # Luật 6: cửa sổ trượt độ dài (max_heavy_consecutive + 1) -- đối chiếu
+        # feasibility.py:80-91. Với mỗi vị trí bắt đầu w, tổng biến môn nặng
+        # trong [w, w + max_heavy_consecutive] <= max_heavy_consecutive
+        # (tương đương "không cho cả cửa sổ đều là môn nặng").
+        window = config.max_heavy_consecutive + 1
+        last_start = MAX_PERIODS_PER_SESSION - config.max_heavy_consecutive
+        for period_vars in vars_by_session_period.values():
+            for w in range(1, last_start + 1):
+                window_vars = []
+                for offset in range(window):
+                    window_vars.extend(period_vars.get(w + offset, []))
+                if window_vars:
+                    m.Add(sum(window_vars) <= config.max_heavy_consecutive)
+
+    # 7. Môn nặng tránh tiết 3 buổi chiều.
+    if getattr(config, "avoid_heavy_afternoon_period3", True):
+        for (slot_id, subject_id), var in x.items():
+            if subject_id in role_index.heavy_ids:
+                ts = slot_by_id[slot_id].ts
+                if ts.session == "C" and ts.period == 3:
+                    m.Add(var == 0)
+
+    # 8. Luật môn-lớp-buổi: (subject_id, class_id) có danh sách ô cho phép thì
+    # mọi ô ngoài danh sách bị ép = 0. None/thiếu khoá = không ràng buộc.
+    for (subject_id, class_id), allowed in inp.subject_class_allowed_cells.items():
+        if allowed is None:
+            continue
+        for s in built.slots_by_class.get(class_id, []):
+            if (s.ts.weekday, s.ts.session) not in allowed:
+                key = (s.slot_id, subject_id)
+                if key in x:
+                    m.Add(x[key] == 0)
 
 
 def solve(built: CpSatModel, time_limit_s: float = 10.0,
