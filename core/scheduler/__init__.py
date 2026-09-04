@@ -25,8 +25,9 @@ from core.scheduler.blocks import (
     _repair_unpaired_blocks, _try_place_block_atomically,
 )
 from core.scheduler.swaps import (
-    _has_lone_period, _repair_lone_periods, _repair_teacher_lone_sessions,
-    _repair_teacher_missing_mandatory_mornings, _try_swap_repair,
+    _exchange_slots, _has_lone_period, _repair_lone_periods,
+    _repair_teacher_lone_sessions, _repair_teacher_missing_mandatory_mornings,
+    _rotate_three_slots, _try_swap_repair, _undo_exchange, _undo_rotation,
 )
 from core.scheduler.teacher_off import _assign_off_slots
 from core.scheduler.quality import (
@@ -56,6 +57,10 @@ __all__ = [
     "_repair_lone_periods",
     "_repair_teacher_lone_sessions",
     "_repair_teacher_missing_mandatory_mornings",
+    "_exchange_slots",
+    "_undo_exchange",
+    "_rotate_three_slots",
+    "_undo_rotation",
     "_has_lone_period",
     "_assign_off_slots",
     "_teacher_quality_penalty",

@@ -22,6 +22,11 @@ class _State:
     slot_teacher: dict = field(default_factory=dict)  # slot_id -> teacher_id
     shl_days: set = field(default_factory=set)        # {(class_id, weekday)} nơi greedy KHÔNG đặt HDTN (dành cho SHL ghim)
     teacher_session_periods: dict = field(default_factory=lambda: defaultdict(list))  # (teacher_id, weekday, session) -> list[period]
+    teacher_rem_need: dict = field(default_factory=lambda: defaultdict(int))  # teacher_id -> tổng số tiết CÒN LẠI chưa xếp của GV đó.
+    # Bộ đếm này là bản tăng dần của phép cộng mà heuristics.py trước đây tính lại từ đầu
+    # (quét toàn bộ remaining_need) cho MỖI môn ứng viên ở MỖI ô -- chiếm ~60% thời gian chạy
+    # engine khi đo bằng cProfile (2026-09-04). Được cập nhật trong _put_at/_remove_at, cộng
+    # với 2 chỗ engine.py tự sửa remaining_need trực tiếp khi giữ chỗ tiết SHL.
     teacher_week_afternoon_count: dict = field(default_factory=lambda: defaultdict(int)) # teacher_id -> count of afternoon periods
     teacher_day_count: dict = field(default_factory=lambda: defaultdict(int)) # (teacher_id, weekday) -> total periods taught that day
     session_heavy_count: dict = field(default_factory=lambda: defaultdict(int)) # (class_id, weekday, session) -> count of heavy periods

@@ -97,10 +97,7 @@ def _pick_best_scored(class_id: int, slot: Slot, state: _State, role_index,
         if getattr(config, "avoid_teacher_4_consecutive_morning", True) and ts.session == "S":
             morning_p = len(state.teacher_session_periods.get((teacher_id, ts.weekday, "S"), []))
             if morning_p >= 3:
-                teacher_tot = sum(
-                    rem for (s, c), rem in state.remaining_need.items()
-                    if assigned_teacher.get((s, c)) == teacher_id
-                )
+                teacher_tot = state.teacher_rem_need.get(teacher_id, 0)
                 if teacher_tot <= 20:
                     score -= 220
 
@@ -109,12 +106,20 @@ def _pick_best_scored(class_id: int, slot: Slot, state: _State, role_index,
             if current_in_session == 1:
                 score += TEACHER_SESSION_PAIR_BONUS
             elif current_in_session == 0:
-                teacher_rem_need = sum(
-                    rem for (s, c), rem in state.remaining_need.items()
-                    if assigned_teacher.get((s, c)) == teacher_id and rem > 0
-                )
+                teacher_rem_need = state.teacher_rem_need.get(teacher_id, 0)
+                # Opening a BRAND-NEW session for this teacher only pays off if they
+                # still have enough periods left to put a second one here later --
+                # otherwise this cell becomes a lone session (II.4). The penalty used
+                # to fire only at rem_need <= 1 (the teacher is literally out of
+                # periods), which missed the much more common case of a teacher with
+                # a few periods left spreading them thin across several new sessions.
+                # Graduated 2026-09-04 after a real timetable showed 26 lone sessions,
+                # most of them created at placement time rather than left over by the
+                # repair pass.
                 if teacher_rem_need <= 1:
                     score -= TEACHER_LONE_SESSION_HEURISTIC_PENALTY
+                elif teacher_rem_need <= 3:
+                    score -= TEACHER_LONE_SESSION_HEURISTIC_PENALTY // 2
             if ts.session == "C" and current_in_session == 0:
                 morning_count = len(state.teacher_session_periods.get((teacher_id, ts.weekday, "S"), []))
                 if morning_count == 1:
@@ -127,10 +132,7 @@ def _pick_best_scored(class_id: int, slot: Slot, state: _State, role_index,
         mandatory_mornings = getattr(config, "mandatory_morning_weekdays", (2, 5, 6))
         if ts.session == "S" and ts.weekday in mandatory_mornings:
             if len(state.teacher_session_periods.get((teacher_id, ts.weekday, "S"), [])) == 0:
-                teacher_total_need = sum(
-                    rem for (s, c), rem in state.remaining_need.items()
-                    if assigned_teacher.get((s, c)) == teacher_id
-                )
+                teacher_total_need = state.teacher_rem_need.get(teacher_id, 0)
                 if teacher_total_need >= 12:
                     score += TEACHER_MANDATORY_MORNING_BONUS
 

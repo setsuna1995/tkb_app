@@ -25,6 +25,7 @@ def _put_at(state: _State, slot: Slot, subject_id: int, teacher_id: int, role_in
     state.assigned[slot.slot_id] = subject_id
     state.slot_teacher[slot.slot_id] = teacher_id
     state.remaining_need[(subject_id, slot.class_id)] -= 1
+    state.teacher_rem_need[teacher_id] -= 1
     state.busy.add((teacher_id, ts.ts_id))
     state.session_count[(teacher_id, ts.weekday, ts.session)] += 1
     state.teacher_day_count[(teacher_id, ts.weekday)] += 1
@@ -47,6 +48,7 @@ def _remove_at(state: _State, slot: Slot, role_index) -> Tuple[int, int]:
     ts = slot.ts
     state.assigned[slot.slot_id] = None
     state.remaining_need[(subject_id, slot.class_id)] += 1
+    state.teacher_rem_need[teacher_id] += 1
     state.busy.discard((teacher_id, ts.ts_id))
     state.session_count[(teacher_id, ts.weekday, ts.session)] -= 1
     state.teacher_day_count[(teacher_id, ts.weekday)] -= 1

@@ -222,7 +222,7 @@ avoid_teacher_4_consecutive_morning = c_hdsp5.checkbox(
 )
 min_weekly_periods_for_lone_penalty = c_hdsp6.number_input(
     "Ngưỡng tiết/tuần áp dụng phạt lẻ tiết GV (0 = phạt toàn bộ, 15 = miễn trừ GV <15 tiết)",
-    0, 30, getattr(config, "min_weekly_periods_for_lone_penalty", 15),
+    0, 30, getattr(config, "min_weekly_periods_for_lone_penalty", 8),
     help="Tiêu chí II.4: Hạn chế tối đa GV dạy 1 tiết/buổi hoặc 1 tiết/ngày, nhưng miễn trừ cho GV ít tiết (< 15 tiết/tuần).",
 )
 

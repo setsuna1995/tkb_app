@@ -34,7 +34,18 @@ TEACHER_CONSECUTIVE_BONUS = 150   # điểm thưởng khi xếp liền kề ti�
 TEACHER_GAP_PENALTY = 250         # điểm phạt khi xếp tạo lỗ hổng (tiết trống) cho GV trong cùng buổi
 TEACHER_SESSION_PAIR_BONUS = 320  # điểm thưởng mạnh khi ghép tiết thứ 2 vào cùng buổi cho GV (tránh lẻ 1 tiết)
 TEACHER_LONE_SESSION_HEURISTIC_PENALTY = 250  # điểm phạt khi mở buổi mới cho GV mà GV không còn đủ tiết để ghép cặp
-TEACHER_SPLIT_DAY_PENALTY = 180   # điểm phạt khi tạo ngày 1 sáng + 1 chiều
+TEACHER_SPLIT_DAY_PENALTY = 520   # điểm phạt khi tạo ngày 1 sáng + 1 chiều. Nâng từ 180 lên 520
+                                  # (2026-09-04, yêu cầu của trường): 180 quá nhẹ so với
+                                  # TEACHER_SESSION_PAIR_BONUS=320 nên greedy vẫn tạo ra ngày
+                                  # "sáng 1 tiết + chiều 1 tiết" -- GV phải đến trường 2 lần
+                                  # trong ngày chỉ để dạy 2 tiết. Trường chấp nhận đánh đổi:
+                                  # thà 1 buổi lẻ rồi về còn hơn hình dạng 1+1 này.
+TEACHER_LONE_SESSION_SPREAD_PENALTY = 600  # điểm phạt cộng thêm cho MỖI buổi lẻ thứ 2 trở đi
+                                  # của cùng 1 GV (2026-09-04): cùng tổng số buổi lẻ thì chia
+                                  # đều mỗi GV 1 buổi vẫn hơn là dồn 2-3 buổi vào một người.
+                                  # Đặt 300 lúc đầu chỉ ép được 1/4 seed về mức 1 buổi/GV; nâng
+                                  # lên 600 (vượt mức phạt 500 của chính buổi lẻ) để buổi lẻ thứ
+                                  # hai của một GV luôn đắt hơn việc mở buổi lẻ ở GV khác.
 TEACHER_AFTERNOON_BALANCE_BONUS = 0  # không ép rải tiết chiều trong greedy gây lẻ 1 tiết; đánh giá cân đối qua _teacher_quality_penalty
 TEACHER_MANDATORY_MORNING_BONUS = 280  # điểm thưởng khi xếp tiết vào các sáng bắt buộc (T2, T5, T6) cho GV tải cao
 

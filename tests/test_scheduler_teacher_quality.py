@@ -546,6 +546,115 @@ def test_repair_teacher_lone_sessions_skips_exempt_low_load_teacher():
     assert tue_count_30 in (0, 2), f"Tue count for Teacher 30 should be 0 or 2, got {tue_count_30}"
 
 
+def test_rotate_three_slots_rotates_and_undo_restores_exactly():
+    """The 3-cycle primitive must rotate x->y, y->z, z->x within one class, and
+    _undo_rotation must put the state back byte-for-byte (this is what makes the
+    chain strategy safe to attempt speculatively)."""
+    ts1 = TimeSlot(1, 2, "S", 1)
+    ts2 = TimeSlot(2, 2, "S", 2)
+    ts3 = TimeSlot(3, 2, "S", 3)
+    slot_x = Slot(1, 101, ts1)
+    slot_y = Slot(2, 101, ts2)
+    slot_z = Slot(3, 101, ts3)
+
+    subj1 = Subject(1, "Toan", ROLE_THUONG)
+    subj2 = Subject(2, "Van", ROLE_THUONG)
+    subj3 = Subject(3, "Ly", ROLE_THUONG)
+    subj_hdtn = Subject(4, "HDTN", ROLE_HDTN)
+    role_index = resolve_roles([subj1, subj2, subj3, subj_hdtn])
+
+    state = sched._State(remaining_need=defaultdict(int), busy=set())
+    sched._put_at(state, slot_x, 1, 10, role_index)
+    sched._put_at(state, slot_y, 2, 20, role_index)
+    sched._put_at(state, slot_z, 3, 30, role_index)
+
+    payload = sched._rotate_three_slots(
+        state, role_index, 101, slot_x, slot_y, slot_z,
+        None, SchedulingConfig(), None,
+    )
+    assert payload is not None
+
+    # x's content moved to y, y's to z, z's back to x.
+    assert (state.assigned[slot_y.slot_id], state.slot_teacher[slot_y.slot_id]) == (1, 10)
+    assert (state.assigned[slot_z.slot_id], state.slot_teacher[slot_z.slot_id]) == (2, 20)
+    assert (state.assigned[slot_x.slot_id], state.slot_teacher[slot_x.slot_id]) == (3, 30)
+
+    sched._undo_rotation(state, role_index, payload)
+    assert (state.assigned[slot_x.slot_id], state.slot_teacher[slot_x.slot_id]) == (1, 10)
+    assert (state.assigned[slot_y.slot_id], state.slot_teacher[slot_y.slot_id]) == (2, 20)
+    assert (state.assigned[slot_z.slot_id], state.slot_teacher[slot_z.slot_id]) == (3, 30)
+    for tid, per in ((10, 1), (20, 2), (30, 3)):
+        assert state.teacher_session_periods[(tid, 2, "S")] == [per]
+
+
+def test_repair_teacher_lone_sessions_uses_three_way_chain_when_direct_swap_blocked():
+    """Strategy 3: teacher 10 has a lone Monday-morning period in class 101 and
+    already teaches Tuesday morning there, but the direct 1-for-1 swap with the
+    Tuesday cell is blocked -- its occupant (teacher 20) is busy elsewhere at
+    Monday period 1, so they cannot take the vacated cell. Routing teacher 20 to
+    a third cell (Tuesday period 2, teacher 30) and teacher 30 back to Monday
+    resolves it. Without the chain strategy this lone session is unrepairable."""
+    ts_mon1 = TimeSlot(1, 2, "S", 1)
+    ts_tue1 = TimeSlot(2, 3, "S", 1)
+    ts_tue2 = TimeSlot(3, 3, "S", 2)
+
+    slot_mon = Slot(1, 101, ts_mon1)     # teacher 10, lone Monday session
+    slot_tue1 = Slot(2, 101, ts_tue1)    # teacher 20
+    slot_tue2 = Slot(3, 101, ts_tue2)    # teacher 30
+    # Teacher 10 already teaches Tuesday morning in class 102, so Tuesday is a
+    # valid consolidation target for them.
+    slot_tue1_b = Slot(4, 102, ts_tue1)  # teacher 10
+    # Teacher 20 is busy at Monday period 1 in class 102 -> cannot move there,
+    # which is exactly what blocks the direct swap.
+    slot_mon_b = Slot(5, 102, ts_mon1)   # teacher 20
+
+    subj1 = Subject(1, "Toan", ROLE_THUONG)
+    subj2 = Subject(2, "Van", ROLE_THUONG)
+    subj3 = Subject(3, "Ly", ROLE_THUONG)
+    subj_hdtn = Subject(4, "HDTN", ROLE_HDTN)
+    subjects = [subj1, subj2, subj3, subj_hdtn]
+    role_index = resolve_roles(subjects)
+
+    assigned_teacher = {
+        (1, 101): 10, (2, 101): 20, (3, 101): 30,
+        (1, 102): 10, (2, 102): 20,
+    }
+    slots_by_class = {
+        101: [slot_mon, slot_tue1, slot_tue2],
+        102: [slot_tue1_b, slot_mon_b],
+    }
+
+    state = sched._State(remaining_need=defaultdict(int), busy=set())
+    sched._put_at(state, slot_mon, 1, 10, role_index)
+    sched._put_at(state, slot_tue1, 2, 20, role_index)
+    sched._put_at(state, slot_tue2, 3, 30, role_index)
+    sched._put_at(state, slot_tue1_b, 1, 10, role_index)
+    sched._put_at(state, slot_mon_b, 2, 20, role_index)
+
+    # Precondition: Monday morning is a lone session for teacher 10.
+    assert len(state.teacher_session_periods[(10, 2, "S")]) == 1
+
+    inp = SchedulingInput(
+        classes=[ClassRoom(101, "6A1"), ClassRoom(102, "6A2")],
+        subjects=subjects,
+        teachers=[Teacher(10, "GV A"), Teacher(20, "GV B"), Teacher(30, "GV C")],
+        need={}, assigned_teacher=assigned_teacher, ban_busy=set(),
+        slots=[slot_mon, slot_tue1, slot_tue2, slot_tue1_b, slot_mon_b],
+        timeslots=[ts_mon1, ts_tue1, ts_tue2],
+    )
+
+    sched._repair_teacher_lone_sessions(
+        inp, state, role_index, assigned_teacher, slots_by_class,
+        config=SchedulingConfig(), min_weekly_periods=0,
+    )
+
+    mon = state.teacher_session_periods.get((10, 2, "S"), [])
+    assert len(mon) == 0, f"Monday lone session should be gone, got {mon}"
+    # Class 101 keeps exactly its original three subjects (a rotation moves
+    # positions, never quotas).
+    assert sorted(state.assigned[s.slot_id] for s in (slot_mon, slot_tue1, slot_tue2)) == [1, 2, 3]
+
+
 def test_repair_teacher_missing_mandatory_mornings_fills_via_same_class_swap():
     """_repair_teacher_missing_mandatory_mornings should fill a teacher's missing
     mandatory morning (Fri, wd 6) by swapping one of their periods on a
@@ -735,6 +844,171 @@ def test_repair_teacher_missing_mandatory_mornings_skips_exempt_low_load_teacher
     # Teacher 30 (non-exempt, total=10 >= 10): must still get repaired.
     assert len(state.teacher_session_periods.get((30, 6, "S"), [])) == 1
     assert len(state.teacher_session_periods.get((30, 3, "S"), [])) == 0
+
+
+def test_repair_teacher_missing_mandatory_mornings_moves_two_periods_when_ii4_applies():
+    """When the teacher is subject to II.4 (load >= min_lone_load), filling a
+    missing mandatory morning with a SINGLE period would just convert an II.3
+    violation into a fresh II.4 lone session. The repair must therefore move
+    TWO periods into that morning (fix 2026-09-04)."""
+    # Shared TimeSlot objects: in the real builder one ts_id represents one
+    # (weekday, session, period) across ALL classes, which is what makes
+    # teacher double-booking detectable via state.busy. Two periods on Friday
+    # morning therefore have to sit at DIFFERENT periods, in different classes.
+    ts_mon1 = TimeSlot(1, 2, "S", 1)
+    ts_thu1 = TimeSlot(2, 5, "S", 1)
+    ts_tue1 = TimeSlot(3, 3, "S", 1)
+    ts_tue2 = TimeSlot(4, 3, "S", 2)
+    ts_fri1 = TimeSlot(5, 6, "S", 1)
+    ts_fri2 = TimeSlot(6, 6, "S", 2)
+
+    slot_mon = Slot(1, 101, ts_mon1)
+    slot_thu = Slot(2, 101, ts_thu1)
+    slot_tue_a = Slot(3, 101, ts_tue1)     # source in class 101
+    slot_fri_a = Slot(4, 101, ts_fri1)     # dest in class 101 (teacher 20)
+    # Class 102 needs period 1 filled before period 2 is placeable at all
+    # (BAT_LIEN_MACH: no gaps within a class's session).
+    slot_tue1_b = Slot(5, 102, ts_tue1)
+    slot_tue2_b = Slot(6, 102, ts_tue2)    # source in class 102
+    slot_fri1_b = Slot(7, 102, ts_fri1)
+    slot_fri2_b = Slot(8, 102, ts_fri2)    # dest in class 102 (teacher 50)
+
+    subj1 = Subject(1, "Toan", ROLE_THUONG)
+    subj2 = Subject(2, "Van", ROLE_THUONG)
+    subj3 = Subject(3, "Ly", ROLE_THUONG)
+    subj4 = Subject(4, "Sinh", ROLE_THUONG)
+    subj_hdtn = Subject(5, "HDTN", ROLE_HDTN)
+    subjects = [subj1, subj2, subj3, subj4, subj_hdtn]
+    role_index = resolve_roles(subjects)
+
+    padding_slots = []
+    padding_ts = []
+    slot_id = 9
+    for cid, wd, periods in ((103, 4, range(1, 6)), (104, 7, range(1, 6))):
+        for p in periods:
+            ts = TimeSlot(slot_id, wd, "S", p)
+            padding_slots.append(Slot(slot_id, cid, ts))
+            padding_ts.append(ts)
+            slot_id += 1
+
+    assigned_teacher = {
+        (1, 101): 10, (2, 101): 20, (1, 102): 10, (3, 102): 50, (4, 102): 30,
+        (1, 103): 10, (1, 104): 10,
+    }
+    slots_by_class = {
+        101: [slot_mon, slot_thu, slot_tue_a, slot_fri_a],
+        102: [slot_tue1_b, slot_tue2_b, slot_fri1_b, slot_fri2_b],
+        103: [s for s in padding_slots if s.class_id == 103],
+        104: [s for s in padding_slots if s.class_id == 104],
+    }
+
+    state = sched._State(remaining_need=defaultdict(int), busy=set())
+    sched._put_at(state, slot_mon, 1, 10, role_index)
+    sched._put_at(state, slot_thu, 1, 10, role_index)
+    sched._put_at(state, slot_tue_a, 1, 10, role_index)
+    sched._put_at(state, slot_fri_a, 2, 20, role_index)
+    sched._put_at(state, slot_tue1_b, 4, 30, role_index)   # filler so Tue p2 is legal
+    sched._put_at(state, slot_tue2_b, 1, 10, role_index)
+    sched._put_at(state, slot_fri1_b, 4, 30, role_index)   # filler so Fri p2 is legal
+    sched._put_at(state, slot_fri2_b, 3, 50, role_index)
+    for s in padding_slots:
+        sched._put_at(state, s, 1, 10, role_index)
+
+    total_before = sum(len(v) for (tid, _w, _s), v in state.teacher_session_periods.items() if tid == 10)
+    assert total_before == 14  # >= min_lone_load, so II.4 applies to teacher 10
+    assert len(state.teacher_session_periods.get((10, 6, "S"), [])) == 0
+
+    classes = [ClassRoom(101, "6A1"), ClassRoom(102, "6A2"), ClassRoom(103, "6A3"), ClassRoom(104, "6A4")]
+    inp = SchedulingInput(
+        classes=classes, subjects=subjects,
+        teachers=[Teacher(10, "GV A"), Teacher(20, "GV B"), Teacher(30, "GV D"), Teacher(50, "GV C")],
+        need={}, assigned_teacher=assigned_teacher, ban_busy=set(),
+        slots=[slot_mon, slot_thu, slot_tue_a, slot_fri_a,
+               slot_tue1_b, slot_tue2_b, slot_fri1_b, slot_fri2_b] + padding_slots,
+        timeslots=[ts_mon1, ts_thu1, ts_tue1, ts_tue2, ts_fri1, ts_fri2] + padding_ts,
+    )
+
+    sched._repair_teacher_missing_mandatory_mornings(
+        inp, state, role_index, assigned_teacher, slots_by_class,
+        config=SchedulingConfig(), min_weekly_periods=10, min_lone_load=8,
+    )
+
+    fri = state.teacher_session_periods.get((10, 6, "S"), [])
+    assert len(fri) == 2, f"expected TWO periods on Friday morning, got {len(fri)}"
+    assert state.pinned.get(slot_fri_a.slot_id) is True
+    assert state.pinned.get(slot_fri2_b.slot_id) is True
+    total_after = sum(len(v) for (tid, _w, _s), v in state.teacher_session_periods.items() if tid == 10)
+    assert total_after == total_before  # pure exchanges, no periods created or lost
+
+
+def test_repair_teacher_missing_mandatory_mornings_rolls_back_when_only_one_period_possible():
+    """All-or-nothing: if only ONE exchange into the missing mandatory morning is
+    available and the teacher is subject to II.4, the repair must roll that
+    exchange back and leave the II.3 violation standing, rather than trading it
+    for a new lone session (fix 2026-09-04)."""
+    ts_mon = TimeSlot(1, 2, "S", 1)
+    ts_thu = TimeSlot(2, 5, "S", 1)
+    ts_tue = TimeSlot(3, 3, "S", 1)
+    ts_fri = TimeSlot(4, 6, "S", 1)      # the ONLY Friday-morning slot available
+
+    slot_mon = Slot(1, 101, ts_mon)
+    slot_thu = Slot(2, 101, ts_thu)
+    slot_tue = Slot(3, 101, ts_tue)
+    slot_fri = Slot(4, 101, ts_fri)
+
+    subj1 = Subject(1, "Toan", ROLE_THUONG)
+    subj2 = Subject(2, "Van", ROLE_THUONG)
+    subj_hdtn = Subject(3, "HDTN", ROLE_HDTN)
+    subjects = [subj1, subj2, subj_hdtn]
+    role_index = resolve_roles(subjects)
+
+    padding_slots = []
+    padding_ts = []
+    slot_id = 5
+    for cid, wd, periods in ((102, 4, range(1, 6)), (103, 4, range(1, 6))):
+        for p in periods:
+            ts = TimeSlot(slot_id, wd, "S", p)
+            padding_slots.append(Slot(slot_id, cid, ts))
+            padding_ts.append(ts)
+            slot_id += 1
+
+    assigned_teacher = {(1, 101): 10, (2, 101): 20, (1, 102): 10, (1, 103): 10}
+    slots_by_class = {
+        101: [slot_mon, slot_thu, slot_tue, slot_fri],
+        102: [s for s in padding_slots if s.class_id == 102],
+        103: [s for s in padding_slots if s.class_id == 103],
+    }
+
+    state = sched._State(remaining_need=defaultdict(int), busy=set())
+    sched._put_at(state, slot_mon, 1, 10, role_index)
+    sched._put_at(state, slot_thu, 1, 10, role_index)
+    sched._put_at(state, slot_tue, 1, 10, role_index)
+    sched._put_at(state, slot_fri, 2, 20, role_index)
+    for s in padding_slots:
+        sched._put_at(state, s, 1, 10, role_index)
+
+    classes = [ClassRoom(101, "6A1"), ClassRoom(102, "6A2"), ClassRoom(103, "6A3")]
+    inp = SchedulingInput(
+        classes=classes, subjects=subjects,
+        teachers=[Teacher(10, "GV A"), Teacher(20, "GV B")],
+        need={}, assigned_teacher=assigned_teacher, ban_busy=set(),
+        slots=[slot_mon, slot_thu, slot_tue, slot_fri] + padding_slots,
+        timeslots=[ts_mon, ts_thu, ts_tue, ts_fri] + padding_ts,
+    )
+
+    sched._repair_teacher_missing_mandatory_mornings(
+        inp, state, role_index, assigned_teacher, slots_by_class,
+        config=SchedulingConfig(), min_weekly_periods=10, min_lone_load=8,
+    )
+
+    # Nothing moved: Friday still empty for teacher 10, Tuesday period intact,
+    # and the Friday slot still belongs to teacher 20 with their own subject.
+    assert len(state.teacher_session_periods.get((10, 6, "S"), [])) == 0
+    assert state.assigned[slot_tue.slot_id] == 1
+    assert state.slot_teacher[slot_tue.slot_id] == 10
+    assert state.assigned[slot_fri.slot_id] == 2
+    assert state.slot_teacher[slot_fri.slot_id] == 20
+    assert state.pinned.get(slot_fri.slot_id) is not True
 
 
 def test_repair_teacher_missing_mandatory_mornings_survives_lone_session_repair():

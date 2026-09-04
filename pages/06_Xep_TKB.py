@@ -370,7 +370,7 @@ if result is not None:
         if missing_morning:
             hard_rule_violations["II.3"] = missing_morning
 
-        min_lone_load = getattr(inp.config, "min_weekly_periods_for_lone_penalty", 15)
+        min_lone_load = getattr(inp.config, "min_weekly_periods_for_lone_penalty", 8)
         if getattr(inp.config, "avoid_teacher_lone_periods", True):
             # Gated the same way engine.py:_check_hard_post_generation_rules gates II.4/II.8.
             lone_sessions = find_teacher_lone_session_violations(inp.slots, result.assignment, inp.assigned_teacher, min_lone_load)
@@ -615,7 +615,7 @@ with st.expander("📅 Xếp nhiều tuần cùng lúc (tạm thời tắt)", ex
                 if b_missing_morning:
                     b_hard_rule_violations["II.3"] = b_missing_morning
 
-                b_min_lone_load = getattr(b_inp.config, "min_weekly_periods_for_lone_penalty", 15)
+                b_min_lone_load = getattr(b_inp.config, "min_weekly_periods_for_lone_penalty", 8)
                 if getattr(b_inp.config, "avoid_teacher_lone_periods", True):
                     # Gated the same way engine.py:_check_hard_post_generation_rules gates II.4/II.8.
                     b_lone_sessions = find_teacher_lone_session_violations(b_inp.slots, b_result.assignment, b_inp.assigned_teacher, b_min_lone_load)

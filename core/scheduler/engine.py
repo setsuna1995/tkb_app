@@ -51,7 +51,7 @@ def _check_hard_post_generation_rules(inp: SchedulingInput, state: _State, confi
         violated.append("II.3")
     total += missing
     if getattr(config, "avoid_teacher_lone_periods", True):
-        min_lone_load = getattr(config, "min_weekly_periods_for_lone_penalty", 15)
+        min_lone_load = getattr(config, "min_weekly_periods_for_lone_penalty", 8)
         lone_sessions = _count_teacher_lone_sessions(inp.slots, state.assigned, state.slot_teacher, min_weekly_periods=min_lone_load)
         lone_days = _count_teacher_lone_days(inp.slots, state.assigned, state.slot_teacher, min_weekly_periods=min_lone_load)
         if lone_sessions > 0 or lone_days > 0:
@@ -151,6 +151,14 @@ def run(inp: SchedulingInput, *, max_attempts: int = SO_LAN_THU,
         for cls in inp.classes:
             state.rem_need_count[cls.class_id] = need_cls[cls.class_id]
             state.rem_slot_count[cls.class_id] = slot_cls_n[cls.class_id]
+        # Seed the per-teacher remaining-need counter that _pick_best_scored reads.
+        # It is kept up to date incrementally from here on (_put_at/_remove_at, plus
+        # the SHL reservation below), replacing a full scan of remaining_need per
+        # scored candidate.
+        for key, n in inp.need.items():
+            tid_need = assigned_teacher.get(key)
+            if tid_need is not None:
+                state.teacher_rem_need[tid_need] += n
         # Shortfall (fewer eligible off-cells than requested) is no longer surfaced
         # into relaxed_rules -- per-week off-slot count is not a hard requirement
         # (user decision 2026-09-03, second revision).
@@ -194,6 +202,9 @@ def run(inp: SchedulingInput, *, max_attempts: int = SO_LAN_THU,
                     state.rem_slot_count[cid] -= 1
                     state.remaining_need[key] -= 1
                     state.rem_need_count[cid] -= 1
+                    shl_tid = assigned_teacher.get(key)
+                    if shl_tid is not None:
+                        state.teacher_rem_need[shl_tid] -= 1
                     reserved_shl.append((cid, target))
 
         for ts in order:
@@ -236,6 +247,7 @@ def run(inp: SchedulingInput, *, max_attempts: int = SO_LAN_THU,
                 state.remaining_need[key] += 1
                 state.rem_need_count[cid] += 1
                 tid = assigned_teacher[key]
+                state.teacher_rem_need[tid] += 1   # mirror of the reservation above
                 if _feasible(cid, target.ts, role_index.hdtn_id, tid, state, role_index, day_capacity, config,
                               subject_class_allowed_cells):
                     _put_at(state, target, role_index.hdtn_id, tid, role_index)
@@ -261,12 +273,17 @@ def run(inp: SchedulingInput, *, max_attempts: int = SO_LAN_THU,
                 inp, state, role_index, assigned_teacher, slots_by_class,
                 day_capacity, config, subject_class_allowed_cells, slot_by_coord,
                 mandatory_mornings=getattr(config, "mandatory_morning_weekdays", (2, 5, 6)),
+                # Tell it which teachers II.4 applies to, so that for those it fills a
+                # missing mandatory morning with TWO periods (or leaves it alone)
+                # instead of manufacturing a fresh lone session.
+                min_lone_load=(getattr(config, "min_weekly_periods_for_lone_penalty", 8)
+                                if getattr(config, "avoid_teacher_lone_periods", True) else 0),
             )
 
         if done:
             _repair_teacher_lone_sessions(inp, state, role_index, assigned_teacher, slots_by_class,
                                           day_capacity, config, subject_class_allowed_cells, slot_by_coord,
-                                          min_weekly_periods=getattr(config, "min_weekly_periods_for_lone_penalty", 15))
+                                          min_weekly_periods=getattr(config, "min_weekly_periods_for_lone_penalty", 8))
 
         if done and (avoid_gdtc or non_consecutive):
             for (cid, sid, wd), pos_list in state.placed.items():

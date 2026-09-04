@@ -119,7 +119,7 @@ class SchedulingConfig:
     hdtn_period2_afternoon: bool = True  # Tiêu chí II.6: Tiết 2 HĐTN xếp vào buổi chiều cho các lớp có học chiều
     avoid_heavy_afternoon_period3: bool = True  # Tiêu chí II.15: Hạn chế môn nặng tiết 3 chiều
     avoid_teacher_4_consecutive_morning: bool = True  # Tiêu chí II.14: Hạn chế GV dạy 4 tiết sáng liên tục nếu tải <= 20
-    min_weekly_periods_for_lone_penalty: int = 15  # Tiêu chí II.4: miễn trừ GV có tải < ngưỡng này; 0 = áp dụng phạt lẻ cho tất cả
+    min_weekly_periods_for_lone_penalty: int = 8  # Tiêu chí II.4: miễn trừ GV có tải < ngưỡng này; 0 = áp dụng phạt lẻ cho tất cả
 
 
 
