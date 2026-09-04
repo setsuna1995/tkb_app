@@ -240,26 +240,54 @@ def test_subject_not_scheduled_on_consecutive_days():
 
 
 def test_max_heavy_per_session():
-    """Luật 5: 4 ô sáng Thứ 2 (tiết 1-4) + 2 ô sáng Thứ 3 (tiết 1-2) = 6 ô. Môn
-    Nặng cần 5 tiết, Toán cần 1 -- vừa khít. Không ràng buộc thì Toán (need
-    nhỏ) bị dồn vào ô cuối (Thứ 3 tiết 2), ép Nặng chiếm TRỌN 4 ô Thứ 2 (vượt
-    trần max_heavy_per_session mặc định = 3)."""
-    ts = [TimeSlot(1, 2, "S", 1), TimeSlot(2, 2, "S", 2), TimeSlot(3, 2, "S", 3),
-          TimeSlot(4, 2, "S", 4), TimeSlot(5, 3, "S", 1), TimeSlot(6, 3, "S", 2)]
+    """Luật 5, cô lập thật sự khỏi luật 6 (review round: bản trước dùng cấu
+    hình mặc định max_heavy_per_session=3 == max_heavy_consecutive=3 trên 1
+    buổi đúng 4 ô -- cửa sổ trượt của luật 6 (kích thước 4) khi đó trùng khít
+    CẢ buổi, nên tự luật 6 đã ép "tổng buổi <= 3" giống hệt luật 5; xoá luật 5
+    đi test đó vẫn PASS, không chứng minh được gì).
+
+    Bản này dùng max_heavy_consecutive=2 (< max_heavy_per_session=2, để công
+    thức max(...) không đội trần buổi lên theo luật 6) và 3 buổi RIÊNG cho
+    lớp: Thứ 3 (2 ô), Thứ 2 (4 ô), Thứ 4 (1 ô) -- tổng trần-theo-luật-5 vừa
+    đúng bằng nhu cầu (2+2+1=5), buộc lời giải hợp lệ gần như duy nhất. Quan
+    trọng: chỉ RIÊNG luật 6 (không có luật 5) vẫn cho phép buổi Thứ 2 (4 ô)
+    nhận tới 3 tiết Nặng theo mẫu RỜI RẠC không liền nhau (vd tiết 1,3,4) --
+    mẫu này không hề vi phạm "không quá 2 tiết liên tiếp" của luật 6, nên
+    KHÔNG bị `find_max_heavy_violations` (chỉ đếm CHUỖI LIÊN TIẾP) bắt được;
+    phải đếm tổng số tiết Nặng/buổi thủ công mới lộ ra luật 5 có tồn tại hay
+    không. Đã verify bằng cách tạm comment dòng ràng buộc luật 5
+    (`cpsat_model.py`, dòng `for vs in vars_by_session.values(): m.Add(...)`)
+    rồi chạy lại: bộ giải (buổi Thứ 3 tạo trước, Thứ 2 giữa, Thứ 4 tạo sau)
+    tự nhiên đẩy Nặng vào Thứ 2 = {1,3,4} (3 tiết, vượt trần 2) -- xác nhận
+    RED thật, không phải suy đoán."""
+    ts = [TimeSlot(1, 3, "S", 1), TimeSlot(2, 3, "S", 2),
+          TimeSlot(3, 2, "S", 1), TimeSlot(4, 2, "S", 2), TimeSlot(5, 2, "S", 3), TimeSlot(6, 2, "S", 4),
+          TimeSlot(7, 4, "S", 1)]
     slots = [Slot(i + 1, 101, t) for i, t in enumerate(ts)]
     subjects = [Subject(1, "KHTN", ROLE_NANG), Subject(2, "Toan", ROLE_THUONG),
                 Subject(3, "HDTN", ROLE_HDTN)]
     inp = SchedulingInput(
         classes=[ClassRoom(101, "6A1")], subjects=subjects,
         teachers=[Teacher(10, "GV A"), Teacher(20, "GV B")],
-        need={(1, 101): 5, (2, 101): 1},
+        need={(1, 101): 5, (2, 101): 2},
         assigned_teacher={(1, 101): 10, (2, 101): 20},
         ban_busy=set(), slots=slots, timeslots=ts,
-        config=SchedulingConfig(),
+        config=SchedulingConfig(max_heavy_per_session=2, max_heavy_consecutive=2),
     )
     built = cpsat.build_model(inp)
     assignment = cpsat.solve(built, time_limit_s=10.0)
     assert assignment is not None
+    # Kiểm trực tiếp tổng số tiết Nặng/buổi (điều luật 5 THỰC SỰ khống chế) --
+    # find_max_heavy_violations chỉ đếm chuỗi liên tiếp nên mù trước mẫu rời
+    # rạc như {1,3,4}; giữ lại nó như một kiểm tra bổ sung, không thay thế.
+    slot_by_id = {s.slot_id: s for s in inp.slots}
+    per_session = {}
+    for sid, subj in assignment.items():
+        if subj == 1:
+            key = (slot_by_id[sid].ts.weekday, slot_by_id[sid].ts.session)
+            per_session[key] = per_session.get(key, 0) + 1
+    over_cap = {k: v for k, v in per_session.items() if v > inp.config.max_heavy_per_session}
+    assert over_cap == {}, f"buổi vượt trần môn Nặng ({inp.config.max_heavy_per_session}/buổi): {over_cap}"
     from core.validation import find_max_heavy_violations
     assert find_max_heavy_violations(inp.slots, assignment, {1}) == []
 
