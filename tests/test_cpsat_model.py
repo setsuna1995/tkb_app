@@ -1,3 +1,4 @@
+from collections import defaultdict
 import pytest
 
 from core.models import (
@@ -687,3 +688,202 @@ def test_subject_class_allowed_cells_rule():
     from core.validation import find_subject_class_rule_violations
     rules = [{"subject_id": 1, "class_ids": [101], "cells": [(3, "S")]}]
     assert find_subject_class_rule_violations(inp.slots, assignment, rules) == []
+
+
+# ==============================================================================
+# Task 5: Môn KÉP và môn 1 CẶP LIỀN TIẾT
+# ==============================================================================
+
+def test_block_subject_cannot_bridge_banned_middle_period():
+    """Test chứng minh tính bắt buộc (falsifiable):
+    1 buổi sáng 3 tiết (1, 2, 3). Môn Văn (ROLE_KEP, block_size=2) cần 2 tiết.
+    GV dạy Văn bị bận ở tiết 2.
+    - Nếu KHÔNG có ràng buộc khối liền kề: Văn dễ dàng được xếp vào tiết 1 và tiết 3 (hợp lệ).
+    - Khi CÓ ràng buộc khối 2 tiết liền kề: Khối 2 tiết chỉ có thể là {1, 2} hoặc {2, 3},
+      cả hai đều đụng tiết 2 bị bận -> bài toán BẮT BUỘC VÔ NGHIỆM (None)."""
+    ts = [TimeSlot(1, 2, "S", 1), TimeSlot(2, 2, "S", 2), TimeSlot(3, 2, "S", 3)]
+    slots = [Slot(i + 1, 101, t) for i, t in enumerate(ts)]
+    subjects = [Subject(1, "Van", ROLE_KEP), Subject(2, "Toan", ROLE_THUONG),
+                Subject(3, "HDTN", ROLE_HDTN)]
+    inp = SchedulingInput(
+        classes=[ClassRoom(101, "6A1")], subjects=subjects,
+        teachers=[Teacher(10, "GV Van"), Teacher(20, "GV Toan")],
+        need={(1, 101): 2, (2, 101): 1},
+        assigned_teacher={(1, 101): 10, (2, 101): 20},
+        ban_busy={(10, 2)},  # GV Van bận ở ts_id=2 (tiết 2)
+        slots=slots, timeslots=ts,
+        config=SchedulingConfig(),
+    )
+    built = cpsat.build_model(inp)
+    assignment = cpsat.solve(built, time_limit_s=10.0)
+    assert assignment is None, (
+        "Văn cần khối 2 tiết liền kề ({1,2} hoặc {2,3}). Tiết 2 bị bận, "
+        f"không được phép xếp nhảy cóc sang {{1, 3}}: {assignment}"
+    )
+
+
+def test_block_subject_even_quota_forms_contiguous_blocks():
+    """Môn kép chẵn tiết (Văn 4 tiết, ROLE_KEP, block_size=2):
+    2 buổi (Thứ 2 sáng 4 tiết, Thứ 3 sáng 4 tiết = 8 ô).
+    Văn need=4 (mỗi ngày 2 tiết liền kề).
+    4 môn thường (Toán, Lý, Hóa, Sinh) mỗi môn need=1 (tôn trọng trần 1 tiết/môn/ngày)."""
+    ts = [TimeSlot(i + 1, 2, "S", i + 1) for i in range(4)] + \
+         [TimeSlot(i + 5, 3, "S", i + 1) for i in range(4)]
+    slots = [Slot(i + 1, 101, t) for i, t in enumerate(ts)]
+    subjects = [
+        Subject(1, "Van", ROLE_KEP),
+        Subject(2, "Toan", ROLE_THUONG),
+        Subject(3, "Ly", ROLE_THUONG),
+        Subject(4, "Hoa", ROLE_THUONG),
+        Subject(5, "Sinh", ROLE_THUONG),
+        Subject(6, "HDTN", ROLE_HDTN),
+    ]
+    inp = SchedulingInput(
+        classes=[ClassRoom(101, "6A1")], subjects=subjects,
+        teachers=[Teacher(10, "GV Van"), Teacher(20, "GV Khac")],
+        need={(1, 101): 4, (2, 101): 1, (3, 101): 1, (4, 101): 1, (5, 101): 1},
+        assigned_teacher={(1, 101): 10, (2, 101): 20, (3, 101): 20, (4, 101): 20, (5, 101): 20},
+        ban_busy=set(), slots=slots, timeslots=ts,
+        config=SchedulingConfig(teacher_off_sessions_per_week=0),
+    )
+    built = cpsat.build_model(inp)
+    assignment = cpsat.solve(built, time_limit_s=10.0)
+    assert assignment is not None
+    slot_by_id = {s.slot_id: s for s in inp.slots}
+    van_by_day = defaultdict(list)
+    for sid, subj in assignment.items():
+        if subj == 1:
+            s = slot_by_id[sid]
+            van_by_day[s.ts.weekday].append(s.ts.period)
+    assert len(van_by_day) == 2, f"Văn 4 tiết kép phải chia 2 ngày: {van_by_day}"
+    for wd, periods in van_by_day.items():
+        sorted_p = sorted(periods)
+        assert len(sorted_p) == 2, f"Ngày {wd} phải có đúng 2 tiết: {sorted_p}"
+        assert sorted_p[1] == sorted_p[0] + 1, f"Ngày {wd} 2 tiết phải liền kề: {sorted_p}"
+
+
+def test_block_subject_odd_quota_allows_single_period():
+    """Môn kép lẻ tiết (Văn 3 tiết, ROLE_KEP, block_size=2):
+    3 buổi sáng (Thứ 2, 3, 4 mỗi sáng 2 tiết = 6 ô).
+    Văn need=3 (1 ngày 2 tiết liền kề, 1 ngày 1 tiết đơn).
+    3 môn thường (Toán, Lý, Hóa) mỗi môn need=1 (tổng 3 môn = 3 ô).
+    Tổng = 6 ô."""
+    ts = [TimeSlot(1, 2, "S", 1), TimeSlot(2, 2, "S", 2),
+          TimeSlot(3, 3, "S", 1), TimeSlot(4, 3, "S", 2),
+          TimeSlot(5, 4, "S", 1), TimeSlot(6, 4, "S", 2)]
+    slots = [Slot(i + 1, 101, t) for i, t in enumerate(ts)]
+    subjects = [
+        Subject(1, "Van", ROLE_KEP),
+        Subject(2, "Toan", ROLE_THUONG),
+        Subject(3, "Ly", ROLE_THUONG),
+        Subject(4, "Hoa", ROLE_THUONG),
+        Subject(5, "HDTN", ROLE_HDTN),
+    ]
+    inp = SchedulingInput(
+        classes=[ClassRoom(101, "6A1")], subjects=subjects,
+        teachers=[Teacher(10, "GV Van"), Teacher(20, "GV Khac")],
+        need={(1, 101): 3, (2, 101): 1, (3, 101): 1, (4, 101): 1},
+        assigned_teacher={(1, 101): 10, (2, 101): 20, (3, 101): 20, (4, 101): 20},
+        ban_busy=set(), slots=slots, timeslots=ts,
+        config=SchedulingConfig(teacher_off_sessions_per_week=0),
+    )
+    built = cpsat.build_model(inp)
+    assignment = cpsat.solve(built, time_limit_s=10.0)
+    assert assignment is not None
+    slot_by_id = {s.slot_id: s for s in inp.slots}
+    van_by_day = defaultdict(list)
+    for sid, subj in assignment.items():
+        if subj == 1:
+            s = slot_by_id[sid]
+            van_by_day[s.ts.weekday].append(s.ts.period)
+    assert len(van_by_day) == 2, f"Văn 3 tiết phải xuất hiện ở 2 ngày: {van_by_day}"
+    day_counts = sorted(len(p) for p in van_by_day.values())
+    assert day_counts == [1, 2], f"Một ngày 1 tiết, một ngày 2 tiết: {van_by_day}"
+    for wd, periods in van_by_day.items():
+        if len(periods) == 2:
+            sorted_p = sorted(periods)
+            assert sorted_p[1] == sorted_p[0] + 1, f"Ngày 2 tiết phải liền kề: {sorted_p}"
+
+
+def test_single_pair_subject_has_exactly_one_pair_and_single_periods():
+    """single_pair_ids (Văn 4 tiết, single_pair_subject_ids={1}):
+    4 buổi sáng (Thứ 2..5, mỗi sáng 2 tiết = 8 ô).
+    Văn need=4 (đúng 1 ngày 2 tiết liền kề, 2 ngày khác mỗi ngày 1 tiết đơn = 3 ngày).
+    4 môn thường (Toán, Lý, Hóa, Sinh) mỗi môn need=1 (tổng 4 môn = 4 ô).
+    Tổng = 8 ô."""
+    ts = [TimeSlot(1, 2, "S", 1), TimeSlot(2, 2, "S", 2),
+          TimeSlot(3, 3, "S", 1), TimeSlot(4, 3, "S", 2),
+          TimeSlot(5, 4, "S", 1), TimeSlot(6, 4, "S", 2),
+          TimeSlot(7, 5, "S", 1), TimeSlot(8, 5, "S", 2)]
+    slots = [Slot(i + 1, 101, t) for i, t in enumerate(ts)]
+    subjects = [
+        Subject(1, "Van", ROLE_THUONG),
+        Subject(2, "Toan", ROLE_THUONG),
+        Subject(3, "Ly", ROLE_THUONG),
+        Subject(4, "Hoa", ROLE_THUONG),
+        Subject(5, "Sinh", ROLE_THUONG),
+        Subject(6, "HDTN", ROLE_HDTN),
+    ]
+    inp = SchedulingInput(
+        classes=[ClassRoom(101, "6A1")], subjects=subjects,
+        teachers=[Teacher(10, "GV Van"), Teacher(20, "GV Khac")],
+        need={(1, 101): 4, (2, 101): 1, (3, 101): 1, (4, 101): 1, (5, 101): 1},
+        assigned_teacher={(1, 101): 10, (2, 101): 20, (3, 101): 20, (4, 101): 20, (5, 101): 20},
+        ban_busy=set(), slots=slots, timeslots=ts,
+        config=SchedulingConfig(
+            single_pair_subject_ids=frozenset({1}),
+            teacher_off_sessions_per_week=0,
+        ),
+    )
+    built = cpsat.build_model(inp)
+    assignment = cpsat.solve(built, time_limit_s=10.0)
+    assert assignment is not None
+    from core.validation import find_single_pair_violations
+    assert find_single_pair_violations(inp.slots, assignment, {1}) == []
+    slot_by_id = {s.slot_id: s for s in inp.slots}
+    van_by_day = defaultdict(list)
+    for sid, subj in assignment.items():
+        if subj == 1:
+            s = slot_by_id[sid]
+            van_by_day[s.ts.weekday].append(s.ts.period)
+    assert len(van_by_day) == 3, f"Văn 4 tiết với single_pair phải trải 3 ngày: {van_by_day}"
+    day_counts = sorted(len(p) for p in van_by_day.values())
+    assert day_counts == [1, 1, 2], f"Phải gồm 1 ngày 2 tiết và 2 ngày 1 tiết: {van_by_day}"
+    for wd, periods in van_by_day.items():
+        if len(periods) == 2:
+            sorted_p = sorted(periods)
+            assert sorted_p[1] == sorted_p[0] + 1, f"Cặp 2 tiết phải liền kề: {sorted_p}"
+
+
+
+def test_hdtn_thematic_week_forms_block_of_3_contiguous_periods():
+    """Tuần chuyên đề HĐTN (block_size=3):
+    1 buổi sáng 5 tiết (1..5). Tiết 2 và tiết 4 bị bận cho GV HĐTN.
+    Các khối 3 tiết có thể có: {1,2,3} (chạm 2), {2,3,4} (chạm 2,4), {3,4,5} (chạm 4).
+    Không có khối 3 tiết liền kề nào khả thi -> Bài toán BẮT BUỘC VÔ NGHIỆM (None).
+    (Nếu không có ràng buộc khối liền kề, HĐTN có thể nhảy cóc vào {1, 3, 5} không chạm tiết bận nào)."""
+    ts = [TimeSlot(i + 1, 2, "S", i + 1) for i in range(5)]
+    slots = [Slot(i + 1, 101, t) for i, t in enumerate(ts)]
+    subjects = [
+        Subject(1, "HDTN", ROLE_HDTN),
+        Subject(2, "Toan", ROLE_THUONG),
+        Subject(3, "Ly", ROLE_THUONG),
+    ]
+    inp = SchedulingInput(
+        classes=[ClassRoom(101, "6A1")], subjects=subjects,
+        teachers=[Teacher(10, "GV HDTN"), Teacher(20, "GV Khac")],
+        need={(1, 101): 3, (2, 101): 1, (3, 101): 1},
+        assigned_teacher={(1, 101): 10, (2, 101): 20, (3, 101): 20},
+        ban_busy={(10, 2), (10, 4)},  # Bận tiết 2 và tiết 4 cho GV HĐTN
+        slots=slots, timeslots=ts,
+        hdtn_thematic_week=True,
+        config=SchedulingConfig(teacher_off_sessions_per_week=0),
+    )
+    built = cpsat.build_model(inp)
+    assignment = cpsat.solve(built, time_limit_s=10.0)
+    assert assignment is None, (
+        "HĐTN tuần chuyên đề cần 3 tiết liền kề. Tiết 2 và 4 bị bận, "
+        f"không được phép nhảy cóc sang {{1, 3, 5}}: {assignment}"
+    )
+
+

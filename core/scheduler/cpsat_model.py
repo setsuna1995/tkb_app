@@ -89,6 +89,7 @@ def build_model(inp: SchedulingInput) -> CpSatModel:
     _add_teacher_constraints(built)
     _add_subject_constraints(built)
     _add_class_constraints(built)
+    _add_block_constraints(built)
     return built
 
 
@@ -501,6 +502,138 @@ def _add_class_constraints(built: CpSatModel) -> None:
         used = m.NewBoolVar(f"class_used_c{class_id}_wd{weekday}_{session}")
         m.Add(sum(vs) >= 2 * used)
         m.Add(sum(vs) <= len(group_slots) * used)
+
+
+def _add_block_constraints(built: CpSatModel) -> None:
+    """Ràng buộc tính liền kề cho môn KÉP (block_size >= 2) và môn 1 CẶP (single_pair_ids)
+    (task-5-brief.md):
+
+    1. Môn kép (block_size >= 2):
+       - Các khối N tiết liền kề trong cùng 1 buổi.
+       - Không chồng lấn khối trong cùng buổi.
+       - Số tiết của môn đó trong ngày = N * (số khối) + (need % N) * has_partial.
+       - Toàn tuần chỉ có tối đa 1 ngày có tiết đơn lẻ (need % N), khớp đúng mức
+         nới lỏng của engine cũ (_repair_unpaired_blocks và _block_partial_state).
+    2. Môn 1 cặp liền tiết (single_pair_ids, vd Ngữ văn 4 tiết):
+       - Toàn tuần có đúng 1 khối 2 tiết liền kề (sum(block_starts) == 1 khi need >= 2).
+       - Các tiết còn lại phân bố mỗi ngày tối đa 1 tiết ở các ngày khác nhau
+         (single_day + day_blocks <= 1).
+    """
+    m = built.model
+    inp = built.inp
+    x = built.x
+    role_index = built.role_index
+    if not role_index or not role_index.block_size:
+        return
+
+    single_pair_ids = getattr(role_index, "single_pair_ids", set()) or set()
+
+    for cls in inp.classes:
+        class_id = cls.class_id
+        class_slots = built.slots_by_class.get(class_id, [])
+        if not class_slots:
+            continue
+
+        # Gom slots của lớp theo buổi: (weekday, session) -> dict[period -> Slot]
+        session_slots = defaultdict(dict)
+        for s in class_slots:
+            session_slots[s.ts.weekday, s.ts.session][s.ts.period] = s
+
+        days_in_class = sorted({s.ts.weekday for s in class_slots})
+
+        for subject_id, block_n in role_index.block_size.items():
+            if block_n < 2:
+                continue
+            total_need = inp.need.get((subject_id, class_id), 0)
+            if total_need <= 0:
+                continue
+
+            is_single_pair = subject_id in single_pair_ids
+
+            # Tạo các biến bắt đầu khối: block_start[wd, sess, p]
+            # Một khối kích thước block_n bắt đầu tại p chiếm các tiết p, p+1, ..., p+block_n-1
+            block_starts_by_day = defaultdict(list)
+            all_block_starts = []
+
+            for (wd, sess), p_map in session_slots.items():
+                session_block_starts_at_p = {}
+                for p in sorted(p_map):
+                    # Kiểm tra xem chuỗi p..p+block_n-1 có đầy đủ trong buổi này không
+                    has_all_slots = True
+                    consec_slots = []
+                    for offset in range(block_n):
+                        target_p = p + offset
+                        if target_p not in p_map:
+                            has_all_slots = False
+                            break
+                        target_slot = p_map[target_p]
+                        if (target_slot.slot_id, subject_id) not in x:
+                            has_all_slots = False
+                            break
+                        consec_slots.append(target_slot)
+
+                    if has_all_slots:
+                        b = m.NewBoolVar(f"blk_c{class_id}_m{subject_id}_wd{wd}_{sess}_p{p}")
+                        session_block_starts_at_p[p] = b
+                        block_starts_by_day[wd].append(b)
+                        all_block_starts.append(b)
+                        # Ràng buộc: b = 1 => tất cả các ô trong khối phải có môn subject_id
+                        for cs in consec_slots:
+                            m.Add(b <= x[cs.slot_id, subject_id])
+
+                # Không chồng lấn các khối trong cùng buổi: mỗi tiết p' chỉ thuộc tối đa 1 khối
+                for p_check in p_map:
+                    covering = [
+                        session_block_starts_at_p[p_start]
+                        for p_start in session_block_starts_at_p
+                        if p_start <= p_check < p_start + block_n
+                    ]
+                    if len(covering) > 1:
+                        m.Add(sum(covering) <= 1)
+
+            # Ràng buộc số tiết theo ngày và toàn tuần
+            if is_single_pair:
+                if total_need >= 2:
+                    m.Add(sum(all_block_starts) == 1)
+                    single_days = []
+                    for wd in days_in_class:
+                        day_vars = [
+                            x[s.slot_id, subject_id]
+                            for s in class_slots
+                            if s.ts.weekday == wd and (s.slot_id, subject_id) in x
+                        ]
+                        day_blocks = block_starts_by_day.get(wd, [])
+                        single_day = m.NewBoolVar(f"sp_single_c{class_id}_m{subject_id}_wd{wd}")
+                        single_days.append(single_day)
+                        # Một ngày chỉ có thể có khối (2 tiết) HOẶC tiết đơn (1 tiết)
+                        m.Add(single_day + sum(day_blocks) <= 1)
+                        m.Add(sum(day_vars) == single_day + 2 * sum(day_blocks))
+                    m.Add(sum(single_days) == total_need - 2)
+                else:
+                    m.Add(sum(all_block_starts) == 0)
+            else:
+                rem = total_need % block_n
+                full_blocks = total_need // block_n
+                m.Add(sum(all_block_starts) == full_blocks)
+
+                partial_days = []
+                for wd in days_in_class:
+                    day_vars = [
+                        x[s.slot_id, subject_id]
+                        for s in class_slots
+                        if s.ts.weekday == wd and (s.slot_id, subject_id) in x
+                    ]
+                    day_blocks = block_starts_by_day.get(wd, [])
+                    if rem > 0:
+                        has_partial = m.NewBoolVar(f"partial_c{class_id}_m{subject_id}_wd{wd}")
+                        partial_days.append(has_partial)
+                        m.Add(has_partial + sum(day_blocks) <= 1)
+                        m.Add(sum(day_vars) == block_n * sum(day_blocks) + rem * has_partial)
+                    else:
+                        m.Add(sum(day_vars) == block_n * sum(day_blocks))
+
+                if rem > 0:
+                    m.Add(sum(partial_days) == 1)
 
 
 def solve(built: CpSatModel, time_limit_s: float = 10.0,
