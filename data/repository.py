@@ -20,7 +20,7 @@ from data.repositories.curriculum import (
     DEFAULT_BASE_CAP, DEFAULT_MIN_FLOOR,
     bulk_set_weekly_curriculum, get_assignments, get_base_cap, get_min_floor,
     get_periods_for_week, get_periods_per_week, get_role_reduction,
-    get_teacher_caps, get_teacher_quota_view, get_weekly_curriculum,
+    get_teacher_caps, get_teacher_floors, get_teacher_quota_view, get_weekly_curriculum,
     list_configured_weeks, set_assignment, set_base_cap, set_min_floor,
     set_periods_per_week, set_role_reduction, set_weekly_curriculum,
 )
@@ -42,7 +42,8 @@ from data.repositories.config import (
 )
 from data.repositories.runs import (
     bulk_replace_tkb_nhap, get_latest_run, get_latest_run_by_parity,
-    get_tkb_nhap, get_tkb_result, save_run, save_tkb_result,
+    get_latest_run_by_week, get_tkb_nhap, get_tkb_result, list_runs_for_week,
+    list_saved_weeks, save_run, save_tkb_result,
 )
 from data.repositories.builder import (
     _canonical_timeslots, _weekday_matches, build_scheduling_input,
@@ -57,7 +58,7 @@ __all__ = [
     "DEFAULT_BASE_CAP", "DEFAULT_MIN_FLOOR",
     "get_base_cap", "set_base_cap", "get_min_floor", "set_min_floor",
     "get_role_reduction", "set_role_reduction",
-    "get_teacher_quota_view", "get_teacher_caps",
+    "get_teacher_quota_view", "get_teacher_caps", "get_teacher_floors",
     "get_assignments", "set_assignment", "get_periods_per_week", "set_periods_per_week",
     "get_weekly_curriculum", "set_weekly_curriculum", "bulk_set_weekly_curriculum",
     "get_periods_for_week", "list_configured_weeks",
@@ -79,7 +80,8 @@ __all__ = [
     "_parse_period_tuple", "_format_period_tuple",
     # runs
     "get_tkb_nhap", "bulk_replace_tkb_nhap",
-    "save_run", "save_tkb_result", "get_latest_run", "get_latest_run_by_parity", "get_tkb_result",
+    "save_run", "save_tkb_result", "get_latest_run", "get_latest_run_by_parity",
+    "get_latest_run_by_week", "list_saved_weeks", "list_runs_for_week", "get_tkb_result",
     # builder
     "_canonical_timeslots", "_weekday_matches", "build_scheduling_input",
 ]

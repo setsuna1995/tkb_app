@@ -90,3 +90,35 @@ def test_teacher_quota_view_35_week_profile(populated_school_conn):
     assert t_cn_view["max_load"] == 3
     assert t_cn_view["min_load"] == 2
     assert t_cn_view["over_current"] == 3 - 19  # -16
+
+
+def test_bgh_quota_tt28_2009():
+    conn = db.get_connection(":memory:")
+    db.init_db(conn)
+
+    t_ht = repo.upsert_teacher(conn, "Thầy Hiệu Trưởng", role="Hiệu trưởng")
+    t_hp = repo.upsert_teacher(conn, "Cô Hiệu Phó", role="Phó hiệu trưởng")
+    t_gvcn = repo.upsert_teacher(conn, "Thầy Chủ Nhiệm", role="GVCN")
+
+    caps = repo.get_teacher_caps(conn)
+    floors = repo.get_teacher_floors(conn)
+    # Hiệu trưởng THCS: 2 periods/week (TT 28/2009)
+    assert caps[t_ht] == 2
+    assert floors[t_ht] == 2
+    # Phó hiệu trưởng THCS: 4 periods/week (TT 28/2009)
+    assert caps[t_hp] == 4
+    assert floors[t_hp] == 4
+    # GVCN: Trần 19 - 4 = 15, Sàn 16 - 4 = 12 (khoảng định mức 12-15)
+    assert caps[t_gvcn] == 15
+    assert floors[t_gvcn] == 12
+
+    view = repo.get_teacher_quota_view(conn, week_no=1)
+    ht_view = next(v for v in view if v["teacher_id"] == t_ht)
+    hp_view = next(v for v in view if v["teacher_id"] == t_hp)
+    gvcn_view = next(v for v in view if v["teacher_id"] == t_gvcn)
+    assert ht_view["cap"] == 2
+    assert ht_view["floor"] == 2
+    assert hp_view["cap"] == 4
+    assert hp_view["floor"] == 4
+    assert gvcn_view["cap"] == 15
+    assert gvcn_view["floor"] == 12

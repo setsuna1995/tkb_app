@@ -238,6 +238,16 @@ def get_scheduling_config(conn: sqlite3.Connection) -> SchedulingConfig:
             if get_meta(conn, "sched_cpsat_time_limit_seconds") is not None
             else default.cpsat_time_limit_seconds
         ),
+        cpsat_minimize_changes=(
+            bool(int(get_meta(conn, "sched_cpsat_minimize_changes")))
+            if get_meta(conn, "sched_cpsat_minimize_changes") is not None
+            else default.cpsat_minimize_changes
+        ),
+        cpsat_workers=(
+            int(get_meta(conn, "sched_cpsat_workers"))
+            if get_meta(conn, "sched_cpsat_workers") is not None
+            else default.cpsat_workers
+        ),
     )
 
 
@@ -275,3 +285,5 @@ def set_scheduling_config(conn: sqlite3.Connection, config: SchedulingConfig) ->
     set_meta(conn, "sched_min_weekly_periods_for_lone_penalty", str(config.min_weekly_periods_for_lone_penalty))
     set_meta(conn, "sched_use_cpsat", str(int(config.use_cpsat)))
     set_meta(conn, "sched_cpsat_time_limit_seconds", str(config.cpsat_time_limit_seconds))
+    set_meta(conn, "sched_cpsat_minimize_changes", str(int(config.cpsat_minimize_changes)))
+    set_meta(conn, "sched_cpsat_workers", str(config.cpsat_workers))

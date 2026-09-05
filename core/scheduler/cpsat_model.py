@@ -772,20 +772,16 @@ def _add_objective(built: CpSatModel) -> None:
                     lone_sess_terms.append(lone[t, wd, sess])
                     penalty_terms["II.4"].append(lone[t, wd, sess])
 
-            # II.8 ngày chia lẻ (1 sáng + 1 chiều)
+            # II.8 ngày chia lẻ (sáng 1 tiết + chiều 1 tiết trong cùng ngày)
             for wd in weekdays:
-                if (t, wd, "S") in used and (t, wd, "C") in used:
-                    u_s = used[t, wd, "S"]
-                    u_c = used[t, wd, "C"]
+                if (t, wd, "S") in lone and (t, wd, "C") in lone:
                     l_s = lone[t, wd, "S"]
                     l_c = lone[t, wd, "C"]
                     sp = m.NewBoolVar(f"split_t{t}_wd{wd}")
-                    # sp = 1 khi (l_s and u_c) hoặc (l_c and u_s)
-                    m.Add(sp >= l_s + u_c - 1)
-                    m.Add(sp >= l_c + u_s - 1)
-                    m.Add(sp <= u_s)
-                    m.Add(sp <= u_c)
-                    m.Add(sp <= l_s + l_c)
+                    # sp = 1 khi cả l_s == 1 và l_c == 1 (sáng 1 tiết + chiều 1 tiết)
+                    m.Add(sp >= l_s + l_c - 1)
+                    m.Add(sp <= l_s)
+                    m.Add(sp <= l_c)
                     penalty_terms["II.8"].append(sp)
 
             # Ngày lẻ: cả ngày đúng 1 tiết

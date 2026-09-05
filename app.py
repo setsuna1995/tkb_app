@@ -21,7 +21,6 @@ pages = {
     ],
     "Xếp & sửa thời khóa biểu": [
         st.Page("pages/06_Xep_TKB.py", title="Xếp TKB tự động", icon="🚀"),
-        st.Page("pages/07_Can_Bang_Tai.py", title="Cân bằng tải giáo viên", icon="⚖️"),
         st.Page("pages/08_Lich_su_Tuan.py", title="Lịch sử tuần", icon="🕘"),
     ],
     "Dữ liệu": [

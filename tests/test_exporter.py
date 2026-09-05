@@ -141,3 +141,32 @@ def test_export_full_backup_khung_sheet_respects_custom_reserved_off_weekdays_ch
     thu2_col = 4 + list(WEEKDAYS).index(2)  # cột Thứ 2
     assert ws_khung.cell(target_row, thu5_col).value == "x"   # Thứ 5 chiều KHÔNG còn bị khoá
     assert ws_khung.cell(target_row, thu2_col).value != "x"   # Thứ 2 chiều giờ bị khoá thay thế
+
+
+def test_export_with_direct_cells(conn):
+    classes = repo.list_classes(conn)
+    subjects = repo.list_subjects(conn)
+    sample_cells = {(classes[0].class_id, 2, "S", 1): subjects[0].subject_id}
+    data = export_xlsx(conn, cells=sample_cells)
+    wb = openpyxl.load_workbook(io.BytesIO(data))
+    assert set(wb.sheetnames) == {"TKB_Mon", "TKB", "TKB_GV"}
+
+
+def test_runs_weekly_queries(conn):
+    _accept_run(conn, "C", seed=1001, week_no=5)
+    _accept_run(conn, "L", seed=1002, week_no=6)
+
+    saved_weeks = repo.list_saved_weeks(conn)
+    assert 5 in saved_weeks
+    assert 6 in saved_weeks
+
+    run_w5 = repo.get_latest_run_by_week(conn, 5)
+    assert run_w5 is not None
+    assert run_w5["week_no"] == 5
+    assert run_w5["seed"] == 1001
+    assert run_w5["parity"] == "C"
+
+    runs_w5 = repo.list_runs_for_week(conn, 5)
+    assert len(runs_w5) >= 1
+    assert runs_w5[0]["week_no"] == 5
+

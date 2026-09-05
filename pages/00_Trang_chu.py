@@ -86,21 +86,21 @@ if teachers:
     under = [q for q in quota_view if q["under"] > 0]
     if over:
         st.warning(
-            "Có giáo viên vượt định mức: "
-            + ", ".join(f"{q['name']} (+{q['over']})" for q in over)
+            "Có giáo viên vượt trần định mức (> trần chuẩn): "
+            + ", ".join(f"{q['name']} (+{round(q['over'], 1):g}t)" for q in over)
         )
     if under:
         min_floor = repo.get_min_floor(conn)
         st.warning(
-            f"Có giáo viên dưới sàn tối thiểu (Tải TB 2 tuần + Giảm trừ ≥ {min_floor}): "
-            + ", ".join(f"{q['name']} (thiếu {q['under']})" for q in under)
+            f"Có giáo viên dưới sàn định mức tối thiểu (< sàn chuẩn {min_floor}t): "
+            + ", ".join(f"{q['name']} (thiếu {round(q['under'], 1):g}t)" for q in under)
         )
 
 st.markdown(
     """
 Dùng thanh điều hướng bên trái để:
 1. **Thiết lập dữ liệu** — khai báo lớp / môn / giáo viên, phân công, định mức, GV bận, khung tiết
-2. **Xếp & sửa thời khóa biểu** — chạy xếp tự động, sửa tay, cân bằng tải, xem lịch sử tuần
+2. **Xếp & sửa thời khóa biểu** — chạy xếp tự động, sửa tay, xem lịch sử tuần
 3. **Dữ liệu** — nhập / xuất Excel
 
 **Sắp có**: tra cứu TKB theo từng giáo viên, phân công dạy thay khi GV nghỉ đột xuất

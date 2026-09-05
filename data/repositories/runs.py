@@ -58,3 +58,26 @@ def get_tkb_result(conn: sqlite3.Connection, run_id: int) -> dict:
         "SELECT class_id, weekday, session, period, subject_id FROM tkb_result WHERE run_id=?", (run_id,)
     ).fetchall()
     return {(r["class_id"], r["weekday"], r["session"], r["period"]): r["subject_id"] for r in rows}
+
+
+def get_latest_run_by_week(conn: sqlite3.Connection, week_no: int) -> Optional[dict]:
+    row = conn.execute(
+        "SELECT * FROM run_log WHERE week_no=? AND succeeded=1 ORDER BY run_id DESC LIMIT 1",
+        (week_no,),
+    ).fetchone()
+    return dict(row) if row else None
+
+
+def list_saved_weeks(conn: sqlite3.Connection) -> list[int]:
+    rows = conn.execute(
+        "SELECT DISTINCT week_no FROM run_log WHERE succeeded=1 ORDER BY week_no"
+    ).fetchall()
+    return [r["week_no"] for r in rows]
+
+
+def list_runs_for_week(conn: sqlite3.Connection, week_no: int) -> list[dict]:
+    rows = conn.execute(
+        "SELECT * FROM run_log WHERE week_no=? ORDER BY run_id DESC",
+        (week_no,),
+    ).fetchall()
+    return [dict(r) for r in rows]

@@ -2,6 +2,7 @@ import os
 import pandas as pd
 import streamlit as st
 
+from data import db
 from data import repository as repo
 from io_excel.weekly_importer import import_weekly_curriculum_from_excel
 from ui_common import (
@@ -242,19 +243,35 @@ with tab_sotiet:
                         st.rerun()
 
 with tab_gv:
-    with st.expander("⚙️ Thiết lập Trần chuẩn & Sàn tối thiểu toàn trường", expanded=False):
+    with st.expander("⚙️ Thiết lập Khung Định mức (Sàn 16 - Trần 19 tiết/tuần) & Giảm trừ toàn trường", expanded=False):
         c1, c2, c3 = st.columns([1, 1, 1])
-        new_base_cap = c1.number_input("Trần chuẩn (tiết/tuần)", 1, 30, repo.get_base_cap(conn),
-                                       help="Định mức cơ bản cho GV THCS (mặc định 19 tiết/tuần theo Thông tư 28/2009/TT-BGDĐT)")
-        new_min_floor = c2.number_input("Sàn tối thiểu (tiết/tuần)", 0, 30, repo.get_min_floor(conn),
-                                         help="Ngưỡng cảnh báo khi tổng tiết giảng dạy + giảm trừ của GV quá thấp (mặc định 16)")
+        new_min_floor = c1.number_input("Sàn định mức tối thiểu (tiết/tuần)", 0, 30, repo.get_min_floor(conn),
+                                         help="Sàn chuẩn theo quy định (mặc định 16 tiết/tuần)")
+        new_base_cap = c2.number_input("Trần định mức tối đa (tiết/tuần)", 1, 30, repo.get_base_cap(conn),
+                                       help="Trần chuẩn theo quy định (mặc định 19 tiết/tuần theo Thông tư 28/2009/TT-BGDĐT)")
         c3.write("")
         c3.write("")
-        if c3.button("Lưu trần / sàn", type="primary"):
+        if c3.button("Lưu khung định mức (16-19t)", type="primary"):
             repo.set_base_cap(conn, int(new_base_cap))
             repo.set_min_floor(conn, int(new_min_floor))
-            st.success("Đã lưu trần chuẩn và sàn tối thiểu.")
+            st.success("Đã lưu khung định mức chuẩn thành công.")
             st.rerun()
+
+    def _format_quota_status(load_val: float, floor_val: int, cap_val: int) -> str:
+        l = round(load_val, 1)
+        if cap_val > 0 and l > cap_val:
+            diff = round(l - cap_val, 1)
+            return f"⚠️ Vượt trần (+{diff:g}t)"
+        elif l < floor_val:
+            diff = round(floor_val - l, 1)
+            return f"⚠️ Dưới sàn (-{diff:g}t)"
+        else:
+            return f"✅ Đạt chuẩn ({l:g}t)"
+
+    def _format_quota_range(floor_val: int, cap_val: int) -> str:
+        if floor_val == cap_val:
+            return f"{cap_val}"
+        return f"{floor_val} – {cap_val}"
 
     teachers = repo.list_teachers(conn)
     if not teachers:
@@ -285,25 +302,28 @@ with tab_gv:
             )
 
             # Metrics
-            n_over = sum(1 for v in view if v["cap"] > 0 and v["over_current"] > 0)
-            n_under = sum(1 for v in view if v["cap"] > 0 and v["under_current"] > 0)
+            n_in_norm = sum(1 for v in view if v["floor"] <= v["load"] <= v["cap"])
+            n_over = sum(1 for v in view if v["cap"] > 0 and v["load"] > v["cap"])
+            n_under = sum(1 for v in view if v["load"] < v["floor"])
+
             m1, m2, m3, m4 = st.columns(4)
             m1.metric("Tổng số GV", len(view))
-            m2.metric("Trần chuẩn", f"{base_cap} tiết/tuần")
-            m3.metric(f"GV vượt trần Tuần {chosen_gv_week}", n_over, delta=f"+{n_over}" if n_over else "0", delta_color="inverse" if n_over else "normal")
-            m4.metric(f"GV dưới sàn Tuần {chosen_gv_week}", n_under, delta=f"-{n_under}" if n_under else "0", delta_color="inverse" if n_under else "normal")
+            m2.metric("Trong định mức (16–19t)", n_in_norm)
+            m3.metric("Dạy vượt trần (> 19t)", n_over, delta=f"+{n_over}" if n_over else "0", delta_color="normal")
+            m4.metric("Dưới sàn (< 16t)", n_under, delta=f"-{n_under}" if n_under else "0", delta_color="inverse" if n_under else "normal")
 
             gv_rows = []
             for v in view:
-                curr_over = round(float(v["over_current"]), 1)
+                status_str = _format_quota_status(v["load"], v["floor"], v["cap"])
+                quota_range_str = _format_quota_range(v["floor"], v["cap"])
                 gv_rows.append({
                     "teacher_id": v["teacher_id"],
                     "Giáo viên": v["name"],
                     "Chức vụ / Kiêm nhiệm": v["role"] or "",
                     "Giảm trừ (tiết)": int(v["reduction"]),
-                    "Trần định mức": int(v["cap"]),
+                    "Định mức chuẩn": quota_range_str,
                     load_col_name: int(v["load"]),
-                    "Lệch tuần này": f"{'+' if curr_over > 0 else ''}{curr_over}" if curr_over != 0 else "0",
+                    "Tình trạng tuần này": status_str,
                     "Tải TB cả năm": round(float(v.get("load_full_year_avg", v["load_avg"])), 1),
                     "Tải TB HK1": round(float(v.get("load_hk1_avg", v["load_avg"])), 1),
                     "Tải TB HK2": round(float(v.get("load_hk2_avg", v["load_avg"])), 1),
@@ -314,15 +334,21 @@ with tab_gv:
                 "teacher_id": None,
                 "Giáo viên": st.column_config.TextColumn(disabled=True),
                 "Chức vụ / Kiêm nhiệm": st.column_config.TextColumn(
-                    help="Ghi chú chức vụ hoặc kiêm nhiệm"
+                    help="Ghi chú chức vụ hoặc kiêm nhiệm (Hiệu trưởng: 2t, Phó hiệu trưởng: 4t, GVCN: -4t, Tổ trưởng: -3t...)"
                 ),
                 "Giảm trừ (tiết)": st.column_config.NumberColumn(
                     min_value=0, max_value=30, step=1, format="%d",
-                    help="Tổng số tiết giảm trừ trực tiếp của GV (Trần = Trần chuẩn − Giảm trừ)"
+                    help="Tổng số tiết giảm trừ trực tiếp của GV (Khung = Sàn chuẩn − Giảm trừ đến Trần chuẩn − Giảm trừ)"
                 ),
-                "Trần định mức": st.column_config.NumberColumn(disabled=True, format="%d"),
+                "Định mức chuẩn": st.column_config.TextColumn(
+                    disabled=True,
+                    help="Khoảng định mức tiết dạy hợp lệ (Ví dụ: 16 - 19 tiết cho GV, 12 - 15 tiết cho GVCN)"
+                ),
                 load_col_name: st.column_config.NumberColumn(disabled=True, format="%d"),
-                "Lệch tuần này": st.column_config.TextColumn(disabled=True, help="Số tiết thừa (+) hoặc thiếu (−) so với định mức trần"),
+                "Tình trạng tuần này": st.column_config.TextColumn(
+                    disabled=True,
+                    help="Đánh giá tải: Đạt chuẩn (trong khoảng 16-19t), Vượt trần (>19t) hoặc Dưới sàn (<16t)"
+                ),
                 "Tải TB cả năm": st.column_config.NumberColumn(disabled=True, format="%.1f"),
                 "Tải TB HK1": st.column_config.NumberColumn(disabled=True, format="%.1f"),
                 "Tải TB HK2": st.column_config.NumberColumn(disabled=True, format="%.1f"),
@@ -337,25 +363,28 @@ with tab_gv:
             )
 
             # Metrics
-            n_over_year = sum(1 for v in view if v["cap"] > 0 and v["over_year"] > 0)
-            n_under_year = sum(1 for v in view if v["cap"] > 0 and v["under_year"] > 0)
+            n_in_norm_year = sum(1 for v in view if v["floor"] <= round(v["load_full_year_avg"], 1) <= v["cap"])
+            n_over_year = sum(1 for v in view if v["cap"] > 0 and round(v["load_full_year_avg"], 1) > v["cap"])
+            n_under_year = sum(1 for v in view if round(v["load_full_year_avg"], 1) < v["floor"])
+
             m1, m2, m3, m4 = st.columns(4)
             m1.metric("Tổng số GV", len(view))
-            m2.metric("Trần chuẩn", f"{base_cap} tiết/tuần")
-            m3.metric("GV vượt trần TB cả năm", n_over_year, delta=f"+{n_over_year}" if n_over_year else "0", delta_color="inverse" if n_over_year else "normal")
-            m4.metric("GV dưới sàn TB cả năm", n_under_year, delta=f"-{n_under_year}" if n_under_year else "0", delta_color="inverse" if n_under_year else "normal")
+            m2.metric("Trong định mức TB cả năm", n_in_norm_year)
+            m3.metric("Vượt trần TB cả năm (>19t)", n_over_year, delta=f"+{n_over_year}" if n_over_year else "0", delta_color="normal")
+            m4.metric("Dưới sàn TB cả năm (<16t)", n_under_year, delta=f"-{n_under_year}" if n_under_year else "0", delta_color="inverse" if n_under_year else "normal")
 
             gv_rows = []
             for v in view:
-                year_over = round(float(v["over_year"]), 1)
+                status_year = _format_quota_status(v["load_full_year_avg"], v["floor"], v["cap"])
+                quota_range_str = _format_quota_range(v["floor"], v["cap"])
                 gv_rows.append({
                     "teacher_id": v["teacher_id"],
                     "Giáo viên": v["name"],
                     "Chức vụ / Kiêm nhiệm": v["role"] or "",
                     "Giảm trừ (tiết)": int(v["reduction"]),
-                    "Trần định mức": int(v["cap"]),
+                    "Định mức chuẩn": quota_range_str,
                     "Tải TB cả năm": round(float(v["load_full_year_avg"]), 1),
-                    "Lệch TB cả năm": f"{'+' if year_over > 0 else ''}{year_over}" if year_over != 0 else "0",
+                    "Tình trạng cả năm": status_year,
                     "Tải TB HK1": round(float(v["load_hk1_avg"]), 1),
                     "Tải TB HK2": round(float(v["load_hk2_avg"]), 1),
                     "Tuần cao nhất": f"T{v['max_week']} ({v['max_load']} tiết)",
@@ -369,11 +398,14 @@ with tab_gv:
                 "Chức vụ / Kiêm nhiệm": st.column_config.TextColumn(help="Ghi chú chức vụ hoặc kiêm nhiệm"),
                 "Giảm trừ (tiết)": st.column_config.NumberColumn(
                     min_value=0, max_value=30, step=1, format="%d",
-                    help="Tổng số tiết giảm trừ trực tiếp của GV (Trần = Trần chuẩn − Giảm trừ)"
+                    help="Tổng số tiết giảm trừ trực tiếp của GV"
                 ),
-                "Trần định mức": st.column_config.NumberColumn(disabled=True, format="%d"),
+                "Định mức chuẩn": st.column_config.TextColumn(
+                    disabled=True,
+                    help="Khoảng định mức tiết dạy hợp lệ (Ví dụ: 16 - 19 tiết cho GV, 12 - 15 tiết cho GVCN)"
+                ),
                 "Tải TB cả năm": st.column_config.NumberColumn(disabled=True, format="%.1f"),
-                "Lệch TB cả năm": st.column_config.TextColumn(disabled=True),
+                "Tình trạng cả năm": st.column_config.TextColumn(disabled=True),
                 "Tải TB HK1": st.column_config.NumberColumn(disabled=True, format="%.1f"),
                 "Tải TB HK2": st.column_config.NumberColumn(disabled=True, format="%.1f"),
                 "Tuần cao nhất": st.column_config.TextColumn(disabled=True),
@@ -388,21 +420,30 @@ with tab_gv:
             view = repo.get_teacher_quota_view(conn, parity=cur_par)
             load_col_name = f"Tải tuần {'Chẵn' if cur_par == 'C' else 'Lẻ'}"
 
+            # Metrics
+            n_in_norm = sum(1 for v in view if v["floor"] <= v["load"] <= v["cap"])
+            n_over = sum(1 for v in view if v["cap"] > 0 and v["load"] > v["cap"])
+            n_under = sum(1 for v in view if v["load"] < v["floor"])
+
+            m1, m2, m3, m4 = st.columns(4)
+            m1.metric("Tổng số GV", len(view))
+            m2.metric("Trong định mức (16–19t)", n_in_norm)
+            m3.metric("Dạy vượt trần (>19t)", n_over, delta=f"+{n_over}" if n_over else "0", delta_color="normal")
+            m4.metric("Dưới sàn (<16t)", n_under, delta=f"-{n_under}" if n_under else "0", delta_color="inverse" if n_under else "normal")
+
             gv_rows = []
             for v in view:
-                c_over = round(float(v["load_chan"] - v["cap"]), 1)
-                l_over = round(float(v["load_le"] - v["cap"]), 1)
-                avg_over = round(float(v["over"]), 1)
-                curr_over = round(float(v["over_current"]), 1)
+                status_str = _format_quota_status(v["load"], v["floor"], v["cap"])
+                quota_range_str = _format_quota_range(v["floor"], v["cap"])
                 gv_rows.append({
                     "teacher_id": v["teacher_id"],
                     "Giáo viên": v["name"],
                     "Chức vụ / Kiêm nhiệm": v["role"] or "",
                     "Giảm trừ (tiết)": int(v["reduction"]),
-                    "Trần định mức": int(v["cap"]),
+                    "Định mức chuẩn": quota_range_str,
                     load_col_name: int(v["load"]),
+                    "Tình trạng tuần này": status_str,
                     "Tải TB cả năm": round(float(v["load_avg"]), 1),
-                    "Lệch so với trần": f"{'+' if curr_over > 0 else ''}{curr_over}" if curr_over != 0 else "0",
                     "Tải tuần Chẵn": int(v["load_chan"]),
                     "Tải tuần Lẻ": int(v["load_le"]),
                 })
@@ -416,10 +457,13 @@ with tab_gv:
                     min_value=0, max_value=30, step=1, format="%d",
                     help="Tổng số tiết giảm trừ trực tiếp của GV"
                 ),
-                "Trần định mức": st.column_config.NumberColumn(disabled=True, format="%d"),
+                "Định mức chuẩn": st.column_config.TextColumn(
+                    disabled=True,
+                    help="Khoảng định mức tiết dạy hợp lệ (Ví dụ: 16 - 19 tiết cho GV, 12 - 15 tiết cho GVCN)"
+                ),
                 load_col_name: st.column_config.NumberColumn(disabled=True, format="%d"),
+                "Tình trạng tuần này": st.column_config.TextColumn(disabled=True),
                 "Tải TB cả năm": st.column_config.NumberColumn(disabled=True, format="%.1f"),
-                "Lệch so với trần": st.column_config.TextColumn(disabled=True),
                 "Tải tuần Chẵn": st.column_config.NumberColumn(disabled=True, format="%d"),
                 "Tải tuần Lẻ": st.column_config.NumberColumn(disabled=True, format="%d"),
             }
@@ -452,22 +496,25 @@ with tab_gv:
             st.rerun()
 
         st.caption(
-            f"Trần định mức = {base_cap} − Giảm trừ. Tải = tổng số tiết dạy thực tế theo tuần đã chọn (Phân công × Số tiết tuần). "
-            f"Sàn tối thiểu cảnh báo: (Tải TB + Giảm trừ) phải ≥ {min_floor}."
+            f"💡 **Quy định khung định mức:** Tiết dạy chuẩn giáo viên THCS nằm trong khoảng **{min_floor} – {base_cap} tiết/tuần** (theo TT 28/2009/TT-BGDĐT). "
+            f"Khoảng định mức cá nhân = (Sàn {min_floor} − Giảm trừ) đến (Trần {base_cap} − Giảm trừ). "
+            f"Giáo viên dạy trong khoảng này là **Đạt chuẩn**, chỉ cảnh báo khi **Vượt trần** (> trần) hoặc **Dưới sàn** (< sàn)."
         )
 
         # ── Ma trận Tải 35 tuần của toàn bộ Giáo viên ──
         with st.expander("📊 Ma trận tải 35 tuần của toàn bộ Giáo viên (35 tuần × GV)", expanded=False):
             st.caption(
                 "Bảng theo dõi tải giảng dạy thực tế của tất cả giáo viên qua từng tuần trong năm học. "
-                "Các ô có màu đỏ nhạt là các tuần giáo viên dạy vượt trần định mức."
+                "Ô màu đỏ: Tuần vượt trần (> trần) | Ô màu vàng: Tuần dưới sàn (< sàn)."
             )
             matrix_gv_rows = []
             for v in view:
                 r_dict = {
                     "Giáo viên": v["name"],
-                    "Trần": v["cap"],
+                    "Khung chuẩn": _format_quota_range(v["floor"], v["cap"]),
                     "TB Năm": round(float(v["load_full_year_avg"]), 1),
+                    "_floor": v["floor"],
+                    "_cap": v["cap"],
                 }
                 w_loads = v.get("weekly_loads", {})
                 for w in range(1, 36):
@@ -476,19 +523,23 @@ with tab_gv:
 
             df_matrix_gv = pd.DataFrame(matrix_gv_rows)
 
-            def _highlight_over_cap(row):
-                cap_val = row["Trần"]
+            def _highlight_quota(row):
+                floor_val = row["_floor"]
+                cap_val = row["_cap"]
                 styles = [""] * len(row)
                 for i, col in enumerate(row.index):
                     if col.startswith("T") and col[1:].isdigit():
                         w_val = row[col]
                         if cap_val > 0 and w_val > cap_val:
                             styles[i] = "background-color: #ffc7ce; font-weight: bold; color: #9c0006"
+                        elif floor_val > 0 and w_val < floor_val:
+                            styles[i] = "background-color: #fff3cd; font-weight: bold; color: #856404"
                 return styles
 
             st.dataframe(
-                df_matrix_gv.style.apply(_highlight_over_cap, axis=1),
+                df_matrix_gv.style.apply(_highlight_quota, axis=1),
                 hide_index=True, width="stretch",
+                column_config={"_floor": None, "_cap": None},
             )
 
         with st.expander("🔬 Chi tiết phân công môn & số tiết theo tuần của từng Giáo viên (KHTN, LS&ĐL, Toán, Văn...)", expanded=False):
@@ -518,20 +569,40 @@ with tab_gv:
                         f"Trung bình HK1: **{chosen_v['load_hk1_avg']:.1f}** tiết/tuần, "
                         f"Trung bình HK2: **{chosen_v['load_hk2_avg']:.1f}** tiết/tuần, "
                         f"Trung bình Cả năm: **{chosen_v['load_full_year_avg']:.1f}** tiết/tuần. "
-                        f"Định mức trần: **{chosen_v['cap']}** tiết."
+                        f"Khung định mức chuẩn: **{_format_quota_range(chosen_v['floor'], chosen_v['cap'])}** tiết/tuần."
                     )
 
-    with st.expander("Mức giảm trừ mặc định theo tên chức vụ", expanded=False):
-        st.caption("Các mức giảm trừ tham chiếu chung cho toàn trường:")
+    with st.expander("⚖️ Mức giảm trừ định mức theo chức vụ & chuẩn Bộ GD&ĐT (Thông tư 28/2009 & 15/2017)", expanded=False):
+        st.markdown(
+            """
+            **Quy định chuẩn của Bộ GD&ĐT đối với giáo viên THCS (Khung chuẩn 16 – 19 tiết/tuần, trần tối đa 19 tiết/tuần):**
+            - **Giáo viên THCS**: Khung chuẩn **16 – 19 tiết/tuần** (sàn 16, trần 19)
+            - **Hiệu trưởng**: Định mức **2 tiết/tuần** (Sàn = Trần = 2)
+            - **Phó hiệu trưởng**: Định mức **4 tiết/tuần** (Sàn = Trần = 4)
+            - **Giáo viên chủ nhiệm (GVCN)**: Giảm **4 tiết/tuần** (Khung chuẩn **12 – 15 tiết/tuần**)
+            - **Tổ trưởng chuyên môn**: Giảm **3 tiết/tuần** (Khung chuẩn **13 – 16 tiết/tuần**)
+            - **Tổ phó chuyên môn**: Giảm **1 tiết/tuần** (Khung chuẩn **15 – 18 tiết/tuần**)
+            - **Thư ký Hội đồng trường**: Giảm **2 tiết/tuần** (Khung chuẩn **14 – 17 tiết/tuần**)
+            - **Tổng phụ trách Đội**: Giảm **8 tiết/tuần** (hoặc định mức riêng theo hạng trường)
+            """
+        )
         rr = repo.get_role_reduction(conn)
         rr_df = pd.DataFrame([{"Chức vụ": k, "Giảm trừ": v} for k, v in rr.items()])
         rr_edited = st.data_editor(rr_df, hide_index=True, num_rows="dynamic", key="editor_role_reduction")
-        if st.button("Lưu bảng giảm trừ mẫu"):
+        
+        c_rr1, c_rr2 = st.columns([1, 1])
+        if c_rr1.button("💾 Lưu bảng giảm trừ chức vụ", type="primary"):
             for _, row in rr_edited.iterrows():
                 name = str(row["Chức vụ"] or "").strip()
                 if name:
                     repo.set_role_reduction(conn, name, int(row["Giảm trừ"] or 0))
-            st.success("Đã lưu bảng giảm trừ mẫu.")
+            st.success("Đã lưu bảng giảm trừ mẫu thành công.")
+            st.rerun()
+
+        if c_rr2.button("🔄 Nạp mẫu giảm trừ chuẩn Bộ GD&ĐT (TT 28/2009)"):
+            for k, v in db.DEFAULT_ROLE_REDUCTION.items():
+                repo.set_role_reduction(conn, k, v)
+            st.success("Đã cập nhật bảng giảm trừ theo chuẩn Bộ GD&ĐT (TT 28/2009 & 15/2017).")
             st.rerun()
 
 sidebar_backup_export(conn)

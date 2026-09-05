@@ -143,7 +143,7 @@ def _fill_result_sheets(ws_raw, ws_tkb, ws_gv, cells, classes, frame_templates, 
                 row_idx += 1
 
 
-def export_xlsx(conn, run_id=None) -> bytes:
+def export_xlsx(conn, run_id=None, cells=None) -> bytes:
     classes = repo.list_classes(conn)
     subjects = repo.list_subjects(conn)
     teacher_names = {t.teacher_id: t.name for t in repo.list_teachers(conn)}
@@ -152,10 +152,11 @@ def export_xlsx(conn, run_id=None) -> bytes:
     frame_templates = repo.get_all_frame_templates(conn)
     all_class_allowed_cells = repo.get_all_class_allowed_cells(conn)
 
-    if run_id is not None:
-        cells = repo.get_tkb_result(conn, run_id)
-    else:
-        cells = repo.get_tkb_nhap(conn)
+    if cells is None:
+        if run_id is not None:
+            cells = repo.get_tkb_result(conn, run_id)
+        else:
+            cells = repo.get_tkb_nhap(conn)
 
     wb = openpyxl.load_workbook(TEMPLATE_PATH)  # drop VBA -- superseded by this app
     ws_raw = wb["TKB_Nhap"]

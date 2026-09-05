@@ -384,7 +384,7 @@ def find_teacher_split_day_violations(slots: list, assignment: dict, assigned_te
     for (teacher_id, wd), sess_counts in teacher_day_sessions.items():
         s_count = sess_counts.get("S", 0)
         c_count = sess_counts.get("C", 0)
-        if (s_count > 0 and c_count > 0 and (s_count == 1 or c_count == 1)
+        if (s_count == 1 and c_count == 1
                 and teacher_totals[teacher_id] >= min_weekly_periods):
             violations.append((teacher_id, wd))
     return violations

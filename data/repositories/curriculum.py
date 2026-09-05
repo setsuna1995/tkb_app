@@ -196,8 +196,28 @@ def get_teacher_quota_view(conn: sqlite3.Connection, parity: str = "C", week_no:
 
     view = []
     for t in teachers:
-        reduction = t.reduction_override if t.reduction_override is not None else reductions.get(t.role, 0)
-        cap = base_cap - reduction
+        if t.reduction_override is not None:
+            reduction = t.reduction_override
+            cap = max(0, base_cap - reduction)
+            floor = max(0, min_floor - reduction)
+        else:
+            role_str = (t.role or "").strip()
+            role_lower = role_str.lower()
+            if "hiệu trưởng" in role_lower and "phó" not in role_lower:
+                # TT 28/2009: Hiệu trưởng dạy 2 tiết/tuần
+                cap = 2
+                floor = 2
+                reduction = reductions.get(role_str, max(0, base_cap - 2))
+            elif "phó hiệu trưởng" in role_lower or "hiệu phó" in role_lower:
+                # TT 28/2009: Phó hiệu trưởng dạy 4 tiết/tuần
+                cap = 4
+                floor = 4
+                reduction = reductions.get(role_str, max(0, base_cap - 4))
+            else:
+                reduction = reductions.get(role_str, 0)
+                cap = max(0, base_cap - reduction)
+                floor = max(0, min_floor - reduction)
+
         load_c = loads_by_parity["C"].get(t.teacher_id, 0)
         load_l = loads_by_parity["L"].get(t.teacher_id, 0)
         load_avg_legacy = (load_c + load_l) / 2
@@ -217,7 +237,7 @@ def get_teacher_quota_view(conn: sqlite3.Connection, parity: str = "C", week_no:
 
         view.append({
             "teacher_id": t.teacher_id, "name": t.name, "role": t.role,
-            "reduction": reduction, "cap": cap, "load": load_current,
+            "reduction": reduction, "floor": floor, "cap": cap, "load": load_current,
             "load_chan": load_c, "load_le": load_l, "load_avg": load_avg_legacy,
             "load_full_year_avg": load_full_year_avg,
             "load_hk1_avg": load_hk1_avg,
@@ -232,9 +252,9 @@ def get_teacher_quota_view(conn: sqlite3.Connection, parity: str = "C", week_no:
             "over_hk1": load_hk1_avg - cap,
             "over_hk2": load_hk2_avg - cap,
             "over_year": load_full_year_avg - cap,
-            "under": min_floor - (load_avg_legacy + reduction),
-            "under_current": min_floor - (load_current + reduction),
-            "under_year": min_floor - (load_full_year_avg + reduction),
+            "under": floor - load_avg_legacy,
+            "under_current": floor - load_current,
+            "under_year": floor - load_full_year_avg,
             "must_monday": t.must_monday, "is_gvcn": t.is_gvcn,
             "assignments": teacher_assignments.get(t.teacher_id, []),
         })
@@ -244,7 +264,36 @@ def get_teacher_quota_view(conn: sqlite3.Connection, parity: str = "C", week_no:
 def get_teacher_caps(conn: sqlite3.Connection) -> dict:
     base_cap = get_base_cap(conn)
     reductions = get_role_reduction(conn)
-    return {
-        t.teacher_id: base_cap - (t.reduction_override if t.reduction_override is not None else reductions.get(t.role, 0))
-        for t in list_teachers(conn)
-    }
+    caps = {}
+    for t in list_teachers(conn):
+        if t.reduction_override is not None:
+            caps[t.teacher_id] = max(0, base_cap - t.reduction_override)
+        else:
+            role_str = (t.role or "").strip()
+            role_lower = role_str.lower()
+            if "hiệu trưởng" in role_lower and "phó" not in role_lower:
+                caps[t.teacher_id] = 2
+            elif "phó hiệu trưởng" in role_lower or "hiệu phó" in role_lower:
+                caps[t.teacher_id] = 4
+            else:
+                caps[t.teacher_id] = max(0, base_cap - reductions.get(role_str, 0))
+    return caps
+
+
+def get_teacher_floors(conn: sqlite3.Connection) -> dict:
+    min_floor = get_min_floor(conn)
+    reductions = get_role_reduction(conn)
+    floors = {}
+    for t in list_teachers(conn):
+        if t.reduction_override is not None:
+            floors[t.teacher_id] = max(0, min_floor - t.reduction_override)
+        else:
+            role_str = (t.role or "").strip()
+            role_lower = role_str.lower()
+            if "hiệu trưởng" in role_lower and "phó" not in role_lower:
+                floors[t.teacher_id] = 2
+            elif "phó hiệu trưởng" in role_lower or "hiệu phó" in role_lower:
+                floors[t.teacher_id] = 4
+            else:
+                floors[t.teacher_id] = max(0, min_floor - reductions.get(role_str, 0))
+    return floors

@@ -140,11 +140,13 @@ CREATE TABLE IF NOT EXISTS subject_class_slot_rules (
 """
 
 DEFAULT_ROLE_REDUCTION = {
+    "Hiệu trưởng": 17,
+    "Phó hiệu trưởng": 15,
     "GVCN": 4,
     "Tổ trưởng": 3,
     "Tổ phó": 1,
+    "Thư ký HĐ": 2,
     "Tổng phụ trách": 8,
-    "Phó hiệu trưởng": 15,
 }
 
 

@@ -103,8 +103,7 @@ def _count_teacher_split_sessions(slots: list[Slot], assigned: dict, slot_teache
                 teacher_totals[tid] += 1
     return sum(
         1 for (tid, wd), sess_counts in teacher_day_sessions.items()
-        if sess_counts.get("S", 0) > 0 and sess_counts.get("C", 0) > 0
-        and (sess_counts.get("S", 0) == 1 or sess_counts.get("C", 0) == 1)
+        if sess_counts.get("S", 0) == 1 and sess_counts.get("C", 0) == 1
         and teacher_totals[tid] >= min_weekly_periods
         and tid not in exempt_teacher_ids
     )

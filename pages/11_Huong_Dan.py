@@ -24,9 +24,8 @@ with st.expander("🗺️ Tổng quan luồng làm việc", expanded=True):
         "6. **Cấu hình xếp lịch** -- các quy tắc \"lựa chọn của trường\" (né tiết, số buổi nghỉ GV, "
         "môn ưu tiên buổi nào...).\n"
         "7. **Xếp TKB tự động** -- chạy thuật toán, tạo thời khóa biểu cho cả trường.\n"
-        "8. **Cân bằng tải giáo viên** -- kiểm tra/điều chỉnh số tiết mỗi GV sau khi xếp.\n"
-        "9. **Lịch sử tuần** -- xem lại các tuần TKB đã xếp trước đó.\n"
-        "10. **Nhập / Xuất Excel** -- nhập dữ liệu từ file Excel cũ, hoặc xuất TKB ra Excel."
+        "8. **Lịch sử tuần** -- xem lại các tuần TKB đã xếp trước đó.\n"
+        "9. **Nhập / Xuất Excel** -- nhập dữ liệu từ file Excel cũ, hoặc xuất TKB ra Excel."
     )
 
 with st.expander("🏫 Khai báo Lớp / Môn / Giáo viên"):
@@ -202,17 +201,6 @@ with st.expander("🚀 Xếp TKB tự động"):
         "tiết, hoặc tắt bớt \"Môn Nặng: bắt buộc xếp buổi sáng\") rồi chạy lại."
     )
 
-with st.expander("⚖️ Cân bằng tải giáo viên"):
-    st.markdown(
-        "Đây là công cụ **Đề xuất và Tự động Điều chỉnh Phân công** dựa trên định mức tiết/tuần:\n\n"
-        "1. **Nguyên tắc trọn gói theo Lớp**: Mọi điều chỉnh đều chuyển nguyên vẹn từng **Lớp cho Môn học đó** "
-        "(toàn bộ số tiết cả tuần Chẵn và tuần Lẻ), tuyệt đối không chia cắt lẻ từng tiết nhằm đảm bảo tính đồng bộ hoàn hảo.\n"
-        "2. **Hình thức cân bằng linh hoạt**:\n"
-        "   - **Chuyển 1 lớp (Transfer)**: Chuyển trọn gói 1 lớp từ GV vượt trần sang GV còn dư địa (ưu tiên GV dưới sàn).\n"
-        "   - **Đổi chéo 2 lớp (Class Swap)**: Hoán đổi 2 lớp cùng môn giữa 2 GV khi chênh lệch tải nhỏ (1–2 tiết) mà chuyển 1 lớp nguyên vẹn không khả thi.\n"
-        "3. **Áp dụng 1-click vào Phân công**: Bạn có thể chọn các đề xuất phù hợp và bấm **\"Áp dụng các đề xuất đã chọn\"** "
-        "hoặc **\"Áp dụng TẤT CẢ đề xuất\"** để hệ thống tự động lưu trực tiếp vào cơ sở dữ liệu Phân công chuyên môn mà không cần phải đi sửa tay từng ô."
-    )
 
 with st.expander("🕘 Lịch sử tuần"):
     st.markdown(
