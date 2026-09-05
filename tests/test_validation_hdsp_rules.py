@@ -64,6 +64,43 @@ def test_find_teacher_split_day_violations_catches_asymmetric_split():
     assert find_teacher_split_day_violations(slots, assignment, assigned_teacher, min_weekly_periods=0) == [(1, 2)]
 
 
+def test_find_teacher_lone_session_violations_honors_exempt_teacher_ids():
+    # Teacher 1: lone session, load (1) already above min_weekly_periods=0, so it
+    # would be flagged -- UNLESS the teacher is on the config's exempt list, mirroring
+    # how CP-SAT/engine.py/quality.py all skip exempted teachers for II.4/II.8
+    # (2026-09-05 root-cause fix: this function used to silently ignore the exempt
+    # list, disagreeing with the solver's own "no violation" verdict).
+    slots = _slots_for([(2, 1)])
+    assignment = {s.slot_id: 1 for s in slots}
+    assigned_teacher = {(1, 101): 1}
+    assert find_teacher_lone_session_violations(slots, assignment, assigned_teacher, min_weekly_periods=0) == [(1, 2, "S")]
+    assert find_teacher_lone_session_violations(
+        slots, assignment, assigned_teacher, min_weekly_periods=0, exempt_teacher_ids=frozenset({1})
+    ) == []
+
+
+def test_find_teacher_lone_day_violations_honors_exempt_teacher_ids():
+    slots = _slots_for([(2, 1)])
+    assignment = {s.slot_id: 1 for s in slots}
+    assigned_teacher = {(1, 101): 1}
+    assert find_teacher_lone_day_violations(slots, assignment, assigned_teacher, min_weekly_periods=0) == [(1, 2)]
+    assert find_teacher_lone_day_violations(
+        slots, assignment, assigned_teacher, min_weekly_periods=0, exempt_teacher_ids=frozenset({1})
+    ) == []
+
+
+def test_find_teacher_split_day_violations_honors_exempt_teacher_ids():
+    slots = _slots_for([(2, 1)], session="S") + _slots_for([(2, 2)], session="C")
+    for i, s in enumerate(slots):
+        s.slot_id = i + 1
+    assignment = {s.slot_id: 1 for s in slots}
+    assigned_teacher = {(1, 101): 1}
+    assert find_teacher_split_day_violations(slots, assignment, assigned_teacher, min_weekly_periods=0) == [(1, 2)]
+    assert find_teacher_split_day_violations(
+        slots, assignment, assigned_teacher, min_weekly_periods=0, exempt_teacher_ids=frozenset({1})
+    ) == []
+
+
 def test_find_teacher_4_consecutive_morning_violations():
     pairs = [(2, p) for p in range(1, 5)]  # 4 periods on one morning, total load = 4 (<=20)
     slots = _slots_for(pairs)

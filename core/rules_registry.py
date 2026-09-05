@@ -47,7 +47,10 @@ RULES: dict[str, RuleSpec] = {
     ),
     "II.4": RuleSpec(
         id="II.4",
-        title_vi="Hạn chế GV dạy 1 tiết/buổi hoặc 1 tiết/ngày (trừ GV <15 tiết/tuần)",
+        # 2026-09-05: "<15 tiết/tuần" trong title cũ không khớp ngưỡng thực thi
+        # (config.min_weekly_periods_for_lone_penalty, mặc định 8) -- gây hiểu lầm
+        # rằng GV 8-14 tiết/tuần được miễn trong khi thực tế vẫn bị chặn.
+        title_vi="Hạn chế GV dạy 1 tiết/buổi hoặc 1 tiết/ngày (trừ GV dưới ngưỡng cấu hình, mặc định 8 tiết/tuần)",
         tier=RuleTier.HARD_POST_GENERATION,
         config_flag="avoid_teacher_lone_periods",
     ),

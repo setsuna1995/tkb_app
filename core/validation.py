@@ -279,10 +279,16 @@ def find_teacher_missing_mandatory_morning_violations(slots: list, assignment: d
 
 
 def find_teacher_lone_session_violations(slots: list, assignment: dict, assigned_teacher: dict,
-                                          min_weekly_periods: int = 15) -> list:
+                                          min_weekly_periods: int = 15,
+                                          exempt_teacher_ids: frozenset = frozenset()) -> list:
     """Returns [(teacher_id, weekday, session), ...] for any teacher session with
     exactly 1 period -- Tiêu chí II.4, exempting teachers below min_weekly_periods.
-    Mirrors core.scheduler.quality._count_teacher_lone_sessions exactly."""
+    Mirrors core.scheduler.quality._count_teacher_lone_sessions exactly, INCLUDING
+    exempt_teacher_ids (config.lone_session_exempt_teacher_ids) -- omitting this
+    parameter here let a teacher the engine/CP-SAT deliberately excused (per the
+    school's own config) get flagged again by this independent display-side check,
+    silently disagreeing with the "no lỗi" the solver's own hard-gate reported
+    (2026-09-05 root-cause fix)."""
     t_sess = defaultdict(int)
     teacher_totals = defaultdict(int)
     for slot in slots:
@@ -290,7 +296,7 @@ def find_teacher_lone_session_violations(slots: list, assignment: dict, assigned
         if subject_id is None:
             continue
         teacher_id = assigned_teacher.get((subject_id, slot.class_id))
-        if teacher_id is None or teacher_id <= 0:
+        if teacher_id is None or teacher_id <= 0 or teacher_id in exempt_teacher_ids:
             continue
         t_sess[(teacher_id, slot.ts.weekday, slot.ts.session)] += 1
         teacher_totals[teacher_id] += 1
@@ -302,10 +308,12 @@ def find_teacher_lone_session_violations(slots: list, assignment: dict, assigned
 
 
 def find_teacher_lone_day_violations(slots: list, assignment: dict, assigned_teacher: dict,
-                                      min_weekly_periods: int = 15) -> list:
+                                      min_weekly_periods: int = 15,
+                                      exempt_teacher_ids: frozenset = frozenset()) -> list:
     """Returns [(teacher_id, weekday), ...] for any teacher day with exactly 1 period
     total -- Tiêu chí II.4, exempting teachers below min_weekly_periods. Mirrors
-    core.scheduler.quality._count_teacher_lone_days exactly."""
+    core.scheduler.quality._count_teacher_lone_days exactly, INCLUDING
+    exempt_teacher_ids (see find_teacher_lone_session_violations's docstring)."""
     teacher_days = defaultdict(int)
     teacher_totals = defaultdict(int)
     for slot in slots:
@@ -313,7 +321,7 @@ def find_teacher_lone_day_violations(slots: list, assignment: dict, assigned_tea
         if subject_id is None:
             continue
         teacher_id = assigned_teacher.get((subject_id, slot.class_id))
-        if teacher_id is None or teacher_id <= 0:
+        if teacher_id is None or teacher_id <= 0 or teacher_id in exempt_teacher_ids:
             continue
         teacher_days[(teacher_id, slot.ts.weekday)] += 1
         teacher_totals[teacher_id] += 1
@@ -325,7 +333,8 @@ def find_teacher_lone_day_violations(slots: list, assignment: dict, assigned_tea
 
 
 def find_teacher_split_day_violations(slots: list, assignment: dict, assigned_teacher: dict,
-                                       min_weekly_periods: int = 15) -> list:
+                                       min_weekly_periods: int = 15,
+                                       exempt_teacher_ids: frozenset = frozenset()) -> list:
     """Returns [(teacher_id, weekday), ...] for any teacher day with periods in BOTH
     sessions where at least one session has exactly 1 period (e.g. 1 AM + 1 PM, but
     also the asymmetric case like 1 AM + 3 PM) -- Tiêu chí II.8, exempting teachers
@@ -336,7 +345,8 @@ def find_teacher_split_day_violations(slots: list, assignment: dict, assigned_te
     `S>0 and C>0 and (S==1 or C==1)`, NOT the narrower `S==1 and C==1` -- getting this
     wrong here would silently disagree with the engine's hard gate, defeating the
     entire point of this task (post-fix-round, that function also gained this same
-    min_weekly_periods parameter)."""
+    min_weekly_periods parameter). Also honors exempt_teacher_ids (see
+    find_teacher_lone_session_violations's docstring, 2026-09-05)."""
     teacher_day_sessions = defaultdict(lambda: defaultdict(int))
     teacher_totals = defaultdict(int)
     for slot in slots:
@@ -344,7 +354,7 @@ def find_teacher_split_day_violations(slots: list, assignment: dict, assigned_te
         if subject_id is None:
             continue
         teacher_id = assigned_teacher.get((subject_id, slot.class_id))
-        if teacher_id is None or teacher_id <= 0:
+        if teacher_id is None or teacher_id <= 0 or teacher_id in exempt_teacher_ids:
             continue
         teacher_day_sessions[(teacher_id, slot.ts.weekday)][slot.ts.session] += 1
         teacher_totals[teacher_id] += 1

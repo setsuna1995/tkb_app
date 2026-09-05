@@ -387,14 +387,15 @@ if result is not None:
             hard_rule_violations["II.3"] = missing_morning
 
         min_lone_load = getattr(inp.config, "min_weekly_periods_for_lone_penalty", 8)
+        lone_exempt_ids = getattr(inp.config, "lone_session_exempt_teacher_ids", frozenset()) or frozenset()
         if getattr(inp.config, "avoid_teacher_lone_periods", True):
             # Gated the same way engine.py:_check_hard_post_generation_rules gates II.4/II.8.
-            lone_sessions = find_teacher_lone_session_violations(inp.slots, result.assignment, inp.assigned_teacher, min_lone_load)
-            lone_days = find_teacher_lone_day_violations(inp.slots, result.assignment, inp.assigned_teacher, min_lone_load)
+            lone_sessions = find_teacher_lone_session_violations(inp.slots, result.assignment, inp.assigned_teacher, min_lone_load, lone_exempt_ids)
+            lone_days = find_teacher_lone_day_violations(inp.slots, result.assignment, inp.assigned_teacher, min_lone_load, lone_exempt_ids)
             if lone_sessions or lone_days:
                 hard_rule_violations["II.4"] = lone_sessions + [(tid, wd, "cả ngày") for tid, wd in lone_days]
 
-            split_days = find_teacher_split_day_violations(inp.slots, result.assignment, inp.assigned_teacher, min_lone_load)
+            split_days = find_teacher_split_day_violations(inp.slots, result.assignment, inp.assigned_teacher, min_lone_load, lone_exempt_ids)
             if split_days:
                 hard_rule_violations["II.8"] = split_days
 
@@ -635,14 +636,15 @@ with st.expander("📅 Xếp nhiều tuần cùng lúc (tạm thời tắt)", ex
                     b_hard_rule_violations["II.3"] = b_missing_morning
 
                 b_min_lone_load = getattr(b_inp.config, "min_weekly_periods_for_lone_penalty", 8)
+                b_lone_exempt_ids = getattr(b_inp.config, "lone_session_exempt_teacher_ids", frozenset()) or frozenset()
                 if getattr(b_inp.config, "avoid_teacher_lone_periods", True):
                     # Gated the same way engine.py:_check_hard_post_generation_rules gates II.4/II.8.
-                    b_lone_sessions = find_teacher_lone_session_violations(b_inp.slots, b_result.assignment, b_inp.assigned_teacher, b_min_lone_load)
-                    b_lone_days = find_teacher_lone_day_violations(b_inp.slots, b_result.assignment, b_inp.assigned_teacher, b_min_lone_load)
+                    b_lone_sessions = find_teacher_lone_session_violations(b_inp.slots, b_result.assignment, b_inp.assigned_teacher, b_min_lone_load, b_lone_exempt_ids)
+                    b_lone_days = find_teacher_lone_day_violations(b_inp.slots, b_result.assignment, b_inp.assigned_teacher, b_min_lone_load, b_lone_exempt_ids)
                     if b_lone_sessions or b_lone_days:
                         b_hard_rule_violations["II.4"] = b_lone_sessions + [(tid, wd, "cả ngày") for tid, wd in b_lone_days]
 
-                    b_split_days = find_teacher_split_day_violations(b_inp.slots, b_result.assignment, b_inp.assigned_teacher, b_min_lone_load)
+                    b_split_days = find_teacher_split_day_violations(b_inp.slots, b_result.assignment, b_inp.assigned_teacher, b_min_lone_load, b_lone_exempt_ids)
                     if b_split_days:
                         b_hard_rule_violations["II.8"] = b_split_days
 
