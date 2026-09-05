@@ -40,7 +40,6 @@ with st.expander("📥 Nạp định lượng số tiết 35 tuần từ file Ex
                     f"✅ Đã nạp thành công **{rep['records_imported']}** dòng dữ liệu cho **{rep['weeks_count']}** tuần "
                     f"({', '.join(rep['classes_updated'])})."
                 )
-                st.rerun()
             except Exception as e:
                 st.error(f"Lỗi khi nạp file: {e}")
                 
@@ -53,7 +52,6 @@ with st.expander("📥 Nạp định lượng số tiết 35 tuần từ file Ex
                     st.success(
                         f"✅ Đã nạp thành công **{rep['records_imported']}** dòng dữ liệu cho **{rep['weeks_count']}** tuần."
                     )
-                    st.rerun()
                 except Exception as e:
                     st.error(f"Lỗi khi nạp: {e}")
 
