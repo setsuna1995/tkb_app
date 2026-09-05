@@ -12,7 +12,7 @@ from __future__ import annotations
 
 from collections import defaultdict
 from dataclasses import dataclass, field
-from typing import Optional
+from typing import Optional, Sequence
 
 from core.frame import MAX_PERIODS_PER_SESSION
 from core.models import SchedulingInput, ScheduleResult, is_bgh
@@ -929,7 +929,7 @@ def _add_change_minimisation(built: CpSatModel) -> None:
     built.changed_terms = changed_terms
 
 
-def build_result(built: CpSatModel, solver: cp_model.CpSolver) -> ScheduleResult:
+def build_result(built: CpSatModel, solver: cp_model.CpSolver, diagnostics: Optional[dict] = None) -> ScheduleResult:
     """Dựng đối tượng ScheduleResult hoàn chỉnh từ một lời giải CP-SAT (task-7-brief.md).
     - assignment: mọi slot_id đều có mặt, ô trống mang None (không phải -1).
     - cells_changed: số ô khác old_subject_id.
@@ -958,11 +958,15 @@ def build_result(built: CpSatModel, solver: cp_model.CpSolver) -> ScheduleResult
 
     cells_total = len(inp.slots)
 
+    unsat_core = set((diagnostics or {}).get("unsat_core", []))
     relaxed_rules = []
     for rid in HARD_POST_GENERATION_IDS:
         terms = built.penalty_terms.get(rid, [])
         if any(solver.Value(v) > 0 for v in terms):
-            relaxed_rules.append({"rule_id": rid})
+            entry = {"rule_id": rid}
+            if rid in unsat_core:
+                entry["proven_infeasible"] = True
+            relaxed_rules.append(entry)
 
     successes_found = 1 if not relaxed_rules else 0
 
@@ -975,7 +979,117 @@ def build_result(built: CpSatModel, solver: cp_model.CpSolver) -> ScheduleResult
         successes_found=successes_found,
         relaxed_rules=relaxed_rules,
         solver_name="cpsat",
+        diagnostics=diagnostics or {},
     )
+
+
+def _build_gated_model(built: CpSatModel, rids: Sequence[str]) -> tuple:
+    """Clone built.model và thêm một reified gate BoolVar cho mỗi rid:
+    gate_<rid> == 1  =>  sum(built.penalty_terms[rid]) == 0.
+    Các rid không có penalty terms sẽ được bỏ qua.
+    Trả về (model_clone, {rid: gate_var})."""
+    model = built.model.Clone()
+    gates = {}
+    for rid in rids:
+        terms = built.penalty_terms.get(rid)
+        if not terms:
+            continue
+        gate = model.NewBoolVar(f"gate_{rid}")
+        model.Add(sum(terms) == 0).OnlyEnforceIf(gate)
+        gates[rid] = gate
+    return model, gates
+
+
+_STATUS_NAMES = {
+    cp_model.OPTIMAL: "OPTIMAL",
+    cp_model.FEASIBLE: "FEASIBLE",
+    cp_model.INFEASIBLE: "INFEASIBLE",
+    cp_model.UNKNOWN: "UNKNOWN",
+}
+
+
+def _diagnose_and_solve(built: CpSatModel, solver: cp_model.CpSolver, time_limit_s: float) -> dict:
+    """Chẩn đoán leo thang assumption gates cho HARD_POST_GENERATION_IDS.
+    Đảm bảo solver lưu giữ trạng thái và giá trị biến của lần Solve() cuối cùng.
+
+    Tối đa len(active_rids) + 1 lần gọi Solve().
+    Tổng thời gian chạy được quản lý chặt chẽ theo ngân sách time_limit_s:
+    mỗi lần gọi chỉ nhận thời gian còn lại (remaining = time_limit_s - sum(WallTime)).
+
+    Trả về:
+      {
+        "status": int,                     # final cp_model status
+        "pass1_status": str,               # status name của lần thử đầu tiên
+        "unsat_core": list[str],           # rule ids từ SufficientAssumptionsForInfeasibility
+                                           # ở lần thử INFEASIBLE đầu tiên; [] nếu pass 1 không INFEASIBLE,
+                                           # hoặc INFEASIBLE nhưng core rỗng (mâu thuẫn ở Base Model).
+        "relaxed_by_diagnosis": list[str], # danh sách rule ids đã phải relax
+        "passes_run": int,
+      }
+    """
+    active_rids = [rid for rid in HARD_POST_GENERATION_IDS if built.penalty_terms.get(rid)]
+    relaxed: set = set()
+    remaining = float(time_limit_s)
+    diag = {
+        "status": cp_model.UNKNOWN,
+        "pass1_status": None,
+        "unsat_core": [],
+        "relaxed_by_diagnosis": [],
+        "passes_run": 0,
+    }
+
+    while True:
+        hard_rids = [rid for rid in active_rids if rid not in relaxed]
+        solver.parameters.max_time_in_seconds = float(time_limit_s)
+        diag["passes_run"] += 1
+
+        if not hard_rids:
+            status = solver.Solve(built.model)
+        else:
+            model, gates = _build_gated_model(built, hard_rids)
+            model.AddAssumptions(list(gates.values()))
+            status = solver.Solve(model)
+
+        remaining -= solver.WallTime()
+        diag["status"] = status
+        if diag["pass1_status"] is None:
+            diag["pass1_status"] = _STATUS_NAMES.get(status, str(status))
+
+        if status in (cp_model.OPTIMAL, cp_model.FEASIBLE):
+            return diag
+
+        if hard_rids and status == cp_model.INFEASIBLE:
+            # CP-SAT's SufficientAssumptionsForInfeasibility() có thể bị nhiễu biến mục tiêu
+            # nếu mô hình chứa Objective. Trích xuất core trên hình chiếu khả thi thuần túy:
+            diag_model, diag_gates = _build_gated_model(built, hard_rids)
+            diag_model.Proto().clear_objective()
+            diag_model.AddAssumptions(list(diag_gates.values()))
+            diag_solver = cp_model.CpSolver()
+            diag_solver.parameters.max_time_in_seconds = min(max(remaining, 1.0), 3.0)
+            if diag_solver.Solve(diag_model) == cp_model.INFEASIBLE:
+                core = set(diag_solver.SufficientAssumptionsForInfeasibility())
+                index_to_rid = {g.Index(): rid for rid, g in diag_gates.items()}
+            else:
+                core = set(solver.SufficientAssumptionsForInfeasibility())
+                index_to_rid = {g.Index(): rid for rid, g in gates.items()}
+
+            offending = {index_to_rid[i] for i in core if i in index_to_rid}
+            if diag["passes_run"] == 1:
+                diag["unsat_core"] = sorted(offending)  # may be [] -> base-model infeasibility
+            if not offending:
+                offending = set(hard_rids)  # Không cô lập được -> thả hết hard_rids đợt này
+            relaxed |= offending
+            diag["relaxed_by_diagnosis"] = sorted(relaxed)
+            continue
+
+        if hard_rids and status == cp_model.UNKNOWN:
+            # Hết giờ (timeout): không có core để chẩn đoán.
+            # Thả đồng loạt các hard_rids còn lại về giải phạt mềm với phần thời gian còn lại.
+            relaxed |= set(hard_rids)
+            diag["relaxed_by_diagnosis"] = sorted(relaxed)
+            continue
+
+        return diag  # hard_rids đã rỗng và mô hình mềm cũng không giải được
 
 
 def solve_to_result(built: CpSatModel, time_limit_s: float = 30.0,
@@ -989,31 +1103,15 @@ def solve_to_result(built: CpSatModel, time_limit_s: float = 30.0,
         workers = min(workers, 2)
 
     solver = cp_model.CpSolver()
-    solver.parameters.max_time_in_seconds = float(time_limit_s)
     solver.parameters.num_search_workers = int(workers)
     if getattr(built.inp, "seed", None):
         solver.parameters.random_seed = int(built.inp.seed)
 
-    # Lượt 1: Thử giải với các ràng buộc cứng HARD_POST_GENERATION_IDS (II.3 == 0, II.4 == 0, II.8 == 0)
-    # Thêm trực tiếp ràng buộc cứng vào mô hình bản sao (clone) để CP-SAT kích hoạt root presolve propagation,
-    # tìm ra nghiệm sạch 100% trong thời gian nhanh nhất (chỉ 2-3s).
-    strict_model = built.model.Clone()
-    for rid in HARD_POST_GENERATION_IDS:
-        terms = built.penalty_terms.get(rid)
-        if terms:
-            strict_model.Add(sum(terms) == 0)
-
-    status = solver.Solve(strict_model)
-
-    # Lượt 2 (Fallback): Nếu bài toán thực sự Infeasible với các luật cứng,
-    # rơi về giải mô hình gốc có hàm mục tiêu phạt mềm.
-    if status not in (cp_model.OPTIMAL, cp_model.FEASIBLE):
-        status = solver.Solve(built.model)
-
-    if status not in (cp_model.OPTIMAL, cp_model.FEASIBLE):
+    diag = _diagnose_and_solve(built, solver, float(time_limit_s))
+    if diag["status"] not in (cp_model.OPTIMAL, cp_model.FEASIBLE):
         return None
 
-    return build_result(built, solver)
+    return build_result(built, solver, diagnostics=diag)
 
 
 def solve(built: CpSatModel, time_limit_s: float = 10.0,
@@ -1028,22 +1126,12 @@ def solve(built: CpSatModel, time_limit_s: float = 10.0,
         workers = min(workers, 2)
 
     solver = cp_model.CpSolver()
-    solver.parameters.max_time_in_seconds = float(time_limit_s)
     solver.parameters.num_search_workers = int(workers)
     if getattr(built.inp, "seed", None):
         solver.parameters.random_seed = int(built.inp.seed)
 
-    strict_model = built.model.Clone()
-    for rid in HARD_POST_GENERATION_IDS:
-        terms = built.penalty_terms.get(rid)
-        if terms:
-            strict_model.Add(sum(terms) == 0)
-
-    status = solver.Solve(strict_model)
-    if status not in (cp_model.OPTIMAL, cp_model.FEASIBLE):
-        status = solver.Solve(built.model)
-
-    if status not in (cp_model.OPTIMAL, cp_model.FEASIBLE):
+    diag = _diagnose_and_solve(built, solver, float(time_limit_s))
+    if diag["status"] not in (cp_model.OPTIMAL, cp_model.FEASIBLE):
         return None
 
     assignment = {}

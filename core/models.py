@@ -189,3 +189,5 @@ class ScheduleResult:
                                                           # fully satisfied even in the best available attempt
                                                           # (see core/scheduler/engine.py's post-generation gate)
     solver_name: str = "heuristic"
+    diagnostics: dict = field(default_factory=dict)  # cpsat_model diagnostic trace; {} for heuristic engine
+

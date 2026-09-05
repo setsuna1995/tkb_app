@@ -10,3 +10,4 @@ __pycache__/
 .playwright-mcp/
 .worktrees/
 .agents
+scratch/
