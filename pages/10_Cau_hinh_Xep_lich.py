@@ -270,8 +270,8 @@ min_weekly_periods_for_lone_penalty = c_hdsp6.number_input(
 st.subheader("Bộ giải thuật toán")
 c_solver1, c_solver2 = st.columns(2)
 use_cpsat = c_solver1.checkbox(
-    "Dùng bộ giải tối ưu toàn cục CP-SAT (thử nghiệm)",
-    value=getattr(config, "use_cpsat", False),
+    "Dùng bộ giải tối ưu toàn cục CP-SAT (Khuyên dùng)",
+    value=getattr(config, "use_cpsat", True),
     help="Bật lên thì TKB được tối ưu hóa toàn cục bằng ràng buộc toán học (CP-SAT) thay vì thuật toán dò tìm ngẫu nhiên. "
          "Nếu bộ giải không tìm được lời giải hoặc quá giờ, hệ thống sẽ tự động chuyển sang bộ giải dự phòng."
 )

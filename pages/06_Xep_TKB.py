@@ -85,9 +85,10 @@ hdtn_thematic_week = st.checkbox(
     help="Áp dụng cho toàn trường, chỉ lần chạy xếp TKB này -- không đổi vĩnh viễn.",
 )
 
+sched_config = repo.get_scheduling_config(conn)
 use_cpsat_run = st.checkbox(
     "🚀 Sử dụng bộ giải tối ưu toàn cục CP-SAT (Khuyên dùng — Triệt tiêu vi phạm II.3, II.4, II.8)",
-    value=getattr(config, "use_cpsat", True),
+    value=bool(getattr(sched_config, "use_cpsat", True)),
     help="Giải toán bằng ràng buộc toán học toàn cục thay vì tìm kiếm ngẫu nhiên. Khuyên dùng để đảm bảo chất lượng thời khóa biểu cao nhất.",
 )
 
