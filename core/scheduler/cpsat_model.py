@@ -12,7 +12,7 @@ from __future__ import annotations
 
 from collections import defaultdict
 from dataclasses import dataclass, field
-from typing import Optional, Sequence
+from typing import Callable, Optional, Sequence
 
 from core.frame import MAX_PERIODS_PER_SESSION
 from core.models import SchedulingInput, ScheduleResult, is_bgh
@@ -21,6 +21,9 @@ from core.rules_registry import HARD_POST_GENERATION_IDS
 from core.scheduler.constants import (
     CAP_TIET_NGAY,
     TEACHER_COMPACT_SCHEDULE_PENALTY,
+    TEACHER_EXEMPT_LONE_DAY_SOFT_PENALTY,
+    TEACHER_EXEMPT_LONE_SESSION_SOFT_PENALTY,
+    TEACHER_EXEMPT_SPLIT_DAY_SOFT_PENALTY,
     TEACHER_LONE_SESSION_SPREAD_PENALTY,
 )
 from core.scheduler.placement import _build_effective_assigned_teacher
@@ -97,6 +100,7 @@ def build_model(inp: SchedulingInput) -> CpSatModel:
     _add_class_constraints(built)
     _add_block_constraints(built)
     _add_objective(built)
+    _add_solution_hint(built)
     return built
 
 
@@ -720,17 +724,28 @@ def _add_objective(built: CpSatModel) -> None:
     lone_day_terms = []
     lone_spread_terms = []
     compact_terms = []
+    # GV trong lone_session_exempt_teacher_ids: KHÔNG hard-gate (không vào penalty_terms
+    # II.4/II.8, không bao giờ kích hoạt relaxed_rules), nhưng vẫn cần một trọng số nhỏ
+    # để không trở thành "bãi rác" mặc định của CP-SAT (2026-09-05, xem constants.py).
+    soft_exempt_lone_terms = []
+    soft_exempt_split_terms = []
+    soft_exempt_lone_day_terms = []
 
     # 1. II.4 (Buổi lẻ, Ngày lẻ, Dồn buổi lẻ) & II.8 (Ngày chia lẻ)
     if avoid_lone:
         for t in teachers:
-            if load[t] < min_lone_load or t in lone_exempt:
+            if load[t] < min_lone_load:
                 continue
+            is_soft_exempt = t in lone_exempt
 
             # II.4 buổi lẻ
             for (wd, sess) in sessions:
-                lone_sess_terms.append(lone[t, wd, sess])
-                penalty_terms["II.4"].append(lone[t, wd, sess])
+                if is_soft_exempt:
+                    soft_exempt_lone_terms.append(lone[t, wd, sess])
+                    penalty_terms["_exempt_lone_session"].append(lone[t, wd, sess])
+                else:
+                    lone_sess_terms.append(lone[t, wd, sess])
+                    penalty_terms["II.4"].append(lone[t, wd, sess])
 
             # II.8 ngày chia lẻ (1 sáng + 1 chiều)
             for wd in weekdays:
@@ -746,7 +761,11 @@ def _add_objective(built: CpSatModel) -> None:
                     m.Add(sp <= u_s)
                     m.Add(sp <= u_c)
                     m.Add(sp <= l_s + l_c)
-                    penalty_terms["II.8"].append(sp)
+                    if is_soft_exempt:
+                        soft_exempt_split_terms.append(sp)
+                        penalty_terms["_exempt_split_day"].append(sp)
+                    else:
+                        penalty_terms["II.8"].append(sp)
 
             # Ngày lẻ: cả ngày đúng 1 tiết
             for wd in weekdays:
@@ -755,8 +774,15 @@ def _add_objective(built: CpSatModel) -> None:
                     ld = m.NewBoolVar(f"lone_day_t{t}_wd{wd}")
                     m.Add(sum(day_cnts) == 1).OnlyEnforceIf(ld)
                     m.Add(sum(day_cnts) != 1).OnlyEnforceIf(ld.Not())
-                    lone_day_terms.append(ld)
-                    penalty_terms["II.4"].append(ld)
+                    if is_soft_exempt:
+                        soft_exempt_lone_day_terms.append(ld)
+                        penalty_terms["_exempt_lone_day"].append(ld)
+                    else:
+                        lone_day_terms.append(ld)
+                        penalty_terms["II.4"].append(ld)
+
+            if is_soft_exempt:
+                continue
 
             # Dồn buổi lẻ: tính từ buổi lẻ thứ 2 trở đi của cùng GV
             t_lones = [lone[t, wd, sess] for (wd, sess) in sessions if (t, wd, sess) in lone]
@@ -894,6 +920,12 @@ def _add_objective(built: CpSatModel) -> None:
         obj_terms.append(250 * sum(lone_day_terms))
     if penalty_terms.get("II.9"):
         obj_terms.append(200 * sum(penalty_terms["II.9"]))
+    if soft_exempt_lone_terms:
+        obj_terms.append(TEACHER_EXEMPT_LONE_SESSION_SOFT_PENALTY * sum(soft_exempt_lone_terms))
+    if soft_exempt_split_terms:
+        obj_terms.append(TEACHER_EXEMPT_SPLIT_DAY_SOFT_PENALTY * sum(soft_exempt_split_terms))
+    if soft_exempt_lone_day_terms:
+        obj_terms.append(TEACHER_EXEMPT_LONE_DAY_SOFT_PENALTY * sum(soft_exempt_lone_day_terms))
 
     has_changes = bool(getattr(built, "changed_terms", None)) and getattr(config, "cpsat_minimize_changes", False)
     if has_changes:
@@ -927,6 +959,22 @@ def _add_change_minimisation(built: CpSatModel) -> None:
                 changed_terms.append(m.NewConstant(1))
 
     built.changed_terms = changed_terms
+
+
+def _add_solution_hint(built: CpSatModel) -> None:
+    """Gợi ý điểm khởi đầu cho CP-SAT từ old_subject_id (lịch hiện có trước khi
+    xếp lại) -- solver coi đây là gợi ý (không phải ràng buộc cứng): nếu gợi ý
+    khớp một nghiệm khả thi thì tiết kiệm phần lớn thời gian tìm kiếm, nếu
+    không khớp thì bị bỏ qua êm ái và solver tìm như bình thường (2026-09-05,
+    giúp chạy nhanh hơn trên hosting CPU hạn chế -- Streamlit Community Cloud
+    free tier)."""
+    m = built.model
+    inp = built.inp
+    for slot in inp.slots:
+        if slot.old_subject_id is not None:
+            key = (slot.slot_id, slot.old_subject_id)
+            if key in built.x:
+                m.AddHint(built.x[key], 1)
 
 
 def build_result(built: CpSatModel, solver: cp_model.CpSolver, diagnostics: Optional[dict] = None) -> ScheduleResult:
@@ -1008,13 +1056,20 @@ _STATUS_NAMES = {
 }
 
 
-def _diagnose_and_solve(built: CpSatModel, solver: cp_model.CpSolver, time_limit_s: float) -> dict:
+def _diagnose_and_solve(built: CpSatModel, solver: cp_model.CpSolver, time_limit_s: float,
+                        progress_cb: Optional[Callable[[dict], None]] = None) -> dict:
     """Chẩn đoán leo thang assumption gates cho HARD_POST_GENERATION_IDS.
     Đảm bảo solver lưu giữ trạng thái và giá trị biến của lần Solve() cuối cùng.
 
     Tối đa len(active_rids) + 1 lần gọi Solve().
     Tổng thời gian chạy được quản lý chặt chẽ theo ngân sách time_limit_s:
     mỗi lần gọi chỉ nhận thời gian còn lại (remaining = time_limit_s - sum(WallTime)).
+
+    progress_cb (2026-09-05, tuỳ chọn): được gọi NGAY TRƯỚC và NGAY SAU mỗi lần
+    Solve() với 1 dict mô tả tiến độ -- dùng để hiển thị thanh tiến trình trên
+    UI (xem pages/06_Xep_TKB.py). Không thể báo tiến độ MƯỢT bên trong 1 lần
+    Solve() (CP-SAT chặn luồng Python cho tới khi xong), nên đây là tiến độ
+    theo TỪNG ĐỢT (pass), không phải theo giây.
 
     Trả về:
       {
@@ -1028,6 +1083,7 @@ def _diagnose_and_solve(built: CpSatModel, solver: cp_model.CpSolver, time_limit
       }
     """
     active_rids = [rid for rid in HARD_POST_GENERATION_IDS if built.penalty_terms.get(rid)]
+    max_passes = len(active_rids) + 1
     relaxed: set = set()
     remaining = float(time_limit_s)
     diag = {
@@ -1043,6 +1099,13 @@ def _diagnose_and_solve(built: CpSatModel, solver: cp_model.CpSolver, time_limit
         solver.parameters.max_time_in_seconds = float(time_limit_s)
         diag["passes_run"] += 1
 
+        if progress_cb:
+            progress_cb({
+                "event": "pass_start", "pass": diag["passes_run"], "max_passes": max_passes,
+                "hard_rids": list(hard_rids), "relaxed_so_far": sorted(relaxed),
+                "time_budget_s": remaining,
+            })
+
         if not hard_rids:
             status = solver.Solve(built.model)
         else:
@@ -1054,6 +1117,12 @@ def _diagnose_and_solve(built: CpSatModel, solver: cp_model.CpSolver, time_limit
         diag["status"] = status
         if diag["pass1_status"] is None:
             diag["pass1_status"] = _STATUS_NAMES.get(status, str(status))
+
+        if progress_cb:
+            progress_cb({
+                "event": "pass_end", "pass": diag["passes_run"], "max_passes": max_passes,
+                "status": _STATUS_NAMES.get(status, str(status)), "wall_time_s": solver.WallTime(),
+            })
 
         if status in (cp_model.OPTIMAL, cp_model.FEASIBLE):
             return diag
@@ -1093,21 +1162,30 @@ def _diagnose_and_solve(built: CpSatModel, solver: cp_model.CpSolver, time_limit
 
 
 def solve_to_result(built: CpSatModel, time_limit_s: float = 30.0,
-                    workers: int = 8) -> Optional[ScheduleResult]:
-    """Giải mô hình và trả về ScheduleResult hoàn chỉnh, hoặc None nếu không giải được (task-7-brief.md)."""
+                    workers: int = 8,
+                    progress_cb: Optional[Callable[[dict], None]] = None) -> Optional[ScheduleResult]:
+    """Giải mô hình và trả về ScheduleResult hoàn chỉnh, hoặc None nếu không giải được (task-7-brief.md).
+    progress_cb: xem docstring _diagnose_and_solve."""
     if not _HAS_ORTOOLS:
         raise CpSatUnavailable("ortools chưa được cài")
 
     import os
     if os.environ.get("PYTEST_XDIST_WORKER") or os.environ.get("PYTEST_CURRENT_TEST"):
         workers = min(workers, 2)
+    else:
+        # CP-SAT không nên nhận num_search_workers vượt số CPU thực có -- trên
+        # hosting free tier (Streamlit Community Cloud, 2026-09-05) thường chỉ
+        # có 1-2 CPU, xin 8 worker sẽ chia nhỏ thời gian CPU mỗi worker được
+        # dùng thay vì chạy song song thật, làm CHẬM đi chứ không nhanh hơn.
+        cpu_count = os.cpu_count() or workers
+        workers = max(1, min(workers, cpu_count))
 
     solver = cp_model.CpSolver()
     solver.parameters.num_search_workers = int(workers)
     if getattr(built.inp, "seed", None):
         solver.parameters.random_seed = int(built.inp.seed)
 
-    diag = _diagnose_and_solve(built, solver, float(time_limit_s))
+    diag = _diagnose_and_solve(built, solver, float(time_limit_s), progress_cb=progress_cb)
     if diag["status"] not in (cp_model.OPTIMAL, cp_model.FEASIBLE):
         return None
 
@@ -1124,6 +1202,13 @@ def solve(built: CpSatModel, time_limit_s: float = 10.0,
     import os
     if os.environ.get("PYTEST_XDIST_WORKER") or os.environ.get("PYTEST_CURRENT_TEST"):
         workers = min(workers, 2)
+    else:
+        # CP-SAT không nên nhận num_search_workers vượt số CPU thực có -- trên
+        # hosting free tier (Streamlit Community Cloud, 2026-09-05) thường chỉ
+        # có 1-2 CPU, xin 8 worker sẽ chia nhỏ thời gian CPU mỗi worker được
+        # dùng thay vì chạy song song thật, làm CHẬM đi chứ không nhanh hơn.
+        cpu_count = os.cpu_count() or workers
+        workers = max(1, min(workers, cpu_count))
 
     solver = cp_model.CpSolver()
     solver.parameters.num_search_workers = int(workers)

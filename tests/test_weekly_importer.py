@@ -75,3 +75,40 @@ def test_import_weekly_curriculum_real_excel(school_conn):
     ppw = repo.get_periods_per_week(school_conn)
     assert ppw.get((s_cn_id, c_8a5_id, "C"), 0) == 2, "8A5 Cong nghe Even week must be 2"
     assert ppw.get((s_cn_id, c_8a5_id, "L"), 0) == 2, "8A5 Cong nghe Odd week must be 2"
+
+
+def test_import_creates_missing_subject_without_crashing():
+    """Regression (2026-09-05): import_weekly_curriculum_from_excel dùng
+    ROLE_NONE (chưa từng tồn tại/được import trong file) khi cần TỰ TẠO một
+    môn chưa có sẵn trong DB -- gây NameError bất cứ khi nào 1 trường thiếu 1
+    môn chuẩn hoặc import theo thứ tự khác thường. Phải tự tạo môn (role
+    ROLE_THUONG) thay vì crash."""
+    import openpyxl
+    from data import db
+    from data import repository as repo
+    from core.models import ROLE_THUONG
+    from io_excel.weekly_importer import import_weekly_curriculum_from_excel
+
+    conn = db.get_connection(":memory:")
+    db.init_db(conn)
+    repo.upsert_class(conn, "6A5", 0)
+    # Chỉ seed đúng 1 môn -- "Giáo dục thể chất" (map từ "GDTC") CHƯA tồn tại,
+    # buộc importer phải tự tạo mới thay vì tìm thấy sẵn trong subj_name_to_id.
+    repo.upsert_subject(conn, "Toán học", ROLE_THUONG, 0)
+
+    wb = openpyxl.Workbook()
+    ws = wb.active
+    ws.title = "HKI_K6"
+    ws.cell(4, 4, 1)       # hàng tuần: tuần 1 ở cột D
+    ws.cell(4, 5, 2)       # tuần 2 ở cột E
+    ws.cell(5, 2, "GDTC")  # Môn
+    ws.cell(5, 4, 2)       # 2 tiết tuần 1
+    ws.cell(5, 5, 2)       # 2 tiết tuần 2
+
+    report = import_weekly_curriculum_from_excel(conn, wb)  # trước fix: NameError ở đây
+
+    assert "Giáo dục thể chất" in report["subjects_mapped"]
+    new_subj_id = repo.get_subject_by_name(conn, "Giáo dục thể chất")
+    assert new_subj_id is not None
+    subj = next(s for s in repo.list_subjects(conn) if s.subject_id == new_subj_id)
+    assert subj.role_code == ROLE_THUONG

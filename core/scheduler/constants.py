@@ -46,6 +46,15 @@ TEACHER_LONE_SESSION_SPREAD_PENALTY = 600  # điểm phạt cộng thêm cho M�
                                   # Đặt 300 lúc đầu chỉ ép được 1/4 seed về mức 1 buổi/GV; nâng
                                   # lên 600 (vượt mức phạt 500 của chính buổi lẻ) để buổi lẻ thứ
                                   # hai của một GV luôn đắt hơn việc mở buổi lẻ ở GV khác.
+TEACHER_EXEMPT_LONE_SESSION_SOFT_PENALTY = 20  # (2026-09-05) GV trong lone_session_exempt_teacher_ids
+                                  # được BỎ QUA hard-gate II.4/II.8 hoàn toàn -- nhưng nếu CP-SAT
+                                  # không mất điểm gì khi lẻ tiết GV này, nó sẽ ưu tiên "dồn" mọi tiết
+                                  # khó xếp của trường vào đúng GV đó (vd 8/8 buổi đều lẻ 1 tiết) vì đó
+                                  # là lựa chọn rẻ nhất cho hàm mục tiêu. Trọng số nhỏ này chỉ để GV
+                                  # miễn trừ không thành "bãi rác" mặc định, KHÔNG đưa vào penalty_terms
+                                  # II.4/II.8 nên không bao giờ kích hoạt hard-gate/relaxed_rules.
+TEACHER_EXEMPT_SPLIT_DAY_SOFT_PENALTY = 20  # tương tự, cho ngày chia lẻ (1 sáng + 1 chiều) của GV miễn trừ
+TEACHER_EXEMPT_LONE_DAY_SOFT_PENALTY = 10  # tương tự, cho ngày chỉ có đúng 1 tiết của GV miễn trừ
 TEACHER_AFTERNOON_BALANCE_BONUS = 0  # không ép rải tiết chiều trong greedy gây lẻ 1 tiết; đánh giá cân đối qua _teacher_quality_penalty
 TEACHER_MANDATORY_MORNING_BONUS = 280  # điểm thưởng khi xếp tiết vào các sáng bắt buộc (T2, T5, T6) cho GV tải cao
 TEACHER_COMPACT_SCHEDULE_PENALTY = 400  # điểm phạt khi MỞ THÊM một buổi chiều mới cho GV

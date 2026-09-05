@@ -964,6 +964,78 @@ def test_lone_session_exempt_teacher_receives_no_lone_penalty():
     assert len(built.penalty_terms.get("II.4", [])) == 0
 
 
+def test_lone_session_exempt_teacher_still_gets_small_soft_penalty():
+    """2026-09-05 fix: một GV trong lone_session_exempt_teacher_ids không bị
+    hard-gate (II.4 vẫn rỗng, xem test phía trên) NHƯNG không được để chi phí
+    lẻ tiết của họ bằng 0 tuyệt đối -- nếu không CP-SAT sẽ ưu tiên "dồn" mọi
+    tiết khó xếp của cả trường vào đúng GV này vì đó luôn là lựa chọn rẻ nhất
+    (quan sát thực tế trên trường: 1 GV bị lẻ 8/8 buổi). Lần lượt buổi lẻ của
+    GV miễn trừ phải xuất hiện trong một bucket phạt MỀM riêng (không phải
+    II.4/II.8, không kích hoạt hard-gate/relaxed_rules), và đóng góp > 0 vào
+    ObjectiveValue của lời giải tối ưu."""
+    ts = [TimeSlot(1, 2, "S", 1), TimeSlot(2, 3, "S", 1)]
+    slots = [Slot(i + 1, 101, t) for i, t in enumerate(ts)]
+    subjects = [Subject(1, "Toan", ROLE_THUONG), Subject(2, "HDTN", ROLE_HDTN)]
+    inp = SchedulingInput(
+        classes=[ClassRoom(101, "6A1")], subjects=subjects,
+        teachers=[Teacher(10, "GV Toan")],
+        need={(1, 101): 2},
+        assigned_teacher={(1, 101): 10},
+        ban_busy=set(), slots=slots, timeslots=ts,
+        config=SchedulingConfig(
+            teacher_off_sessions_per_week=0,
+            lone_session_exempt_teacher_ids=frozenset({10}),
+            min_weekly_periods_for_lone_penalty=1,
+        ),
+    )
+    built = cpsat.build_model(inp)
+    # Vẫn miễn trừ hard-gate: rỗng ở cả 2 rule id chính thức.
+    assert len(built.penalty_terms.get("II.4", [])) == 0
+    assert len(built.penalty_terms.get("II.8", [])) == 0
+    # Nhưng phải có bucket phạt mềm riêng, khác II.4/II.8/rules_registry.
+    from core.rules_registry import HARD_POST_GENERATION_IDS
+    assert "_exempt_lone_session" not in HARD_POST_GENERATION_IDS
+    soft_terms = built.penalty_terms.get("_exempt_lone_session", [])
+    assert len(soft_terms) == 2  # 2 tiết, mỗi tiết 1 ngày riêng -> 2 buổi lẻ
+
+    from ortools.sat.python import cp_model
+    solver = cp_model.CpSolver()
+    status = solver.Solve(built.model)
+    assert status in (cp_model.OPTIMAL, cp_model.FEASIBLE)
+    # Cả 2 tiết đều lẻ buổi (2 ngày tách biệt, không thể ghép) -> chi phí > 0.
+    assert solver.ObjectiveValue() > 0
+
+
+def test_solve_to_result_calls_progress_cb_with_pass_events():
+    """2026-09-05: progress_cb (dùng cho thanh tiến trình trên UI, xem
+    pages/06_Xep_TKB.py) phải nhận đủ 1 cặp pass_start/pass_end cho lần giải
+    đầu tiên, với pass=1 và max_passes >= 1."""
+    ts = [TimeSlot(1, 2, "S", 1)]
+    slots = [Slot(1, 101, ts[0])]
+    subjects = [Subject(1, "Toan", ROLE_THUONG), Subject(2, "HDTN", ROLE_HDTN)]
+    inp = SchedulingInput(
+        classes=[ClassRoom(101, "6A1")], subjects=subjects,
+        teachers=[Teacher(10, "GV Toan")],
+        need={(1, 101): 1},
+        assigned_teacher={(1, 101): 10},
+        ban_busy=set(), slots=slots, timeslots=ts,
+        config=SchedulingConfig(teacher_off_sessions_per_week=0),
+    )
+    built = cpsat.build_model(inp)
+    events = []
+    result = cpsat.solve_to_result(built, time_limit_s=5.0, workers=1, progress_cb=events.append)
+    assert result is not None and result.success
+
+    starts = [e for e in events if e["event"] == "pass_start"]
+    ends = [e for e in events if e["event"] == "pass_end"]
+    assert len(starts) >= 1 and len(ends) >= 1
+    assert starts[0]["pass"] == 1
+    assert starts[0]["max_passes"] >= 1
+    assert ends[0]["pass"] == 1
+    assert isinstance(ends[0]["status"], str)
+    assert isinstance(ends[0]["wall_time_s"], float)
+
+
 def test_bgh_exempt_from_strict_morning_rule():
     """Test 3 (Task 6): BGH được miễn luật strict T2/T6, GV thường thì không."""
     ts = [TimeSlot(1, 3, "S", 1)]  # Chỉ có Thứ 3, cả hai GV đều thiếu sáng Thứ 2 (strict)

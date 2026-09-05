@@ -216,8 +216,11 @@ def import_weekly_curriculum_from_excel(
                 continue
 
             if canonical_name not in subj_name_to_id:
-                # Dynamically create subject if missing
-                sid = repo.upsert_subject(conn, canonical_name, role_code=ROLE_NONE, sort_order=len(subj_name_to_id))
+                # Dynamically create subject if missing -- ROLE_THUONG (môn thường, không
+                # heavy/kép/GDTC/HDTN) là mặc định an toàn cho môn mới phát hiện qua import,
+                # trường có thể sửa lại role_code thủ công sau ở trang Khai báo nếu cần
+                # (2026-09-05: sửa NameError -- ROLE_NONE chưa từng tồn tại/import ở đây).
+                sid = repo.upsert_subject(conn, canonical_name, role_code=ROLE_THUONG, sort_order=len(subj_name_to_id))
                 subj_name_to_id[canonical_name] = sid
 
             subj_id = subj_name_to_id[canonical_name]

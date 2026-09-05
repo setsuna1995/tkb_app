@@ -153,7 +153,11 @@ class SchedulingConfig:
     # Chỉ là điểm phạt khi chấm chọn, không phải luật cứng: nếu không còn chỗ thì
     # vẫn xếp bình thường chứ không làm hỏng các tiêu chí khác.
     use_cpsat: bool = True  # Bật bộ giải tối ưu hóa toàn cục CP-SAT
-    cpsat_time_limit_seconds: int = 30  # Giới hạn thời gian giải cho CP-SAT (giây)
+    cpsat_time_limit_seconds: int = 180  # Giới hạn thời gian giải cho CP-SAT (giây). Nâng từ 30
+    # lên 180 (2026-09-05): hosting Streamlit Community Cloud free tier CPU rất hạn chế (thường
+    # chỉ 1 CPU) -- 30s không đủ để CP-SAT tìm lời giải sạch (0 vi phạm II.3/II.4/II.8) trên dữ
+    # liệu thực của trường, phải nới lỏng nhiều luật một cách không cần thiết. Bù bằng cách cho
+    # nhiều thời gian hơn thay vì hy sinh chất lượng lịch.
     cpsat_minimize_changes: bool = False  # Ưu tiên giữ tối đa ô TKB cũ (mặc định Tắt để giải tự do)
 
 

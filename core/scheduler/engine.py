@@ -77,7 +77,11 @@ def _check_hard_post_generation_rules(inp: SchedulingInput, state: _State, confi
 
 
 def run(inp: SchedulingInput, *, max_attempts: int = SO_LAN_THU,
-        target_successes: int = SO_PA_TOT, lock_threshold: int = NGUONG_KHOA) -> ScheduleResult:
+        target_successes: int = SO_PA_TOT, lock_threshold: int = NGUONG_KHOA,
+        progress_cb=None) -> ScheduleResult:
+    """progress_cb (2026-09-05, tuỳ chọn): chỉ có tác dụng trên nhánh CP-SAT --
+    xem core/scheduler/cpsat_model.py:_diagnose_and_solve's docstring. Engine
+    cũ (vòng lặp random-greedy bên dưới) không gọi callback này."""
     role_index = resolve_roles(inp.subjects, inp.extra_kep_ids, inp.hdtn_thematic_week, inp.config.single_pair_subject_ids)
     config = inp.config
     avoid_gdtc = getattr(config, "avoid_gdtc_consecutive_days", True)
@@ -158,7 +162,7 @@ def run(inp: SchedulingInput, *, max_attempts: int = SO_LAN_THU,
             from core.scheduler import cpsat_model
             built = cpsat_model.build_model(inp)
             time_limit = getattr(config, "cpsat_time_limit_seconds", 30)
-            result = cpsat_model.solve_to_result(built, time_limit_s=time_limit)
+            result = cpsat_model.solve_to_result(built, time_limit_s=time_limit, progress_cb=progress_cb)
             if result is not None:
                 return result
         except cpsat_model.CpSatUnavailable:

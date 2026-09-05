@@ -98,8 +98,39 @@ if st.button("🚀 Chạy xếp TKB", disabled=bool(over) and not proceed_anyway
         hdtn_thematic_week=hdtn_thematic_week, week_no=chosen_week,
     )
     inp.config.use_cpsat = bool(use_cpsat_run)
-    with st.spinner("Đang xếp thời khóa biểu bằng bộ giải " + ("CP-SAT..." if use_cpsat_run else "Heuristic...")):
-        result = sched.run(inp)
+
+    if use_cpsat_run:
+        # Thanh tiến trình theo TỪNG ĐỢT giải (không mượt theo giây -- CP-SAT
+        # chặn luồng Python trong lúc Solve(), xem cpsat_model._diagnose_and_solve's
+        # docstring), nhưng vẫn hơn hẳn spinner tĩnh không có thông tin gì
+        # (2026-09-05, yêu cầu người dùng "biết sắp xếp đến đâu rồi").
+        progress_bar = st.progress(0, text="Đang chuẩn bị mô hình CP-SAT...")
+        status_log = st.empty()
+        log_lines = []
+
+        def _on_cpsat_progress(info):
+            max_passes = max(info.get("max_passes", 1), 1)
+            if info["event"] == "pass_start":
+                hard_rids = info.get("hard_rids") or []
+                relaxed = info.get("relaxed_so_far") or []
+                desc = (f"ràng buộc cứng còn lại: {', '.join(hard_rids)}" if hard_rids
+                        else "phần còn lại (chỉ còn ràng buộc mềm)")
+                line = f"⏳ Lần thử {info['pass']}/{max_passes}: đang giải {desc}"
+                if relaxed:
+                    line += f" — đã phải nới lỏng trước đó: {', '.join(relaxed)}"
+                progress_bar.progress(min(0.95, (info["pass"] - 1) / max_passes), text=line)
+            else:
+                line = f"✓ Lần thử {info['pass']} kết thúc: {info['status']} (mất {info['wall_time_s']:.1f}s)"
+                progress_bar.progress(min(0.99, info["pass"] / max_passes), text=line)
+            log_lines.append(line)
+            status_log.caption("  \n".join(log_lines[-8:]))
+
+        result = sched.run(inp, progress_cb=_on_cpsat_progress)
+        progress_bar.progress(1.0, text="Hoàn tất.")
+    else:
+        with st.spinner("Đang xếp thời khóa biểu bằng bộ giải Heuristic..."):
+            result = sched.run(inp)
+
     st.session_state["last_result"] = result
     st.session_state["last_input"] = inp
     st.session_state["last_scheduled_week"] = chosen_week
