@@ -59,188 +59,102 @@ with st.expander("📥 Nạp định lượng số tiết 35 tuần từ file Ex
 tab_sotiet, tab_gv = st.tabs(["📊 Số tiết/tuần (SoTiet)", "👩‍🏫 Định mức giáo viên (DinhMuc_GV)"])
 
 with tab_sotiet:
-    view_mode = st.radio(
-        "Chế độ định mức",
-        ["📅 Định lượng 35 tuần cả năm", "⚖️ Định mức Chẵn / Lẻ"],
-        horizontal=True,
-        key="sotiet_view_mode",
+    c_hk, c_wk = st.columns([1, 2])
+    hk_choice = c_hk.selectbox("Học kỳ", ["Học kỳ I (Tuần 1 - 18)", "Học kỳ II (Tuần 19 - 35)", "Tất cả các tuần (1 - 35)"])
+    
+    if "I (Tuần 1 - 18)" in hk_choice:
+        week_options = list(range(1, 19))
+    elif "II (Tuần 19 - 35)" in hk_choice:
+        week_options = list(range(19, 36))
+    else:
+        week_options = list(range(1, 36))
+
+    selected_week = c_wk.select_slider(
+        "Chọn tuần cần xem & chỉnh sửa:",
+        options=week_options,
+        value=week_options[0],
+        format_func=lambda w: f"Tuần {w} ({'Học kỳ I' if w <= 18 else 'Học kỳ II'})",
+        key="slider_selected_week",
     )
 
-    if view_mode == "📅 Định lượng 35 tuần cả năm":
-        c_hk, c_wk = st.columns([1, 2])
-        hk_choice = c_hk.selectbox("Học kỳ", ["Học kỳ I (Tuần 1 - 18)", "Học kỳ II (Tuần 19 - 35)", "Tất cả các tuần (1 - 35)"])
-        
-        if "I (Tuần 1 - 18)" in hk_choice:
-            week_options = list(range(1, 19))
-        elif "II (Tuần 19 - 35)" in hk_choice:
-            week_options = list(range(19, 36))
-        else:
-            week_options = list(range(1, 36))
+    week_periods = repo.get_periods_for_week(conn, week_no=selected_week)
+    
+    st.write(f"Đang hiển thị: **Tuần {selected_week}** ({'Học kỳ I' if selected_week <= 18 else 'Học kỳ II'})")
 
-        selected_week = c_wk.select_slider(
-            "Chọn tuần cần xem & chỉnh sửa:",
-            options=week_options,
-            value=week_options[0],
-            format_func=lambda w: f"Tuần {w} ({'Chẵn' if w % 2 == 0 else 'Lẻ'})",
-            key="slider_selected_week",
+    data = {"Môn": [s.name for s in subjects]}
+    for c in classes:
+        data[c.name] = [int(week_periods.get((s.subject_id, c.class_id), 0)) for s in subjects]
+    df = pd.DataFrame(data)
+
+    col_config = {
+        "Môn": st.column_config.TextColumn(disabled=True),
+    }
+    for c in classes:
+        col_config[c.name] = st.column_config.NumberColumn(
+            min_value=0, max_value=20, step=1, format="%d", help=f"Số tiết môn học cho lớp {c.name}"
         )
 
-        effective_par = "C" if selected_week % 2 == 0 else "L"
-        week_periods = repo.get_periods_for_week(conn, week_no=selected_week, parity=effective_par)
-        
-        st.write(f"Đang hiển thị: **Tuần {selected_week}** (Tuần {'Chẵn' if effective_par == 'C' else 'Lẻ'})")
+    edited = st.data_editor(
+        df, hide_index=True, key=f"editor_week_{selected_week}",
+        column_config=col_config, width="stretch",
+    )
 
-        data = {"Môn": [s.name for s in subjects]}
-        for c in classes:
-            data[c.name] = [int(week_periods.get((s.subject_id, c.class_id), 0)) for s in subjects]
-        df = pd.DataFrame(data)
+    c_save, c_copy = st.columns([1, 1])
+    if c_save.button(f"💾 Lưu định mức Tuần {selected_week}", key=f"save_week_{selected_week}", type="primary"):
+        entries = []
+        for i, s in enumerate(subjects):
+            for c in classes:
+                raw_val = edited.loc[i, c.name]
+                val = int(float(raw_val)) if pd.notna(raw_val) and str(raw_val).strip() != "" else 0
+                entries.append((s.subject_id, c.class_id, selected_week, val))
+        repo.bulk_set_weekly_curriculum(conn, entries)
+        st.success(f"Đã lưu thành công định mức cho Tuần {selected_week}.")
+        st.rerun()
 
-        col_config = {
-            "Môn": st.column_config.TextColumn(disabled=True),
-        }
-        for c in classes:
-            col_config[c.name] = st.column_config.NumberColumn(
-                min_value=0, max_value=20, step=1, format="%d", help=f"Số tiết môn học cho lớp {c.name}"
-            )
-
-        edited = st.data_editor(
-            df, hide_index=True, key=f"editor_week_{selected_week}",
-            column_config=col_config, width="stretch",
+    with c_copy.expander(f"📋 Sao chép định lượng Tuần {selected_week} sang các tuần khác"):
+        target_weeks = st.multiselect(
+            "Chọn các tuần đích nhận định mức:",
+            options=[w for w in range(1, 36) if w != selected_week],
+            key=f"target_weeks_{selected_week}",
         )
+        if st.button("Áp dụng sao chép", key=f"btn_apply_copy_{selected_week}"):
+            if target_weeks:
+                copy_entries = []
+                for i, s in enumerate(subjects):
+                    for c in classes:
+                        raw_val = edited.loc[i, c.name]
+                        val = int(float(raw_val)) if pd.notna(raw_val) and str(raw_val).strip() != "" else 0
+                        for tw in target_weeks:
+                            copy_entries.append((s.subject_id, c.class_id, tw, val))
+                repo.bulk_set_weekly_curriculum(conn, copy_entries)
+                st.success(f"Đã sao chép thành công định lượng sang các tuần: {', '.join(str(w) for w in target_weeks)}.")
+                st.rerun()
 
-        c_save, c_copy = st.columns([1, 1])
-        if c_save.button(f"💾 Lưu định mức Tuần {selected_week}", key=f"save_week_{selected_week}", type="primary"):
-            entries = []
-            for i, s in enumerate(subjects):
-                for c in classes:
-                    raw_val = edited.loc[i, c.name]
-                    val = int(float(raw_val)) if pd.notna(raw_val) and str(raw_val).strip() != "" else 0
-                    entries.append((s.subject_id, c.class_id, selected_week, val))
-            repo.bulk_set_weekly_curriculum(conn, entries)
-            st.success(f"Đã lưu thành công định mức cho Tuần {selected_week}.")
-            st.rerun()
+    totals = {}
+    for c in classes:
+        t = 0
+        for i in range(len(subjects)):
+            v = edited.loc[i, c.name]
+            t += int(float(v)) if pd.notna(v) and str(v).strip() != "" else 0
+        totals[c.name] = t
+    st.caption("Tổng tiết/lớp trong tuần này: " + ", ".join(f"**{name}**: {total}" for name, total in totals.items()))
 
-        with c_copy.expander(f"📋 Sao chép định lượng Tuần {selected_week} sang các tuần khác"):
-            target_weeks = st.multiselect(
-                "Chọn các tuần đích nhận định mức:",
-                options=[w for w in range(1, 36) if w != selected_week],
-                key=f"target_weeks_{selected_week}",
-            )
-            if st.button("Áp dụng sao chép", key=f"btn_apply_copy_{selected_week}"):
-                if target_weeks:
-                    copy_entries = []
-                    for i, s in enumerate(subjects):
-                        for c in classes:
-                            raw_val = edited.loc[i, c.name]
-                            val = int(float(raw_val)) if pd.notna(raw_val) and str(raw_val).strip() != "" else 0
-                            for tw in target_weeks:
-                                copy_entries.append((s.subject_id, c.class_id, tw, val))
-                    repo.bulk_set_weekly_curriculum(conn, copy_entries)
-                    st.success(f"Đã sao chép thành công định lượng sang các tuần: {', '.join(str(w) for w in target_weeks)}.")
-                    st.rerun()
-
-        totals = {}
-        for c in classes:
-            t = 0
-            for i in range(len(subjects)):
-                v = edited.loc[i, c.name]
-                t += int(float(v)) if pd.notna(v) and str(v).strip() != "" else 0
-            totals[c.name] = t
-        st.caption("Tổng tiết/lớp trong tuần này: " + ", ".join(f"**{name}**: {total}" for name, total in totals.items()))
-
-        with st.expander("📈 Ma trận tổng tiết 35 tuần của tất cả các lớp", expanded=False):
-            matrix_data = {"Lớp": [c.name for c in classes]}
-            configured_weeks = repo.list_configured_weeks(conn)
-            all_week_data = repo.get_weekly_curriculum(conn)
-            for w in range(1, 36):
-                col_totals = []
-                for c in classes:
-                    t = sum(all_week_data.get((s.subject_id, c.class_id, w), 0) for s in subjects)
-                    if t == 0:
-                        # Fallback
-                        par = "C" if w % 2 == 0 else "L"
-                        ppw = repo.get_periods_per_week(conn)
-                        t = sum(ppw.get((s.subject_id, c.class_id, par), 0) for s in subjects)
-                    col_totals.append(t)
-                matrix_data[f"T{w}"] = col_totals
-            st.dataframe(pd.DataFrame(matrix_data), hide_index=True, width="stretch")
-
-    else:
-        # Chế độ Chẵn / Lẻ
-        parity_label = st.radio("Tuần", ["Chẵn", "Lẻ"], horizontal=True, key="sotiet_parity")
-        parity = "C" if parity_label == "Chẵn" else "L"
-        ppw = repo.get_periods_per_week(conn)
-        data = {"Môn": [s.name for s in subjects]}
-        for c in classes:
-            data[c.name] = [int(ppw.get((s.subject_id, c.class_id, parity), 0)) for s in subjects]
-        df = pd.DataFrame(data)
-
-        col_config = {
-            "Môn": st.column_config.TextColumn(disabled=True),
-        }
-        for c in classes:
-            col_config[c.name] = st.column_config.NumberColumn(
-                min_value=0, max_value=20, step=1, format="%d", help=f"Số tiết môn học cho lớp {c.name}"
-            )
-
-        edited = st.data_editor(
-            df, hide_index=True, key=f"editor_sotiet_{parity}",
-            column_config=col_config, width="stretch",
-        )
-
-        if st.button(f"💾 Lưu số tiết tuần {'Chẵn' if parity == 'C' else 'Lẻ'}", key=f"save_sotiet_{parity}", type="primary"):
-            for i, s in enumerate(subjects):
-                for c in classes:
-                    raw_val = edited.loc[i, c.name]
-                    val = int(float(raw_val)) if pd.notna(raw_val) and str(raw_val).strip() != "" else 0
-                    repo.set_periods_per_week(conn, s.subject_id, c.class_id, parity, val)
-            st.success(f"Đã lưu thành công số tiết tuần {'Chẵn' if parity == 'C' else 'Lẻ'}.")
-            st.rerun()
-
-        totals = {}
-        for c in classes:
-            t = 0
-            for i in range(len(subjects)):
-                v = edited.loc[i, c.name]
-                t += int(float(v)) if pd.notna(v) and str(v).strip() != "" else 0
-            totals[c.name] = t
-        st.caption("Tổng tiết/lớp: " + ", ".join(f"**{name}**: {total}" for name, total in totals.items()))
-
-        st.divider()
-        st.subheader("Cân bằng Chẵn/Lẻ theo lớp")
-        st.caption(
-            "Môn có số tiết khác nhau giữa tuần Chẵn và tuần Lẻ (ví dụ 2 tiết tuần này, 1 tiết tuần kia) "
-            "để đạt trung bình lẻ như 1.5 tiết/tuần. Nếu các môn lệch không cân bằng nhau giữa 2 tuần, "
-            "tổng tiết/tuần của lớp sẽ khác nhau giữa Chẵn và Lẻ -- một trong 2 tuần có thể không đủ chỗ "
-            "xếp TKB dù tuần kia vừa khít. Chọn lại tuần nào \"nặng\" hơn cho từng môn để cân bằng."
-        )
-        ppw_full = repo.get_periods_per_week(conn)
-        for cls in classes:
-            alt_subjects = []
-            total_c = total_l = 0
-            for s in subjects:
-                c_val = ppw_full.get((s.subject_id, cls.class_id, "C"), 0)
-                l_val = ppw_full.get((s.subject_id, cls.class_id, "L"), 0)
-                total_c += c_val
-                total_l += l_val
-                if c_val != l_val:
-                    alt_subjects.append((s, c_val, l_val))
-            if not alt_subjects:
-                continue
-            label = f"{cls.name}: tổng Chẵn={total_c}, Lẻ={total_l}"
-            label += f" -- LỆCH {abs(total_c - total_l)} tiết" if total_c != total_l else " (đã cân bằng)"
-            with st.expander(label):
-                for s, c_val, l_val in alt_subjects:
-                    heavier = "Chẵn" if c_val > l_val else "Lẻ"
-                    choice = st.radio(
-                        f"{s.name} (chẵn={c_val}, lẻ={l_val}) -- tuần nào nặng hơn?", ["Chẵn", "Lẻ"],
-                        index=0 if heavier == "Chẵn" else 1, horizontal=True,
-                        key=f"parity_swap_{cls.class_id}_{s.subject_id}",
-                    )
-                    if choice != heavier:
-                        repo.set_periods_per_week(conn, s.subject_id, cls.class_id, "C", l_val)
-                        repo.set_periods_per_week(conn, s.subject_id, cls.class_id, "L", c_val)
-                        st.rerun()
+    with st.expander("📈 Ma trận tổng tiết 35 tuần của tất cả các lớp", expanded=False):
+        matrix_data = {"Lớp": [c.name for c in classes]}
+        configured_weeks = repo.list_configured_weeks(conn)
+        all_week_data = repo.get_weekly_curriculum(conn)
+        for w in range(1, 36):
+            col_totals = []
+            for c in classes:
+                t = sum(all_week_data.get((s.subject_id, c.class_id, w), 0) for s in subjects)
+                if t == 0:
+                    # Fallback
+                    par = "C" if w % 2 == 0 else "L"
+                    ppw = repo.get_periods_per_week(conn)
+                    t = sum(ppw.get((s.subject_id, c.class_id, par), 0) for s in subjects)
+                col_totals.append(t)
+            matrix_data[f"T{w}"] = col_totals
+        st.dataframe(pd.DataFrame(matrix_data), hide_index=True, width="stretch")
 
 with tab_gv:
     with st.expander("⚙️ Thiết lập Khung Định mức (Sàn 16 - Trần 19 tiết/tuần) & Giảm trừ toàn trường", expanded=False):
@@ -280,7 +194,7 @@ with tab_gv:
         c_mode, c_val = st.columns([1, 2])
         gv_view_filter = c_mode.radio(
             "Chế độ xem định mức",
-            ["📅 Theo tuần cụ thể (1-35)", "📈 Tổng quan toàn năm học (35 tuần)", "⚖️ Theo Chẵn / Lẻ"],
+            ["📅 Theo tuần cụ thể (1-35)", "📈 Tổng quan toàn năm học (35 tuần)"],
             horizontal=True, key="gv_view_filter"
         )
         
@@ -293,12 +207,11 @@ with tab_gv:
                 format="Tuần %d",
                 key="gv_week_slider",
             )
-            cur_par = "C" if chosen_gv_week % 2 == 0 else "L"
-            view = repo.get_teacher_quota_view(conn, parity=cur_par, week_no=chosen_gv_week)
+            view = repo.get_teacher_quota_view(conn, week_no=chosen_gv_week)
             load_col_name = f"Tải Tuần {chosen_gv_week}"
             st.caption(
                 f"Đang hiển thị tải giảng dạy của **Tuần {chosen_gv_week}** "
-                f"({'Học kỳ I' if chosen_gv_week <= 18 else 'Học kỳ II'} — Tuần {'Chẵn' if cur_par == 'C' else 'Lẻ'})."
+                f"({'Học kỳ I' if chosen_gv_week <= 18 else 'Học kỳ II'})."
             )
 
             # Metrics
@@ -354,7 +267,7 @@ with tab_gv:
                 "Tải TB HK2": st.column_config.NumberColumn(disabled=True, format="%.1f"),
             }
 
-        elif gv_view_filter == "📈 Tổng quan toàn năm học (35 tuần)":
+        else:
             view = repo.get_teacher_quota_view(conn, week_no=1)
             load_col_name = "Tải TB cả năm"
             st.caption(
@@ -410,62 +323,6 @@ with tab_gv:
                 "Tải TB HK2": st.column_config.NumberColumn(disabled=True, format="%.1f"),
                 "Tuần cao nhất": st.column_config.TextColumn(disabled=True),
                 "Tuần thấp nhất": st.column_config.TextColumn(disabled=True),
-            }
-
-        else:
-            # Chẵn / Lẻ
-            _, cur_par = repo.get_tuan_config(conn)
-            chosen_par = c_val.radio("Chọn loại tuần:", ["Chẵn", "Lẻ"], index=0 if cur_par == "C" else 1, horizontal=True, key="gv_par_radio")
-            cur_par = "C" if chosen_par == "Chẵn" else "L"
-            view = repo.get_teacher_quota_view(conn, parity=cur_par)
-            load_col_name = f"Tải tuần {'Chẵn' if cur_par == 'C' else 'Lẻ'}"
-
-            # Metrics
-            n_in_norm = sum(1 for v in view if v["floor"] <= v["load"] <= v["cap"])
-            n_over = sum(1 for v in view if v["cap"] > 0 and v["load"] > v["cap"])
-            n_under = sum(1 for v in view if v["load"] < v["floor"])
-
-            m1, m2, m3, m4 = st.columns(4)
-            m1.metric("Tổng số GV", len(view))
-            m2.metric("Trong định mức (16–19t)", n_in_norm)
-            m3.metric("Dạy vượt trần (>19t)", n_over, delta=f"+{n_over}" if n_over else "0", delta_color="normal")
-            m4.metric("Dưới sàn (<16t)", n_under, delta=f"-{n_under}" if n_under else "0", delta_color="inverse" if n_under else "normal")
-
-            gv_rows = []
-            for v in view:
-                status_str = _format_quota_status(v["load"], v["floor"], v["cap"])
-                quota_range_str = _format_quota_range(v["floor"], v["cap"])
-                gv_rows.append({
-                    "teacher_id": v["teacher_id"],
-                    "Giáo viên": v["name"],
-                    "Chức vụ / Kiêm nhiệm": v["role"] or "",
-                    "Giảm trừ (tiết)": int(v["reduction"]),
-                    "Định mức chuẩn": quota_range_str,
-                    load_col_name: int(v["load"]),
-                    "Tình trạng tuần này": status_str,
-                    "Tải TB cả năm": round(float(v["load_avg"]), 1),
-                    "Tải tuần Chẵn": int(v["load_chan"]),
-                    "Tải tuần Lẻ": int(v["load_le"]),
-                })
-            gv_df = pd.DataFrame(gv_rows)
-
-            gv_editor_config = {
-                "teacher_id": None,
-                "Giáo viên": st.column_config.TextColumn(disabled=True),
-                "Chức vụ / Kiêm nhiệm": st.column_config.TextColumn(help="Ghi chú chức vụ hoặc kiêm nhiệm"),
-                "Giảm trừ (tiết)": st.column_config.NumberColumn(
-                    min_value=0, max_value=30, step=1, format="%d",
-                    help="Tổng số tiết giảm trừ trực tiếp của GV"
-                ),
-                "Định mức chuẩn": st.column_config.TextColumn(
-                    disabled=True,
-                    help="Khoảng định mức tiết dạy hợp lệ (Ví dụ: 16 - 19 tiết cho GV, 12 - 15 tiết cho GVCN)"
-                ),
-                load_col_name: st.column_config.NumberColumn(disabled=True, format="%d"),
-                "Tình trạng tuần này": st.column_config.TextColumn(disabled=True),
-                "Tải TB cả năm": st.column_config.NumberColumn(disabled=True, format="%.1f"),
-                "Tải tuần Chẵn": st.column_config.NumberColumn(disabled=True, format="%d"),
-                "Tải tuần Lẻ": st.column_config.NumberColumn(disabled=True, format="%d"),
             }
 
         st.markdown("**Bảng phân bổ định mức & tải giảng dạy của Giáo viên**")

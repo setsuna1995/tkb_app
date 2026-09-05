@@ -77,10 +77,11 @@ with st.expander("📋 Phân công chuyên môn"):
 
 with st.expander("📊 Định mức tiết / tuần"):
     st.markdown(
-        "Nhập số tiết/tuần mỗi (môn, lớp) cần xếp -- theo tuần **chẵn** và **lẻ** riêng (một số "
-        "môn có số tiết khác nhau giữa 2 loại tuần). Trang này cũng có bảng \"giảm trừ theo chức "
-        "vụ\" -- số tiết dạy được giảm cho GVCN, Tổ trưởng, Tổ phó... để tính đúng định mức còn "
-        "lại (tải dạy) của từng giáo viên."
+        "Nhập số tiết/tuần mỗi (môn, lớp) cần xếp theo từng tuần trong **35 tuần năm học** "
+        "(Học kỳ I: tuần 1–18, Học kỳ II: tuần 19–35), cho phép tùy biến linh hoạt số tiết các môn "
+        "thay đổi theo tuần (KHTN, LS&ĐL, GDQP, Nghệ thuật...). Trang này cũng có bảng Khung định mức chuẩn "
+        "(sàn 16 – trần 19 tiết/tuần) và bảng giảm trừ theo chức vụ (Hiệu trưởng 2t, Phó hiệu trưởng 4t, "
+        "GVCN -4t, Tổ trưởng -3t...) để quản lý định mức và theo dõi thừa/thiếu giờ của giáo viên."
     )
 
 with st.expander("🚫 Giáo viên bận"):
@@ -165,8 +166,8 @@ with st.expander("⚙️ Cấu hình xếp lịch"):
 
 with st.expander("🚀 Xếp TKB tự động"):
     st.markdown(
-        "Trước khi chạy: chọn **Tuần** (Chẵn/Lẻ) ở đầu trang -- quyết định dùng bộ định mức "
-        "tiết/tuần nào (chẵn hay lẻ) cho lần xếp này.\n\n"
+        "Trước khi chạy: chọn **Tuần cần xếp** (trong 35 tuần năm học) -- hệ thống sẽ tự động áp dụng "
+        "chính xác bộ định mức số tiết của tuần đó.\n\n"
         "**Tuần này tổ chức chuyên đề**: tick nếu tuần này HDTN không chạy theo lịch thường (chào "
         "cờ đầu tuần + sinh hoạt lớp cuối tuần), mà dồn cả 3 tiết HDTN thành 1 khối liền kề (giống "
         "cơ chế Kép nhưng 3 tiết thay vì 2), áp dụng cho TOÀN TRƯỜNG, và bỏ ghim cố định chào cờ/"
@@ -204,7 +205,7 @@ with st.expander("🚀 Xếp TKB tự động"):
 
 with st.expander("🕘 Lịch sử tuần"):
     st.markdown(
-        "Xem lại các tuần TKB đã xếp trước đó: số thứ tự tuần, seed dùng để xếp, tuần chẵn/lẻ, "
+        "Xem lại các tuần TKB đã xếp trước đó: số thứ tự tuần, seed dùng để xếp, "
         "và thời điểm tạo -- hữu ích khi cần đối chiếu hoặc xếp lại một tuần cũ (chọn tuần rồi "
         "\"Nạp seed của tuần đã chọn\", sang trang Xếp TKB tự động để chạy lại). Số ô thay đổi so "
         "với lần xếp gần nhất KHÔNG nằm ở trang này -- xem ở mục \"Lần xếp gần nhất\" trên trang "
@@ -222,7 +223,7 @@ with st.expander("📁 Nhập / Xuất Excel"):
         "/ Xuất Excel. Bấm bất cứ lúc nào, từ bất kỳ trang nào, để tải file sao lưu mới nhất.\n\n"
         "File sao lưu ghi lại: lớp, môn, giáo viên, phân công chuyên môn, định mức tiết/tuần, "
         "bảng giảm trừ theo chức vụ (kèm 2 cờ Đi T2/GVCN), giáo viên bận, khung tiết, TKB nháp "
-        "hiện tại, và lịch sử tuần (seed + tuần chẵn/lẻ). File sao lưu **KHÔNG** gồm: toàn bộ cấu "
+        "hiện tại, và lịch sử tuần (seed). File sao lưu **KHÔNG** gồm: toàn bộ cấu "
         "hình ở trang **Cấu hình xếp lịch** (né tiết, ngưỡng số lượng, buổi/ngày khoá cứng, ưu "
         "tiên buổi, và các luật ràng buộc môn/lớp theo buổi cụ thể), lẫn 3 lựa chọn nghỉ riêng "
         "của từng giáo viên ở trang Khai báo (nghỉ mấy buổi/tuần riêng, ghim nghỉ trọn ngày, ghim "

@@ -14,7 +14,7 @@ from core.validation import (
 )
 from core.rules_registry import RULES
 from data import repository as repo
-from io_excel.exporter import export_xlsx, export_xlsx_both_parities
+from io_excel.exporter import export_xlsx
 from ui_common import get_conn, require_auth, require_school, sidebar_backup_export, sidebar_school_switcher
 
 
@@ -121,50 +121,37 @@ tab_schedule, tab_history = st.tabs([
 ])
 
 with tab_schedule:
-    c_mode, c_sel = st.columns([1, 2])
-    sched_mode = c_mode.radio(
-        "Chế độ xếp",
-        ["📅 Theo tuần cụ thể trong năm (1-35)", "⚖️ Theo tuần Chẵn / Lẻ"],
-        horizontal=True,
-        key="sched_mode_radio",
-    )
-
-    seed, parity = repo.get_tuan_config(conn)
-
-    if sched_mode == "📅 Theo tuần cụ thể trong năm (1-35)":
-        chosen_week = c_sel.selectbox(
-            "Chọn tuần cần xếp:",
-            options=list(range(1, 36)),
-            index=0,
-            format_func=lambda w: f"Tuần {w} ({'Học kỳ I' if w <= 18 else 'Học kỳ II'} — {'Chẵn' if w % 2 == 0 else 'Lẻ'})",
-            key="sched_week_select",
-        )
-        chosen_parity = "C" if chosen_week % 2 == 0 else "L"
-        if chosen_parity != parity:
-            repo.set_tuan_config(conn, seed, chosen_parity)
-            parity = chosen_parity
-        st.write(f"Tuần đang xếp: **Tuần {chosen_week}** ({'Chẵn' if parity == 'C' else 'Lẻ'}), seed = {seed or '(ngẫu nhiên mỗi lần chạy)'}")
-        st.caption(f"🎯 **Định lượng:** Tự động áp dụng phân bổ số tiết theo định mức của **Tuần {chosen_week}**.")
+    seed, _ = repo.get_tuan_config(conn)
+    c_hk, c_sel = st.columns([1, 2])
+    hk_choice = c_hk.selectbox("Học kỳ", ["Học kỳ I (Tuần 1 - 18)", "Học kỳ II (Tuần 19 - 35)", "Tất cả các tuần (1 - 35)"], key="sched_hk_pick")
+    if "I (Tuần 1 - 18)" in hk_choice:
+        week_opts = list(range(1, 19))
+    elif "II (Tuần 19 - 35)" in hk_choice:
+        week_opts = list(range(19, 36))
     else:
-        chosen_week = None
-        chosen_label = c_sel.radio("Tuần", ["Chẵn", "Lẻ"], index=0 if parity == "C" else 1, horizontal=True)
-        chosen_parity = "C" if chosen_label == "Chẵn" else "L"
-        if chosen_parity != parity:
-            repo.set_tuan_config(conn, seed, chosen_parity)
-            parity = chosen_parity
-        st.write(f"Tuần hiện tại: **{'Chẵn' if parity == 'C' else 'Lẻ'}**, seed = {seed or '(ngẫu nhiên mỗi lần chạy)'}")
+        week_opts = list(range(1, 36))
 
-    quota_view = repo.get_teacher_quota_view(conn, parity=parity, week_no=chosen_week)
+    chosen_week = c_sel.selectbox(
+        "Chọn tuần cần xếp:",
+        options=week_opts,
+        index=0,
+        format_func=lambda w: f"Tuần {w} ({'Học kỳ I' if w <= 18 else 'Học kỳ II'})",
+        key="sched_week_select",
+    )
+    parity = "C" if chosen_week % 2 == 0 else "L"
+    st.write(f"Tuần đang xếp: **Tuần {chosen_week}**, seed = {seed or '(ngẫu nhiên mỗi lần chạy)'}")
+    st.caption(f"🎯 **Định lượng:** Tự động áp dụng phân bổ số tiết định lượng theo chuẩn của **Tuần {chosen_week}**.")
+
+    quota_view = repo.get_teacher_quota_view(conn, week_no=chosen_week)
     over = [q for q in quota_view if q["cap"] > 0 and q["load"] > q["cap"]]
     under = [q for q in quota_view if q["load"] < q["floor"]]
     if over or under:
-        week_label = f"Tuần {chosen_week}" if chosen_week is not None else (f"Tuần {'Chẵn' if parity == 'C' else 'Lẻ'}")
         info_titles = []
         if over:
             info_titles.append(f"{len(over)} GV dạy vượt trần (> trần)")
         if under:
             info_titles.append(f"{len(under)} GV dưới sàn (< sàn)")
-        with st.expander(f"ℹ️ Tải giảng dạy {week_label} (chuẩn 16-19 tiết/tuần): Có {', '.join(info_titles)}", expanded=False):
+        with st.expander(f"ℹ️ Tải giảng dạy Tuần {chosen_week} (chuẩn 16-19 tiết/tuần): Có {', '.join(info_titles)}", expanded=False):
             if over:
                 st.markdown("**Giáo viên dạy vượt trần định mức (thừa giờ):**")
                 for q in over:
@@ -683,7 +670,7 @@ with tab_schedule:
                 "Danh sách các tuần cần xếp:",
                 options=list(range(1, 36)),
                 default=default_batch,
-                format_func=lambda wn: f"Tuần {wn} ({'Chẵn' if wn % 2 == 0 else 'Lẻ'})",
+                format_func=lambda wn: f"Tuần {wn}",
                 key="batch_week_select",
             )
 
@@ -695,8 +682,7 @@ with tab_schedule:
             batch_extra_kep_ids = frozenset(s.subject_id for s in subjects if s.name in batch_extra_kep_names)
             batch_quota_warnings = []
             for wn in batch_week_nos:
-                b_par = "C" if wn % 2 == 0 else "L"
-                b_qv = repo.get_teacher_quota_view(conn, parity=b_par, week_no=wn)
+                b_qv = repo.get_teacher_quota_view(conn, week_no=wn)
                 b_over = [q for q in b_qv if q["cap"] > 0 and q["load"] > q["cap"]]
                 b_under = [q for q in b_qv if q["load"] < q["floor"]]
                 if b_over or b_under:
@@ -706,7 +692,7 @@ with tab_schedule:
                     if b_under:
                         parts.append("Dưới sàn: " + ", ".join(f"{q['name']} ({q['load']}/{q['floor']})" for q in b_under))
                     batch_quota_warnings.append(
-                        f"**Tuần {wn}** ({'Chẵn' if b_par == 'C' else 'Lẻ'}): " + " | ".join(parts)
+                        f"**Tuần {wn}**: " + " | ".join(parts)
                     )
 
             if batch_quota_warnings:
@@ -737,7 +723,7 @@ with tab_schedule:
 
             batch_results = st.session_state.get("batch_results", {})
             for wn, (b_seed, b_parity, b_inp, b_result) in list(batch_results.items()):
-                with st.expander(f"Kết quả Tuần {wn} ({'Chẵn' if b_parity == 'C' else 'Lẻ'})", expanded=True):
+                with st.expander(f"Kết quả Tuần {wn}", expanded=True):
                     if not b_result.success:
                         st.error(b_result.failure_reason)
                         continue
@@ -907,7 +893,7 @@ with tab_history:
         "Chọn tuần muốn xem lại:",
         options=list(range(1, 36)),
         index=default_week - 1,
-        format_func=lambda w: f"Tuần {w} ({'Chẵn' if w % 2 == 0 else 'Lẻ'}{' — ✅ Đã lưu' if w in saved_weeks else ''})",
+        format_func=lambda w: f"Tuần {w}{' — ✅ Đã lưu' if w in saved_weeks else ''}",
         key="history_week_select",
     )
 
@@ -920,16 +906,14 @@ with tab_history:
         if saved_weeks:
             st.caption(f"Các tuần đã có TKB chính thức: **{', '.join(f'Tuần {w}' for w in saved_weeks)}**")
     else:
-        w_parity = run_for_week["parity"]
-        w_parity_str = "Chẵn" if w_parity == "C" else "Lẻ"
         st.success(
-            f"✅ **Thời khóa biểu Tuần {selected_view_week}** ({w_parity_str}) — "
+            f"✅ **Thời khóa biểu Tuần {selected_view_week}** — "
             f"Đã lưu lúc: **{run_for_week['created_at']}** | "
             f"Seed: **{run_for_week['seed']}** | "
             f"Tổng số ô tiết đã xếp: **{run_for_week['cells_total']}**"
         )
 
-        c_dl1, c_dl2, c_dl3 = st.columns([1, 1, 1])
+        c_dl1, c_dl2 = st.columns([1, 1])
         with c_dl1:
             try:
                 week_xlsx = export_xlsx(conn, run_id=run_for_week["run_id"])
@@ -945,19 +929,6 @@ with tab_history:
                 st.error(f"Lỗi xuất Excel: {ex}")
 
         with c_dl2:
-            try:
-                both_xlsx, both_warnings = export_xlsx_both_parities(conn)
-                st.download_button(
-                    "📥 Xuất cả 2 tuần (Chẵn + Lẻ) (.xlsx)",
-                    data=both_xlsx,
-                    file_name="TKB_ca_2_tuan.xlsx",
-                    mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-                    key=f"btn_dl_both_parities_{selected_view_week}",
-                )
-            except Exception as ex:
-                st.caption(f"Xuất 2 tuần: {ex}")
-
-        with c_dl3:
             if st.button(f"🔄 Nạp Tuần {selected_view_week} vào TKB Nháp", key=f"btn_load_to_nhap_{selected_view_week}"):
                 saved_cells = repo.get_tkb_result(conn, run_for_week["run_id"])
                 repo.bulk_replace_tkb_nhap(conn, saved_cells)

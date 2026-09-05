@@ -18,13 +18,14 @@ classes = repo.list_classes(conn)
 subjects = repo.list_subjects(conn)
 teachers = repo.list_teachers(conn)
 config = repo.get_scheduling_config(conn)
-latest_run = repo.get_latest_run(conn)
+saved_weeks = repo.list_saved_weeks(conn)
+current_week = saved_weeks[0] if saved_weeks else 1
 
 col1, col2, col3, col4 = st.columns(4)
 col1.metric("Số lớp", len(classes))
 col2.metric("Số môn", len(subjects))
 col3.metric("Số giáo viên", len(teachers))
-col4.metric("Tuần hiện tại", "Chẵn" if parity == "C" else "Lẻ")
+col4.metric("Tuần đang xếp", f"Tuần {current_week}")
 
 st.subheader("Tiến độ thiết lập")
 
@@ -49,7 +50,7 @@ num_teachers_with_busy = sum(1 for t in teachers if repo.get_teacher_busy_cells(
 setup_steps = [
     ("Khai báo", setup_status.check_khai_bao(len(classes), len(subjects), len(teachers)), "01_Khai_bao"),
     ("Phân công", setup_status.check_phan_cong(ppw, assignments), "02_PhanCong"),
-    ("Định mức", setup_status.check_dinh_muc(repo.get_teacher_quota_view(conn, parity)), "03_DinhMuc"),
+    ("Định mức", setup_status.check_dinh_muc(repo.get_teacher_quota_view(conn, week_no=current_week)), "03_DinhMuc"),
     ("Khung tiết", setup_status.check_khung_tiet(class_totals, class_quota_by_parity), "05_Khung_tiet"),
     ("GV bận", setup_status.check_gv_ban(len(teachers), num_teachers_with_busy), "04_GV_Ban"),
 ]
@@ -69,19 +70,20 @@ if len(classes) == 0:
         "hoặc trang **Khai báo** để nhập tay từ đầu."
     )
 
+st.divider()
+st.subheader("Thời khóa biểu gần nhất")
+latest_run = repo.get_latest_run(conn)
 if latest_run:
-    st.subheader("Lần xếp gần nhất")
-    status = "✅ Thành công" if latest_run["succeeded"] else "❌ Thất bại"
     st.write(
-        f"{status} — Tuần {latest_run['week_no']}, seed {latest_run['seed']}, "
-        f"thay đổi {latest_run['cells_changed']}/{latest_run['cells_total']} ô "
-        f"— lúc {latest_run['created_at']}"
+        f"Lần xếp gần nhất: **{latest_run['created_at']}** "
+        f"(tuần {latest_run.get('week_no') or '1'}, seed = {latest_run['seed']}, "
+        f"{latest_run['cells_total']} ô)"
     )
 else:
     st.info("Chưa có lần xếp thời khóa biểu nào.")
 
 if teachers:
-    quota_view = repo.get_teacher_quota_view(conn, parity)
+    quota_view = repo.get_teacher_quota_view(conn, week_no=current_week)
     over = [q for q in quota_view if q["cap"] > 0 and q["over"] > 0]
     under = [q for q in quota_view if q["under"] > 0]
     if over:
