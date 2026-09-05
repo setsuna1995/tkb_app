@@ -57,7 +57,7 @@ status_df = pd.DataFrame([
     {"Bước": label, "Trạng thái": "✅" if status.ok else "⚠️", "Ghi chú": status.detail}
     for label, status, _page in setup_steps
 ])
-st.dataframe(status_df, hide_index=True, use_container_width=True)
+st.dataframe(status_df, hide_index=True, width="stretch")
 
 link_cols = st.columns(len(setup_steps))
 for col, (label, _status, page) in zip(link_cols, setup_steps):

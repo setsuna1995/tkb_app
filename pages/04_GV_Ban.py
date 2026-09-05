@@ -67,7 +67,7 @@ with tab_grid:
         st.markdown("**Áp dụng nhanh các mẫu phổ biến cho giáo viên này:**")
         pcol1, pcol2, pcol3 = st.columns(3)
         with pcol1:
-            if st.button("🌅 Không đi Tiết 1 (Thứ 3 & 5)", use_container_width=True, help="Ví dụ: Thầy Khu"):
+            if st.button("🌅 Không đi Tiết 1 (Thứ 3 & 5)", width="stretch", help="Ví dụ: Thầy Khu"):
                 new_cells = set(busy_cells)
                 new_cells.add((3, "S", 1))
                 new_cells.add((5, "S", 1))
@@ -75,7 +75,7 @@ with tab_grid:
                 st.success(f"Đã cập nhật: {selected_teacher_name} không đi Tiết 1 Thứ 3 & Thứ 5!")
                 st.rerun()
                 
-            if st.button("🌅 Không đi Tiết 1 (Thứ 3, 4, 5)", use_container_width=True, help="Ví dụ: Cô Huyền Ly"):
+            if st.button("🌅 Không đi Tiết 1 (Thứ 3, 4, 5)", width="stretch", help="Ví dụ: Cô Huyền Ly"):
                 new_cells = set(busy_cells)
                 for w in (3, 4, 5):
                     new_cells.add((w, "S", 1))
@@ -84,7 +84,7 @@ with tab_grid:
                 st.rerun()
 
         with pcol2:
-            if st.button("🌅 Không đi Tiết 1 (Thứ 3, 4, 6)", use_container_width=True, help="Ví dụ: Cô Nguyễn Ly"):
+            if st.button("🌅 Không đi Tiết 1 (Thứ 3, 4, 6)", width="stretch", help="Ví dụ: Cô Nguyễn Ly"):
                 new_cells = set(busy_cells)
                 for w in (3, 4, 6):
                     new_cells.add((w, "S", 1))
@@ -92,7 +92,7 @@ with tab_grid:
                 st.success(f"Đã cập nhật: {selected_teacher_name} không đi Tiết 1 Thứ 3, 4, 6!")
                 st.rerun()
 
-            if st.button("🌅 Không đi Tiết 1 (Thứ 3, 5, 6)", use_container_width=True, help="Ví dụ: Thầy Sơn"):
+            if st.button("🌅 Không đi Tiết 1 (Thứ 3, 5, 6)", width="stretch", help="Ví dụ: Thầy Sơn"):
                 new_cells = set(busy_cells)
                 for w in (3, 5, 6):
                     new_cells.add((w, "S", 1))
@@ -101,7 +101,7 @@ with tab_grid:
                 st.rerun()
 
         with pcol3:
-            if st.button("⛔ Bận S4 & C1 cả tuần", use_container_width=True, help="Ví dụ: Thầy Hồng (GDTC)"):
+            if st.button("⛔ Bận S4 & C1 cả tuần", width="stretch", help="Ví dụ: Thầy Hồng (GDTC)"):
                 new_cells = set(busy_cells)
                 for w in range(2, 8):
                     new_cells.add((w, "S", 4))
@@ -110,7 +110,7 @@ with tab_grid:
                 st.success(f"Đã cập nhật: {selected_teacher_name} bận S4 và C1 tất cả các ngày!")
                 st.rerun()
 
-            if st.button("🔄 Xóa sạch tất cả tiết bận", use_container_width=True):
+            if st.button("🔄 Xóa sạch tất cả tiết bận", width="stretch"):
                 repo.clear_unavailability(conn, sel_tid)
                 st.info(f"Đã xóa toàn bộ tiết bận của {selected_teacher_name}.")
                 st.rerun()
@@ -122,7 +122,7 @@ with tab_grid:
         )
         pcol4, pcol5, pcol6 = st.columns(3)
         with pcol4:
-            if st.button(f"🌤️ Nghỉ trọn Sáng (Thứ {wd_pick})", use_container_width=True):
+            if st.button(f"🌤️ Nghỉ trọn Sáng (Thứ {wd_pick})", width="stretch"):
                 new_cells = set(busy_cells)
                 for p in range(1, 6):
                     new_cells.add((wd_pick, "S", p))
@@ -130,7 +130,7 @@ with tab_grid:
                 st.success(f"Đã cập nhật: {selected_teacher_name} nghỉ trọn buổi Sáng Thứ {wd_pick}!")
                 st.rerun()
         with pcol5:
-            if st.button(f"🌆 Nghỉ trọn Chiều (Thứ {wd_pick})", use_container_width=True):
+            if st.button(f"🌆 Nghỉ trọn Chiều (Thứ {wd_pick})", width="stretch"):
                 new_cells = set(busy_cells)
                 for p in range(1, 6):
                     new_cells.add((wd_pick, "C", p))
@@ -138,7 +138,7 @@ with tab_grid:
                 st.success(f"Đã cập nhật: {selected_teacher_name} nghỉ trọn buổi Chiều Thứ {wd_pick}!")
                 st.rerun()
         with pcol6:
-            if st.button(f"🌑 Nghỉ trọn cả ngày (Thứ {wd_pick})", use_container_width=True):
+            if st.button(f"🌑 Nghỉ trọn cả ngày (Thứ {wd_pick})", width="stretch"):
                 new_cells = set(busy_cells)
                 for p in range(1, 6):
                     new_cells.add((wd_pick, "S", p))
@@ -180,14 +180,14 @@ with tab_grid:
     edited_grid = st.data_editor(
         df_grid,
         hide_index=True,
-        use_container_width=True,
+        width="stretch",
         key=f"editor_gvban_grid_{sel_tid}",
         column_config=column_config,
     )
 
     btn_col1, btn_col2 = st.columns([2, 4])
     with btn_col1:
-        if st.button("💾 Lưu tiết bận cho giáo viên này", type="primary", use_container_width=True):
+        if st.button("💾 Lưu tiết bận cho giáo viên này", type="primary", width="stretch"):
             new_busy_cells = set()
             for _, r in edited_grid.iterrows():
                 sess_code = "S" if r["Buổi"] == "Sáng" else "C"
@@ -237,7 +237,7 @@ with tab_overview:
     col_m2.metric("Tổng số lượt tiết bận", total_busy_count)
 
     df_overview = pd.DataFrame(overview_rows)
-    st.dataframe(df_overview, hide_index=True, use_container_width=True)
+    st.dataframe(df_overview, hide_index=True, width="stretch")
 
 # ---------------------------------------------------------------------------
 # TAB 3: Raw Rule List Editor
@@ -261,7 +261,7 @@ with tab_list:
         num_rows="dynamic",
         hide_index=True,
         key="editor_gvban_raw_list",
-        use_container_width=True,
+        width="stretch",
         column_config={
             "Giáo viên": st.column_config.SelectboxColumn(options=list(id_by_name)),
             "Thứ": st.column_config.SelectboxColumn(options=["*", "2", "3", "4", "5", "6", "7", "CN"]),

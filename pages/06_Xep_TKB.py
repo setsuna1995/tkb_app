@@ -85,12 +85,19 @@ hdtn_thematic_week = st.checkbox(
     help="Áp dụng cho toàn trường, chỉ lần chạy xếp TKB này -- không đổi vĩnh viễn.",
 )
 
+use_cpsat_run = st.checkbox(
+    "🚀 Sử dụng bộ giải tối ưu toàn cục CP-SAT (Khuyên dùng — Triệt tiêu vi phạm II.3, II.4, II.8)",
+    value=getattr(config, "use_cpsat", True),
+    help="Giải toán bằng ràng buộc toán học toàn cục thay vì tìm kiếm ngẫu nhiên. Khuyên dùng để đảm bảo chất lượng thời khóa biểu cao nhất.",
+)
+
 if st.button("🚀 Chạy xếp TKB", disabled=bool(over) and not proceed_anyway, type="primary"):
     inp = repo.build_scheduling_input(
         conn, parity=parity, seed=seed, extra_kep_ids=extra_kep_ids,
         hdtn_thematic_week=hdtn_thematic_week, week_no=chosen_week,
     )
-    with st.spinner("Đang xếp thời khóa biểu..."):
+    inp.config.use_cpsat = bool(use_cpsat_run)
+    with st.spinner("Đang xếp thời khóa biểu bằng bộ giải " + ("CP-SAT..." if use_cpsat_run else "Heuristic...")):
         result = sched.run(inp)
     st.session_state["last_result"] = result
     st.session_state["last_input"] = inp
@@ -152,7 +159,7 @@ if result is not None:
                     for wd in WEEKDAYS:
                         row[WEEKDAY_NAMES[wd]] = grid[(sess, per)].get(wd, "")
                     rows.append(row)
-                st.dataframe(pd.DataFrame(rows), hide_index=True, use_container_width=True)
+                st.dataframe(pd.DataFrame(rows), hide_index=True, width="stretch")
 
         # ── Xem TKB theo Giáo viên ──
         teacher_map = {t.teacher_id: t.name for t in inp.teachers}
@@ -229,7 +236,7 @@ if result is not None:
 
                     st.dataframe(
                         df.style.apply(_highlight_lone, axis=1),
-                        hide_index=True, use_container_width=True,
+                        hide_index=True, width="stretch",
                     )
 
                     # Summary stats for this teacher
@@ -280,7 +287,7 @@ if result is not None:
 
                 st.dataframe(
                     df_overview.style.apply(_highlight_lone_overview, axis=1),
-                    hide_index=True, use_container_width=True,
+                    hide_index=True, width="stretch",
                 )
 
         conflicts = find_teacher_conflicts(inp.slots, result.assignment, inp.assigned_teacher)
@@ -456,7 +463,7 @@ if result is not None:
 
         st.dataframe(
             pd.DataFrame(check_rows).style.apply(_highlight_nonzero, axis=1),
-            hide_index=True, use_container_width=True,
+            hide_index=True, width="stretch",
         )
 
         if st.button(
@@ -604,7 +611,7 @@ with st.expander("📅 Xếp nhiều tuần cùng lúc (tạm thời tắt)", ex
                             for wd in WEEKDAYS:
                                 row[WEEKDAY_NAMES[wd]] = grid[(sess, per)].get(wd, "")
                             rows.append(row)
-                        st.dataframe(pd.DataFrame(rows), hide_index=True, use_container_width=True)
+                        st.dataframe(pd.DataFrame(rows), hide_index=True, width="stretch")
 
                 b_conflicts = find_teacher_conflicts(b_inp.slots, b_result.assignment, b_inp.assigned_teacher)
                 if b_conflicts:
@@ -684,7 +691,7 @@ with st.expander("📅 Xếp nhiều tuần cùng lúc (tạm thời tắt)", ex
                     b_check_rows.append(row)
                 st.dataframe(
                     pd.DataFrame(b_check_rows).style.apply(_batch_highlight_nonzero, axis=1),
-                    hide_index=True, use_container_width=True,
+                    hide_index=True, width="stretch",
                 )
 
                 if st.button(

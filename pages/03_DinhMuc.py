@@ -106,7 +106,7 @@ with tab_sotiet:
 
         edited = st.data_editor(
             df, hide_index=True, key=f"editor_week_{selected_week}",
-            column_config=col_config, use_container_width=True,
+            column_config=col_config, width="stretch",
         )
 
         c_save, c_copy = st.columns([1, 1])
@@ -164,7 +164,7 @@ with tab_sotiet:
                         t = sum(ppw.get((s.subject_id, c.class_id, par), 0) for s in subjects)
                     col_totals.append(t)
                 matrix_data[f"T{w}"] = col_totals
-            st.dataframe(pd.DataFrame(matrix_data), hide_index=True, use_container_width=True)
+            st.dataframe(pd.DataFrame(matrix_data), hide_index=True, width="stretch")
 
     else:
         # Chế độ Chẵn / Lẻ
@@ -186,7 +186,7 @@ with tab_sotiet:
 
         edited = st.data_editor(
             df, hide_index=True, key=f"editor_sotiet_{parity}",
-            column_config=col_config, use_container_width=True,
+            column_config=col_config, width="stretch",
         )
 
         if st.button(f"💾 Lưu số tiết tuần {'Chẵn' if parity == 'C' else 'Lẻ'}", key=f"save_sotiet_{parity}", type="primary"):
@@ -433,7 +433,7 @@ with tab_gv:
 
         edited_gv = st.data_editor(
             gv_df, hide_index=True, key="editor_teacher_quotas",
-            column_config=gv_editor_config, use_container_width=True,
+            column_config=gv_editor_config, width="stretch",
         )
 
         if st.button("💾 Lưu định mức & giảm trừ GV", key="btn_save_teacher_quotas", type="primary"):
@@ -490,7 +490,7 @@ with tab_gv:
 
             st.dataframe(
                 df_matrix_gv.style.apply(_highlight_over_cap, axis=1),
-                hide_index=True, use_container_width=True,
+                hide_index=True, width="stretch",
             )
 
         with st.expander("🔬 Chi tiết phân công môn & số tiết theo tuần của từng Giáo viên (KHTN, LS&ĐL, Toán, Văn...)", expanded=False):
@@ -514,7 +514,7 @@ with tab_gv:
                             "Tiết TB HK2": round(hk2_avg, 1),
                             "Tiết TB Cả năm": round(sum(w_map.values()) / 35.0, 1) if w_map else (a["periods_chan"] + a["periods_le"]) / 2,
                         })
-                    st.dataframe(pd.DataFrame(detail_rows), hide_index=True, use_container_width=True)
+                    st.dataframe(pd.DataFrame(detail_rows), hide_index=True, width="stretch")
                     st.caption(
                         f"👉 **Tổng kết {chosen_t_name}**: Dạy **{chosen_v['load']}** tiết (tuần đang chọn) — "
                         f"Trung bình HK1: **{chosen_v['load_hk1_avg']:.1f}** tiết/tuần, "

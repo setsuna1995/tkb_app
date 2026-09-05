@@ -152,7 +152,7 @@ class SchedulingConfig:
     # nhiều buổi (sáng hay chiều đều tính) -- vd GV Thể dục cần nghỉ 2 buổi bất kỳ.
     # Chỉ là điểm phạt khi chấm chọn, không phải luật cứng: nếu không còn chỗ thì
     # vẫn xếp bình thường chứ không làm hỏng các tiêu chí khác.
-    use_cpsat: bool = False  # Bật bộ giải tối ưu hóa toàn cục CP-SAT (thử nghiệm)
+    use_cpsat: bool = True  # Bật bộ giải tối ưu hóa toàn cục CP-SAT
     cpsat_time_limit_seconds: int = 30  # Giới hạn thời gian giải cho CP-SAT (giây)
     cpsat_minimize_changes: bool = False  # Ưu tiên giữ tối đa ô TKB cũ (mặc định Tắt để giải tự do)
 

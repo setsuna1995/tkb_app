@@ -96,7 +96,7 @@ with st.expander("📊 Bảng Tổng Hợp Tải Giáo Viên Hiện Tại", expa
         })
 
     df_summary = pd.DataFrame(summary_rows)
-    st.dataframe(df_summary, hide_index=True, use_container_width=True)
+    st.dataframe(df_summary, hide_index=True, width="stretch")
 
 # 2. Bảng Đề Xuất Phân Công
 if not suggestions and not unresolved_over and not unresolved_under:
@@ -152,13 +152,13 @@ else:
                 "_sug_index": None,
             },
             disabled=["Hình thức", "Mục đích", "Lớp chuyển đi", "GV chuyển đi (Tải cũ → mới)", "GV nhận (Tải cũ → mới)", "Lớp hoán đổi (nếu có)"],
-            use_container_width=True,
+            width="stretch",
             key="editor_suggestions",
         )
 
         col_btn1, col_btn2, _ = st.columns([3, 3, 4])
         with col_btn1:
-            if st.button("⚡ Áp dụng các đề xuất đã chọn", type="primary", use_container_width=True):
+            if st.button("⚡ Áp dụng các đề xuất đã chọn", type="primary", width="stretch"):
                 selected_indices = [
                     int(row["_sug_index"])
                     for _, row in edited_sug.iterrows()
@@ -182,7 +182,7 @@ else:
                     st.rerun()
 
         with col_btn2:
-            if st.button("⚡ Áp dụng TẤT CẢ đề xuất", use_container_width=True):
+            if st.button("⚡ Áp dụng TẤT CẢ đề xuất", width="stretch"):
                 applied_count = 0
                 for s in suggestions:
                     if s.action_type == "transfer":

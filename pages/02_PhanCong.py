@@ -26,7 +26,7 @@ for c in classes:
 df = pd.DataFrame(data)
 
 st.caption("Điền tên giáo viên vào ô tương ứng (môn × lớp). Để trống nếu chưa phân công.")
-edited = st.data_editor(df, hide_index=True, key="editor_phancong", disabled=["Môn"], use_container_width=True)
+edited = st.data_editor(df, hide_index=True, key="editor_phancong", disabled=["Môn"], width="stretch")
 
 if st.button("Lưu phân công"):
     def get_or_create_teacher(name: str):

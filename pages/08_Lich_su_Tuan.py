@@ -33,7 +33,7 @@ if st.button("🆕 Tuần mới (seed mới + đảo Chẵn/Lẻ)"):
 history = repo.list_seed_history(conn)
 if history:
     st.subheader("Lịch sử")
-    st.dataframe(pd.DataFrame(history), hide_index=True, use_container_width=True)
+    st.dataframe(pd.DataFrame(history), hide_index=True, width="stretch")
 
     week_options = [h["week_no"] for h in history]
     pick = st.selectbox("Tái tạo lại tuần", week_options)

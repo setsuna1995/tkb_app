@@ -97,14 +97,14 @@ for wd in range(2, 8):
 edited_grid = st.data_editor(
     df_grid,
     hide_index=True,
-    use_container_width=True,
+    width="stretch",
     key=f"editor_khung_grid",
     column_config=column_config,
 )
 
 btn_col1, btn_col2 = st.columns([2, 4])
 with btn_col1:
-    if st.button("💾 Lưu khung tiết", type="primary", use_container_width=True):
+    if st.button("💾 Lưu khung tiết", type="primary", width="stretch"):
         new_allowed_cells = set()
         for _, r in edited_grid.iterrows():
             sess_code = "S" if r["Buổi"] == "Sáng" else "C"
@@ -143,7 +143,7 @@ for c in classes:
         "Trạng thái": status
     })
 
-st.dataframe(pd.DataFrame(overview_rows), hide_index=True, use_container_width=True)
+st.dataframe(pd.DataFrame(overview_rows), hide_index=True, width="stretch")
 
 sidebar_backup_export(conn)
 sidebar_fixed_rules(conn)

@@ -978,21 +978,6 @@ def build_result(built: CpSatModel, solver: cp_model.CpSolver) -> ScheduleResult
     )
 
 
-def _apply_hard_post_gen_gates(built: CpSatModel) -> list:
-    """Tạo assumption gates để ưu tiên triệt tiêu 100% vi phạm II.3 và II.4 (HARD_POST_GENERATION).
-    Nếu trường hợp bất khả kháng, solver sẽ tự động fallback bằng cách gỡ gates."""
-    gates = []
-    if built.penalty_terms.get("II.3"):
-        g_ii3 = built.model.NewBoolVar("gate_hard_ii3")
-        built.model.Add(sum(built.penalty_terms["II.3"]) == 0).OnlyEnforceIf(g_ii3)
-        gates.append(g_ii3)
-    if built.penalty_terms.get("II.4"):
-        g_ii4 = built.model.NewBoolVar("gate_hard_ii4")
-        built.model.Add(sum(built.penalty_terms["II.4"]) == 0).OnlyEnforceIf(g_ii4)
-        gates.append(g_ii4)
-    return gates
-
-
 def solve_to_result(built: CpSatModel, time_limit_s: float = 30.0,
                     workers: int = 8) -> Optional[ScheduleResult]:
     """Giải mô hình và trả về ScheduleResult hoàn chỉnh, hoặc None nếu không giải được (task-7-brief.md)."""
@@ -1009,13 +994,20 @@ def solve_to_result(built: CpSatModel, time_limit_s: float = 30.0,
     if getattr(built.inp, "seed", None):
         solver.parameters.random_seed = int(built.inp.seed)
 
-    gates = _apply_hard_post_gen_gates(built)
-    if gates:
-        built.model.AddAssumptions(gates)
+    # Lượt 1: Thử giải với các ràng buộc cứng HARD_POST_GENERATION_IDS (II.3 == 0, II.4 == 0, II.8 == 0)
+    # Thêm trực tiếp ràng buộc cứng vào mô hình bản sao (clone) để CP-SAT kích hoạt root presolve propagation,
+    # tìm ra nghiệm sạch 100% trong thời gian nhanh nhất (chỉ 2-3s).
+    strict_model = built.model.Clone()
+    for rid in HARD_POST_GENERATION_IDS:
+        terms = built.penalty_terms.get(rid)
+        if terms:
+            strict_model.Add(sum(terms) == 0)
 
-    status = solver.Solve(built.model)
-    if status not in (cp_model.OPTIMAL, cp_model.FEASIBLE) and gates:
-        built.model.ClearAssumptions()
+    status = solver.Solve(strict_model)
+
+    # Lượt 2 (Fallback): Nếu bài toán thực sự Infeasible với các luật cứng,
+    # rơi về giải mô hình gốc có hàm mục tiêu phạt mềm.
+    if status not in (cp_model.OPTIMAL, cp_model.FEASIBLE):
         status = solver.Solve(built.model)
 
     if status not in (cp_model.OPTIMAL, cp_model.FEASIBLE):
@@ -1041,13 +1033,14 @@ def solve(built: CpSatModel, time_limit_s: float = 10.0,
     if getattr(built.inp, "seed", None):
         solver.parameters.random_seed = int(built.inp.seed)
 
-    gates = _apply_hard_post_gen_gates(built)
-    if gates:
-        built.model.AddAssumptions(gates)
+    strict_model = built.model.Clone()
+    for rid in HARD_POST_GENERATION_IDS:
+        terms = built.penalty_terms.get(rid)
+        if terms:
+            strict_model.Add(sum(terms) == 0)
 
-    status = solver.Solve(built.model)
-    if status not in (cp_model.OPTIMAL, cp_model.FEASIBLE) and gates:
-        built.model.ClearAssumptions()
+    status = solver.Solve(strict_model)
+    if status not in (cp_model.OPTIMAL, cp_model.FEASIBLE):
         status = solver.Solve(built.model)
 
     if status not in (cp_model.OPTIMAL, cp_model.FEASIBLE):
@@ -1058,3 +1051,4 @@ def solve(built: CpSatModel, time_limit_s: float = 10.0,
         if solver.Value(var):
             assignment[slot_id] = subject_id
     return assignment
+
