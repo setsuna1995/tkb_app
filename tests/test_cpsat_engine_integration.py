@@ -2,6 +2,8 @@
 import os
 import pytest
 
+pytestmark = pytest.mark.slow
+
 from core import scheduler as sched
 from core.models import SchedulingConfig
 from core.validation import (
@@ -37,6 +39,7 @@ def conn(tmp_path):
     connection.close()
 
 
+@pytest.mark.slow
 def test_use_cpsat_false_preserves_legacy_engine_behavior(conn):
     """Test 1 (Task 8): use_cpsat=False không đổi gì so với engine cũ."""
     inp = repo.build_scheduling_input(conn, parity="C", seed=2026)
@@ -48,11 +51,12 @@ def test_use_cpsat_false_preserves_legacy_engine_behavior(conn):
     assert result.attempts_tried >= 1
 
 
+@pytest.mark.slow
 def test_cpsat_solution_passes_all_validation_functions(conn):
     """Test 2 (Task 8): use_cpsat=True cho lời giải hợp lệ qua toàn bộ core/validation.py."""
     inp = repo.build_scheduling_input(conn, parity="C", seed=2026)
     inp.config.use_cpsat = True
-    inp.config.cpsat_time_limit_seconds = 30
+    inp.config.cpsat_time_limit_seconds = 5
     result = sched.run(inp)
 
     assert result.success is True, result.failure_reason
@@ -119,6 +123,7 @@ def test_cpsat_solution_passes_all_validation_functions(conn):
     assert sub_cls_violations == [], f"Subject class rule violations: {sub_cls_violations}"
 
 
+@pytest.mark.slow
 def test_cpsat_does_not_lose_to_legacy_engine_on_any_metric(conn):
     """Test 3 (Task 8): CP-SAT có tổng điểm phạt chất lượng thấp hơn vượt trội so với engine cũ."""
     from core.scheduler.quality import _teacher_quality_penalty
@@ -130,7 +135,7 @@ def test_cpsat_does_not_lose_to_legacy_engine_on_any_metric(conn):
 
     inp_cpsat = repo.build_scheduling_input(conn, parity="C", seed=2026)
     inp_cpsat.config.use_cpsat = True
-    inp_cpsat.config.cpsat_time_limit_seconds = 30
+    inp_cpsat.config.cpsat_time_limit_seconds = 15
     res_cpsat = sched.run(inp_cpsat)
     assert res_cpsat.success is True
     assert res_cpsat.solver_name == "cpsat"

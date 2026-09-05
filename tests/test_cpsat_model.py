@@ -1038,7 +1038,7 @@ def test_old_subject_id_preserved_when_valid():
         need={(1, 101): 1, (2, 101): 1},
         assigned_teacher={(1, 101): 10, (2, 101): 20},
         ban_busy=set(), slots=slots, timeslots=ts,
-        config=SchedulingConfig(teacher_off_sessions_per_week=0),
+        config=SchedulingConfig(teacher_off_sessions_per_week=0, cpsat_minimize_changes=True),
     )
     built = cpsat.build_model(inp)
     res = cpsat.solve_to_result(built)

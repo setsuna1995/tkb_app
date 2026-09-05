@@ -154,6 +154,7 @@ class SchedulingConfig:
     # vẫn xếp bình thường chứ không làm hỏng các tiêu chí khác.
     use_cpsat: bool = False  # Bật bộ giải tối ưu hóa toàn cục CP-SAT (thử nghiệm)
     cpsat_time_limit_seconds: int = 30  # Giới hạn thời gian giải cho CP-SAT (giây)
+    cpsat_minimize_changes: bool = False  # Ưu tiên giữ tối đa ô TKB cũ (mặc định Tắt để giải tự do)
 
 
 

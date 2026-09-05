@@ -805,6 +805,7 @@ def _add_objective(built: CpSatModel) -> None:
                     u_p[p] = v_p
 
                 # Khoảng trống tại tiết p: có tiết trước p, có tiết sau p, và tiết p trống
+                sess_gaps = []
                 for p in active_p[1:-1]:
                     before_vars = [u_p[p_prev] for p_prev in active_p if p_prev < p]
                     after_vars = [u_p[p_next] for p_next in active_p if p_next > p]
@@ -824,6 +825,11 @@ def _add_objective(built: CpSatModel) -> None:
                     m.Add(is_gap <= has_after)
                     m.Add(is_gap <= 1 - u_p[p])
                     penalty_terms["II.7"].append(is_gap)
+                    sess_gaps.append(is_gap)
+
+                # II.7: Trống 1 tiết thì oke, không được trống >= 2 tiết trong một buổi
+                if len(sess_gaps) >= 2:
+                    m.Add(sum(sess_gaps) <= 1)
 
     # 4. II.14 >= 4 tiết sáng liên tiếp
     if getattr(config, "avoid_teacher_4_consecutive_morning", True):
@@ -868,7 +874,7 @@ def _add_objective(built: CpSatModel) -> None:
     # 7. Theo dõi và tối thiểu hóa thay đổi ô cũ (task-7-brief.md)
     _add_change_minimisation(built)
 
-    # Tổng hợp hàm mục tiêu
+    # Tổng hợp hàm mục tiêu (khớp 100% với quality.py:_teacher_quality_penalty)
     obj_terms = []
     if penalty_terms.get("II.3"):
         obj_terms.append(800 * sum(penalty_terms["II.3"]))
@@ -889,17 +895,16 @@ def _add_objective(built: CpSatModel) -> None:
     if penalty_terms.get("II.9"):
         obj_terms.append(200 * sum(penalty_terms["II.9"]))
 
-    has_changes = bool(getattr(built, "changed_terms", None))
-    scale = max(1000, len(inp.slots) + 1) if has_changes else 1
-
-    total_terms = []
-    if obj_terms:
-        total_terms.append(scale * sum(obj_terms))
+    has_changes = bool(getattr(built, "changed_terms", None)) and getattr(config, "cpsat_minimize_changes", False)
     if has_changes:
+        scale = max(1000, len(inp.slots) + 1)
+        total_terms = []
+        if obj_terms:
+            total_terms.append(scale * sum(obj_terms))
         total_terms.append(sum(built.changed_terms))
-
-    if total_terms:
         m.Minimize(sum(total_terms))
+    elif obj_terms:
+        m.Minimize(sum(obj_terms))
 
 
 def _add_change_minimisation(built: CpSatModel) -> None:
@@ -973,6 +978,21 @@ def build_result(built: CpSatModel, solver: cp_model.CpSolver) -> ScheduleResult
     )
 
 
+def _apply_hard_post_gen_gates(built: CpSatModel) -> list:
+    """Tạo assumption gates để ưu tiên triệt tiêu 100% vi phạm II.3 và II.4 (HARD_POST_GENERATION).
+    Nếu trường hợp bất khả kháng, solver sẽ tự động fallback bằng cách gỡ gates."""
+    gates = []
+    if built.penalty_terms.get("II.3"):
+        g_ii3 = built.model.NewBoolVar("gate_hard_ii3")
+        built.model.Add(sum(built.penalty_terms["II.3"]) == 0).OnlyEnforceIf(g_ii3)
+        gates.append(g_ii3)
+    if built.penalty_terms.get("II.4"):
+        g_ii4 = built.model.NewBoolVar("gate_hard_ii4")
+        built.model.Add(sum(built.penalty_terms["II.4"]) == 0).OnlyEnforceIf(g_ii4)
+        gates.append(g_ii4)
+    return gates
+
+
 def solve_to_result(built: CpSatModel, time_limit_s: float = 30.0,
                     workers: int = 8) -> Optional[ScheduleResult]:
     """Giải mô hình và trả về ScheduleResult hoàn chỉnh, hoặc None nếu không giải được (task-7-brief.md)."""
@@ -989,7 +1009,15 @@ def solve_to_result(built: CpSatModel, time_limit_s: float = 30.0,
     if getattr(built.inp, "seed", None):
         solver.parameters.random_seed = int(built.inp.seed)
 
+    gates = _apply_hard_post_gen_gates(built)
+    if gates:
+        built.model.AddAssumptions(gates)
+
     status = solver.Solve(built.model)
+    if status not in (cp_model.OPTIMAL, cp_model.FEASIBLE) and gates:
+        built.model.ClearAssumptions()
+        status = solver.Solve(built.model)
+
     if status not in (cp_model.OPTIMAL, cp_model.FEASIBLE):
         return None
 
@@ -1013,7 +1041,15 @@ def solve(built: CpSatModel, time_limit_s: float = 10.0,
     if getattr(built.inp, "seed", None):
         solver.parameters.random_seed = int(built.inp.seed)
 
+    gates = _apply_hard_post_gen_gates(built)
+    if gates:
+        built.model.AddAssumptions(gates)
+
     status = solver.Solve(built.model)
+    if status not in (cp_model.OPTIMAL, cp_model.FEASIBLE) and gates:
+        built.model.ClearAssumptions()
+        status = solver.Solve(built.model)
+
     if status not in (cp_model.OPTIMAL, cp_model.FEASIBLE):
         return None
 
