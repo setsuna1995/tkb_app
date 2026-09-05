@@ -237,18 +237,35 @@ def find_heavy_afternoon_period3_violations(slots: list, assignment: dict, heavy
     return violations
 
 
+def _is_teacher_busy_on_morning(teacher_id: int, wd: int, slots: list, assigned_teacher: dict, ban_busy: set) -> bool:
+    if not ban_busy:
+        return False
+    morn_slots = [s for s in slots if s.ts.weekday == wd and s.ts.session == "S"]
+    if not morn_slots:
+        return False
+    classes_for_teacher = {c_id for (subj_id, c_id), t_id in assigned_teacher.items() if t_id == teacher_id}
+    candidate_slots = [s for s in morn_slots if s.class_id in classes_for_teacher]
+    if not candidate_slots:
+        return any((teacher_id, s.ts.ts_id) in ban_busy for s in morn_slots)
+    has_busy = any((teacher_id, s.ts.ts_id) in ban_busy for s in candidate_slots)
+    all_busy = all((teacher_id, s.ts.ts_id) in ban_busy for s in candidate_slots)
+    return has_busy and all_busy
+
+
 def find_teacher_missing_mandatory_morning_violations(slots: list, assignment: dict, assigned_teacher: dict,
                                                         mandatory_mornings: tuple = (2, 5, 6),
                                                         min_weekly_periods: int = 10,
                                                         strict_weekdays: tuple = (),
-                                                        exempt_teacher_ids: frozenset = frozenset()) -> list:
+                                                        exempt_teacher_ids: frozenset = frozenset(),
+                                                        ban_busy: set = None) -> list:
     """Returns [(teacher_id, weekday), ...] for teachers at/above min_weekly_periods
     who end up with zero periods on a mandatory morning -- Tiêu chí II.3: catches an
     accidental empty forbidden morning beyond the teacher's one designated off-slot.
     Mirrors core.scheduler.quality._count_teacher_missing_mandatory_mornings exactly,
     so this check and the engine's post-generation gate (core/scheduler/engine.py)
     never disagree -- INCLUDING the threshold, which callers must pass through from
-    config.min_weekly_periods_for_mandatory_morning (2026-09-04)."""
+    config.min_weekly_periods_for_mandatory_morning (2026-09-04).
+    ban_busy: tập các ô GV đã tích bận (2026-09-06); GV đã tích bận toàn bộ sáng được miễn trừ."""
     teacher_morns = defaultdict(lambda: defaultdict(int))
     teacher_totals = defaultdict(int)
     for slot in slots:
@@ -268,12 +285,16 @@ def find_teacher_missing_mandatory_morning_violations(slots: list, assignment: d
         if teacher_id not in exempt_teacher_ids:
             for wd in strict_weekdays:
                 if teacher_morns[teacher_id][wd] == 0:
+                    if ban_busy and _is_teacher_busy_on_morning(teacher_id, wd, slots, assigned_teacher, ban_busy):
+                        continue
                     violations.append((teacher_id, wd))
         if total >= min_weekly_periods:
             for wd in mandatory_mornings:
                 if wd in strict_weekdays:
                     continue
                 if teacher_morns[teacher_id][wd] == 0:
+                    if ban_busy and _is_teacher_busy_on_morning(teacher_id, wd, slots, assigned_teacher, ban_busy):
+                        continue
                     violations.append((teacher_id, wd))
     return violations
 

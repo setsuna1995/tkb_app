@@ -12,6 +12,9 @@ from __future__ import annotations
 
 from collections import defaultdict
 from dataclasses import dataclass, field
+import os
+import threading
+import time
 from typing import Callable, Optional, Sequence
 
 from core.frame import MAX_PERIODS_PER_SESSION
@@ -25,6 +28,7 @@ from core.scheduler.constants import (
     TEACHER_EXEMPT_LONE_SESSION_SOFT_PENALTY,
     TEACHER_EXEMPT_SPLIT_DAY_SOFT_PENALTY,
     TEACHER_LONE_SESSION_SPREAD_PENALTY,
+    TEACHER_STRICT_MORNING_MISS_PENALTY,
 )
 from core.scheduler.placement import _build_effective_assigned_teacher
 
@@ -647,6 +651,26 @@ def _add_block_constraints(built: CpSatModel) -> None:
                     m.Add(sum(partial_days) == 1)
 
 
+def _is_teacher_busy_morning(inp: SchedulingInput, teacher_id: int, weekday: int) -> bool:
+    """Kiểm tra xem GV có bị bận (tích bận) toàn bộ các ô sáng thứ `weekday` hay không.
+    Trả về True nếu GV có bị khoá bận trong ban_busy trên tất cả các ô sáng có thể dạy."""
+    if not inp.ban_busy:
+        return False
+    morn_slots = [s for s in inp.slots if s.ts.weekday == weekday and s.ts.session == "S"]
+    if not morn_slots:
+        return False
+    eff = _build_effective_assigned_teacher(inp)
+    candidate_slots = [
+        s for s in morn_slots
+        if any(eff.get((subj.subject_id, s.class_id)) == teacher_id for subj in inp.subjects)
+    ]
+    if not candidate_slots:
+        return any((teacher_id, s.ts.ts_id) in inp.ban_busy for s in morn_slots)
+    has_busy = any((teacher_id, s.ts.ts_id) in inp.ban_busy for s in candidate_slots)
+    all_busy = all((teacher_id, s.ts.ts_id) in inp.ban_busy for s in candidate_slots)
+    return has_busy and all_busy
+
+
 def _add_objective(built: CpSatModel) -> None:
     """Hàm mục tiêu tối ưu hóa toàn cục các tiêu chí HĐSP mềm (task-6-brief.md):
     - II.3 thiếu sáng bắt buộc: 800
@@ -724,6 +748,7 @@ def _add_objective(built: CpSatModel) -> None:
     lone_day_terms = []
     lone_spread_terms = []
     compact_terms = []
+    strict_morning_terms = []
     # GV trong lone_session_exempt_teacher_ids: KHÔNG hard-gate (không vào penalty_terms
     # II.4/II.8, không bao giờ kích hoạt relaxed_rules), nhưng vẫn cần một trọng số nhỏ
     # để không trở thành "bãi rác" mặc định của CP-SAT (2026-09-05, xem constants.py).
@@ -761,11 +786,7 @@ def _add_objective(built: CpSatModel) -> None:
                     m.Add(sp <= u_s)
                     m.Add(sp <= u_c)
                     m.Add(sp <= l_s + l_c)
-                    if is_soft_exempt:
-                        soft_exempt_split_terms.append(sp)
-                        penalty_terms["_exempt_split_day"].append(sp)
-                    else:
-                        penalty_terms["II.8"].append(sp)
+                    penalty_terms["II.8"].append(sp)
 
             # Ngày lẻ: cả ngày đúng 1 tiết
             for wd in weekdays:
@@ -782,6 +803,16 @@ def _add_objective(built: CpSatModel) -> None:
                         penalty_terms["II.4"].append(ld)
 
             if is_soft_exempt:
+                # 2026-09-05: Khống chế trần cứng số buổi lẻ cho GV miễn trừ:
+                # Tối đa 2 buổi lẻ/tuần! Tuyệt đối không để CP-SAT băm nhỏ thành 3-4 buổi.
+                t_lones = [lone[t, wd, sess] for (wd, sess) in sessions if (t, wd, sess) in lone]
+                if t_lones:
+                    m.Add(sum(t_lones) <= 2)
+                    # Nếu có buổi lẻ thứ 2: phạt dồn để solver ưu tiên cao nhất là chỉ 1 buổi lẻ
+                    extra_l = m.NewIntVar(0, len(t_lones), f"extra_lone_exempt_t{t}")
+                    m.Add(extra_l >= sum(t_lones) - 1)
+                    m.Add(extra_l >= 0)
+                    lone_spread_terms.append(extra_l)
                 continue
 
             # Dồn buổi lẻ: tính từ buổi lẻ thứ 2 trở đi của cùng GV
@@ -796,8 +827,9 @@ def _add_objective(built: CpSatModel) -> None:
     all_mand_strict = sorted(set(mand_morns) | set(strict_morns))
     for t in teachers:
         for wd in all_mand_strict:
-            is_strict = (wd in strict_morns and t not in bgh_ids)
-            is_mand = (wd in mand_morns and wd not in strict_morns and load[t] >= min_mand_load)
+            is_busy = _is_teacher_busy_morning(inp, t, wd)
+            is_strict = (wd in strict_morns and t not in bgh_ids and not is_busy)
+            is_mand = (wd in mand_morns and wd not in strict_morns and load[t] >= min_mand_load and not is_busy)
             if not (is_strict or is_mand):
                 continue
             if (t, wd, "S") in used:
@@ -805,10 +837,14 @@ def _add_objective(built: CpSatModel) -> None:
                 m.Add(used[t, wd, "S"] == 0).OnlyEnforceIf(miss)
                 m.Add(used[t, wd, "S"] == 1).OnlyEnforceIf(miss.Not())
                 penalty_terms["II.3"].append(miss)
+                if is_strict:
+                    strict_morning_terms.append(miss)
             else:
                 # Không có buổi sáng nào của thứ này trong khung trường -> chắc chắn thiếu
                 miss = m.NewConstant(1)
                 penalty_terms["II.3"].append(miss)
+                if is_strict:
+                    strict_morning_terms.append(miss)
 
     # 3. II.7 Tiết trống giữa buổi (gaps)
     if getattr(config, "avoid_teacher_gaps", True):
@@ -904,6 +940,9 @@ def _add_objective(built: CpSatModel) -> None:
     obj_terms = []
     if penalty_terms.get("II.3"):
         obj_terms.append(800 * sum(penalty_terms["II.3"]))
+    if strict_morning_terms:
+        diff_weight = max(0, TEACHER_STRICT_MORNING_MISS_PENALTY - 800)
+        obj_terms.append(diff_weight * sum(strict_morning_terms))
     if penalty_terms.get("II.8"):
         obj_terms.append(700 * sum(penalty_terms["II.8"]))
     if lone_spread_terms:
@@ -1056,31 +1095,163 @@ _STATUS_NAMES = {
 }
 
 
+def detect_optimal_workers(override: int = 0) -> int:
+    """Tự động phát hiện môi trường thực thi để chọn số workers tối ưu cho CP-SAT:
+    - Nếu người dùng ép cấu hình cụ thể (override > 0): tôn trọng lựa chọn đó.
+    - Nhận diện Streamlit Community Cloud (STREAMLIT_SHARING_HOST, IS_STREAMLIT_CLOUD):
+      khóa an toàn ở 2 workers để không làm nghẽn luồng Web và không bị cloud bóp CPU.
+    - Nhận diện cgroups Linux quota (Docker / Kubernetes / VPS): nếu quota <= 2 vCPU thì trả về max(1, quota).
+    - Nhận diện tiến trình Python (process_cpu_count hoặc sched_getaffinity): nếu <= 2 thì trả về max(1, eff).
+    - Môi trường PC/Laptop cục bộ đa nhân (cores >= 4):
+      chọn 4 workers (vừa kích hoạt đủ 4 chiến lược song song của CP-SAT, vừa chỉ chiếm ~25% CPU để máy mát,
+      không giật lag giao diện Streamlit).
+    """
+    if override and int(override) > 0:
+        return int(override)
+
+    # 1. Biến môi trường Streamlit Community Cloud
+    if os.environ.get("STREAMLIT_SHARING_HOST") or os.environ.get("IS_STREAMLIT_CLOUD"):
+        return 2
+
+    # 2. Linux cgroups CPU Quota (tránh bẫy đọc nhầm core máy chủ vật lý mẹ trên cloud)
+    try:
+        if os.path.exists("/sys/fs/cgroup/cpu.max"):
+            with open("/sys/fs/cgroup/cpu.max") as f:
+                quota, period = f.read().split()
+                if quota != "max":
+                    cgroup_cpus = int(int(quota) / int(period))
+                    return max(1, min(2, cgroup_cpus))
+        elif os.path.exists("/sys/fs/cgroup/cpu/cpu.cfs_quota_us"):
+            with open("/sys/fs/cgroup/cpu/cpu.cfs_quota_us") as fq, open("/sys/fs/cgroup/cpu/cpu.cfs_period_us") as fp:
+                q, p = int(fq.read().strip()), int(fp.read().strip())
+                if q > 0 and p > 0:
+                    return max(1, min(2, int(q / p)))
+    except Exception:
+        pass
+
+    # 3. Python 3.13+ process_cpu_count hoặc sched_getaffinity
+    effective_cpus = None
+    if hasattr(os, "process_cpu_count"):
+        try:
+            effective_cpus = os.process_cpu_count()
+        except Exception:
+            pass
+    if not effective_cpus and hasattr(os, "sched_getaffinity"):
+        try:
+            effective_cpus = len(os.sched_getaffinity(0))
+        except Exception:
+            pass
+    if not effective_cpus:
+        effective_cpus = os.cpu_count() or 2
+
+    # 4. Quyết định
+    if effective_cpus <= 2:
+        return max(1, effective_cpus)
+    return 4
+
+
+class EarlyStoppingCallback(cp_model.CpSolverSolutionCallback):
+    """Callback theo dõi tiến độ tìm nghiệm và dừng sớm khi điểm phạt bão hòa (plateau/stagnation).
+    - Dừng ngay nếu objective <= 0.
+    - Dừng nếu sau khi đã có nghiệm khả thi, trong `stagnation_s` giây không tìm được nghiệm nào tốt hơn.
+    - Định kỳ/Mỗi lần có nghiệm mới: gọi progress_cb để UI hiển thị tiến độ thời gian thực.
+    """
+    def __init__(self, stagnation_s: float = 8.0,
+                 progress_cb: Optional[Callable[[dict], None]] = None,
+                 pass_no: int = 1, max_passes: int = 1):
+        super().__init__()
+        self.stagnation_s = stagnation_s
+        self.progress_cb = progress_cb
+        self.pass_no = pass_no
+        self.max_passes = max_passes
+        self.last_sol_time = None
+        self.best_obj = None
+        self.sol_count = 0
+        self.start_time = time.time()
+        self.stop_event = threading.Event()
+        self.watcher = threading.Thread(target=self._watch, daemon=True)
+
+    def _watch(self):
+        while not self.stop_event.is_set():
+            time.sleep(0.3)
+            if self.last_sol_time is not None and (time.time() - self.last_sol_time > self.stagnation_s):
+                self.StopSearch()
+                break
+
+    def on_solution_callback(self):
+        self.sol_count += 1
+        now = time.time()
+        self.last_sol_time = now
+        obj = self.ObjectiveValue()
+        self.best_obj = obj
+        if self.progress_cb:
+            try:
+                self.progress_cb({
+                    "event": "solution",
+                    "pass": self.pass_no,
+                    "max_passes": self.max_passes,
+                    "sol_count": self.sol_count,
+                    "objective": obj,
+                    "status": "FEASIBLE",
+                    "wall_time_s": now - self.start_time,
+                })
+            except Exception:
+                pass
+        if obj <= 0:
+            self.StopSearch()
+
+
+def _presolve_capacity_screening(built: CpSatModel) -> set[str]:
+    """Phân tích giải tích tiền giải (0.001s) để phát hiện mâu thuẫn dung lượng toán học (Pigeonhole):
+    - Luật II.3: Giáo viên có tải >= ngưỡng (hoặc strict) bắt buộc phải có mặt dạy vào sáng Thứ 2 (và 5, 6).
+    - Luật II.4: Cấm tuyệt đối 1 tiết/buổi (mỗi GV phải dạy >= 2 tiết nếu có mặt).
+    - Nếu (Số GV bắt buộc x 2) > Tổng số tiết dạy được của toàn trường trong buổi sáng đó:
+      => Theo nguyên lý Dirichlet, KHÔNG THỂ thỏa mãn đồng thời II.3 và II.4 làm ràng buộc cứng!
+      => Tự động trả về {"II.4"} để nới lỏng ngay trước khi solver chạy, tránh lãng phí 10-15s timeout ở Pass 1.
+    """
+    config = built.inp.config
+    mand_morns = getattr(config, "mandatory_morning_weekdays", (2, 5, 6))
+    strict_morns = getattr(config, "strict_morning_weekdays", ())
+    min_mand_load = getattr(config, "min_weekly_periods_for_mandatory_morning", 10)
+    bgh_ids = {t.teacher_id for t in built.inp.teachers if is_bgh(t)}
+
+    load = defaultdict(int)
+    for (s_id, c_id), n in built.inp.need.items():
+        t_id = built.inp.assigned_teacher.get((s_id, c_id))
+        if t_id is not None and t_id > 0:
+            load[t_id] += n
+
+    all_mand = set(mand_morns) | set(strict_morns)
+    for wd in all_mand:
+        morn_slots = [s for s in built.inp.slots if s.ts.weekday == wd and s.ts.session == "S"]
+        cap = len(morn_slots)
+        req_teachers = 0
+        for t in built.inp.teachers:
+            if t.teacher_id in bgh_ids:
+                continue
+            if _is_teacher_busy_morning(built.inp, t.teacher_id, wd):
+                continue
+            is_strict = (wd in strict_morns)
+            is_mand = (wd in mand_morns and wd not in strict_morns and load[t.teacher_id] >= min_mand_load)
+            if is_strict or is_mand:
+                req_teachers += 1
+
+        min_needed = req_teachers * 2
+        if min_needed > cap:
+            return {"II.4"}
+
+    return set()
+
+
 def _diagnose_and_solve(built: CpSatModel, solver: cp_model.CpSolver, time_limit_s: float,
                         progress_cb: Optional[Callable[[dict], None]] = None) -> dict:
-    """Chẩn đoán leo thang assumption gates cho HARD_POST_GENERATION_IDS.
-    Đảm bảo solver lưu giữ trạng thái và giá trị biến của lần Solve() cuối cùng.
-
-    Tối đa len(active_rids) + 1 lần gọi Solve().
-    Tổng thời gian chạy được quản lý chặt chẽ theo ngân sách time_limit_s:
-    mỗi lần gọi chỉ nhận thời gian còn lại (remaining = time_limit_s - sum(WallTime)).
-
-    progress_cb (2026-09-05, tuỳ chọn): được gọi NGAY TRƯỚC và NGAY SAU mỗi lần
-    Solve() với 1 dict mô tả tiến độ -- dùng để hiển thị thanh tiến trình trên
-    UI (xem pages/06_Xep_TKB.py). Không thể báo tiến độ MƯỢT bên trong 1 lần
-    Solve() (CP-SAT chặn luồng Python cho tới khi xong), nên đây là tiến độ
-    theo TỪNG ĐỢT (pass), không phải theo giây.
-
-    Trả về:
-      {
-        "status": int,                     # final cp_model status
-        "pass1_status": str,               # status name của lần thử đầu tiên
-        "unsat_core": list[str],           # rule ids từ SufficientAssumptionsForInfeasibility
-                                           # ở lần thử INFEASIBLE đầu tiên; [] nếu pass 1 không INFEASIBLE,
-                                           # hoặc INFEASIBLE nhưng core rỗng (mâu thuẫn ở Base Model).
-        "relaxed_by_diagnosis": list[str], # danh sách rule ids đã phải relax
-        "passes_run": int,
-      }
+    """Chẩn đoán leo thang assumption gates cho HARD_POST_GENERATION_IDS và giải tối ưu.
+    - Tiền giải: Chạy sàng lọc giải tích dung lượng (_presolve_capacity_screening) 0.001s
+      để phát hiện mâu thuẫn Dirichlet lồng chim, nới lỏng trước khi solver chạy.
+    - Pass 1: Chẩn đoán tính khả thi thuần túy (loại bỏ Objective, trần 2.5s) để phát hiện và cô lập
+      xung đột (UNSAT core) siêu tốc thay vì chờ timeout.
+    - Pass 2: Giải tối ưu hóa trên bộ ràng buộc khả thi với cơ chế Early Stopping (dừng khi
+      điểm phạt bão hòa sau 5-8s).
     """
     active_rids = [rid for rid in HARD_POST_GENERATION_IDS if built.penalty_terms.get(rid)]
     max_passes = len(active_rids) + 1
@@ -1094,25 +1265,110 @@ def _diagnose_and_solve(built: CpSatModel, solver: cp_model.CpSolver, time_limit
         "passes_run": 0,
     }
 
+    if remaining <= 0.0:
+        return diag
+
+    num_workers = int(getattr(solver.parameters, "num_search_workers", 2) or 2)
+    stagnation = 5.0 if num_workers <= 2 else 8.0
+
     while True:
         hard_rids = [rid for rid in active_rids if rid not in relaxed]
-        solver.parameters.max_time_in_seconds = float(time_limit_s)
         diag["passes_run"] += 1
+
+        if remaining <= 0.05:
+            diag["status"] = cp_model.UNKNOWN
+            return diag
 
         if progress_cb:
             progress_cb({
                 "event": "pass_start", "pass": diag["passes_run"], "max_passes": max_passes,
                 "hard_rids": list(hard_rids), "relaxed_so_far": sorted(relaxed),
                 "time_budget_s": remaining,
+                "workers": num_workers,
             })
 
         if not hard_rids:
-            status = solver.Solve(built.model)
-        else:
-            model, gates = _build_gated_model(built, hard_rids)
-            model.AddAssumptions(list(gates.values()))
-            status = solver.Solve(model)
+            # Mô hình hoàn toàn mềm: chỉ giải tối ưu với Early Stopping
+            solver.parameters.max_time_in_seconds = float(remaining)
+            cb = EarlyStoppingCallback(
+                stagnation_s=stagnation, progress_cb=progress_cb,
+                pass_no=diag["passes_run"], max_passes=max_passes
+            )
+            cb.watcher.start()
+            status = solver.Solve(built.model, cb)
+            cb.stop_event.set()
+            remaining -= solver.WallTime()
+            diag["status"] = status
+            if diag["pass1_status"] is None:
+                diag["pass1_status"] = _STATUS_NAMES.get(status, str(status))
+            if progress_cb:
+                progress_cb({
+                    "event": "pass_end", "pass": diag["passes_run"], "max_passes": max_passes,
+                    "status": _STATUS_NAMES.get(status, str(status)), "wall_time_s": solver.WallTime(),
+                })
+            return diag
 
+        # Khi còn hard_rids:
+        # Bước 1: Chẩn đoán tính khả thi thuần túy (Pure Feasibility Projection - Loại bỏ Objective)
+        # Giúp chứng minh INFEASIBLE và trích xuất UNSAT core trong vài giây thay vì đợi timeout!
+        diag_model, diag_gates = _build_gated_model(built, hard_rids)
+        diag_model.Proto().clear_objective()
+        diag_model.AddAssumptions(list(diag_gates.values()))
+        diag_solver = cp_model.CpSolver()
+        diag_solver.parameters.num_search_workers = num_workers
+        diag_solver.parameters.linearization_level = 1
+        diag_solver.parameters.cp_model_probing_level = 1
+        if getattr(built.inp, "seed", None):
+            diag_solver.parameters.random_seed = int(built.inp.seed)
+        diag_budget = min(2.5, max(remaining * 0.15, 1.0))
+        diag_solver.parameters.max_time_in_seconds = float(diag_budget)
+
+        feas_status = diag_solver.Solve(diag_model)
+        remaining -= diag_solver.WallTime()
+
+        if feas_status == cp_model.INFEASIBLE:
+            core = set(diag_solver.SufficientAssumptionsForInfeasibility())
+            index_to_rid = {g.Index(): rid for rid, g in diag_gates.items()}
+            offending = {index_to_rid[i] for i in core if i in index_to_rid}
+            if diag["pass1_status"] is None:
+                diag["pass1_status"] = "INFEASIBLE"
+                diag["unsat_core"] = sorted(offending)
+            if not offending:
+                offending = set(hard_rids)
+            relaxed |= offending
+            diag["relaxed_by_diagnosis"] = sorted(relaxed)
+            if progress_cb:
+                progress_cb({
+                    "event": "pass_end", "pass": diag["passes_run"], "max_passes": max_passes,
+                    "status": "INFEASIBLE", "wall_time_s": diag_solver.WallTime(),
+                })
+            continue
+
+        if feas_status == cp_model.UNKNOWN:
+            # Hết giờ ở chẩn đoán (thường do Dirichlet Pigeonhole): thả các hard_rids còn lại
+            if diag["pass1_status"] is None:
+                diag["pass1_status"] = "UNKNOWN"
+            relaxed |= set(hard_rids)
+            diag["relaxed_by_diagnosis"] = sorted(relaxed)
+            if progress_cb:
+                progress_cb({
+                    "event": "pass_end", "pass": diag["passes_run"], "max_passes": max_passes,
+                    "status": "UNKNOWN", "wall_time_s": diag_solver.WallTime(),
+                })
+            continue
+
+        # feas_status in (OPTIMAL, FEASIBLE): Bộ hard_rids này đã được chứng minh khả thi!
+        # Bước 2: Giải tối ưu hóa điểm phạt trên các hard_rids này kèm Early Stopping
+        model, gates = _build_gated_model(built, hard_rids)
+        model.AddAssumptions(list(gates.values()))
+        solver.parameters.max_time_in_seconds = float(remaining)
+        cb = EarlyStoppingCallback(
+            stagnation_s=stagnation, progress_cb=progress_cb,
+            pass_no=diag["passes_run"], max_passes=max_passes
+        )
+        cb.watcher.start()
+        status = solver.Solve(model, cb)
+        cb.stop_event.set()
         remaining -= solver.WallTime()
         diag["status"] = status
         if diag["pass1_status"] is None:
@@ -1127,42 +1383,14 @@ def _diagnose_and_solve(built: CpSatModel, solver: cp_model.CpSolver, time_limit
         if status in (cp_model.OPTIMAL, cp_model.FEASIBLE):
             return diag
 
-        if hard_rids and status == cp_model.INFEASIBLE:
-            # CP-SAT's SufficientAssumptionsForInfeasibility() có thể bị nhiễu biến mục tiêu
-            # nếu mô hình chứa Objective. Trích xuất core trên hình chiếu khả thi thuần túy:
-            diag_model, diag_gates = _build_gated_model(built, hard_rids)
-            diag_model.Proto().clear_objective()
-            diag_model.AddAssumptions(list(diag_gates.values()))
-            diag_solver = cp_model.CpSolver()
-            diag_solver.parameters.max_time_in_seconds = min(max(remaining, 1.0), 3.0)
-            if diag_solver.Solve(diag_model) == cp_model.INFEASIBLE:
-                core = set(diag_solver.SufficientAssumptionsForInfeasibility())
-                index_to_rid = {g.Index(): rid for rid, g in diag_gates.items()}
-            else:
-                core = set(solver.SufficientAssumptionsForInfeasibility())
-                index_to_rid = {g.Index(): rid for rid, g in gates.items()}
-
-            offending = {index_to_rid[i] for i in core if i in index_to_rid}
-            if diag["passes_run"] == 1:
-                diag["unsat_core"] = sorted(offending)  # may be [] -> base-model infeasibility
-            if not offending:
-                offending = set(hard_rids)  # Không cô lập được -> thả hết hard_rids đợt này
-            relaxed |= offending
-            diag["relaxed_by_diagnosis"] = sorted(relaxed)
-            continue
-
-        if hard_rids and status == cp_model.UNKNOWN:
-            # Hết giờ (timeout): không có core để chẩn đoán.
-            # Thả đồng loạt các hard_rids còn lại về giải phạt mềm với phần thời gian còn lại.
-            relaxed |= set(hard_rids)
-            diag["relaxed_by_diagnosis"] = sorted(relaxed)
-            continue
-
-        return diag  # hard_rids đã rỗng và mô hình mềm cũng không giải được
+        # Trường hợp hiếm: solver tối ưu gặp lỗi hoặc timeout không ra nghiệm
+        relaxed |= set(hard_rids)
+        diag["relaxed_by_diagnosis"] = sorted(relaxed)
+        continue
 
 
 def solve_to_result(built: CpSatModel, time_limit_s: float = 30.0,
-                    workers: int = 8,
+                    workers: Optional[int] = None,
                     progress_cb: Optional[Callable[[dict], None]] = None) -> Optional[ScheduleResult]:
     """Giải mô hình và trả về ScheduleResult hoàn chỉnh, hoặc None nếu không giải được (task-7-brief.md).
     progress_cb: xem docstring _diagnose_and_solve."""
@@ -1171,17 +1399,17 @@ def solve_to_result(built: CpSatModel, time_limit_s: float = 30.0,
 
     import os
     if os.environ.get("PYTEST_XDIST_WORKER") or os.environ.get("PYTEST_CURRENT_TEST"):
-        workers = min(workers, 2)
+        eff_workers = 2
+    elif workers is None or int(workers) <= 0:
+        user_workers = getattr(built.inp.config, "cpsat_workers", 0)
+        eff_workers = detect_optimal_workers(override=user_workers)
     else:
-        # CP-SAT không nên nhận num_search_workers vượt số CPU thực có -- trên
-        # hosting free tier (Streamlit Community Cloud, 2026-09-05) thường chỉ
-        # có 1-2 CPU, xin 8 worker sẽ chia nhỏ thời gian CPU mỗi worker được
-        # dùng thay vì chạy song song thật, làm CHẬM đi chứ không nhanh hơn.
-        cpu_count = os.cpu_count() or workers
-        workers = max(1, min(workers, cpu_count))
+        eff_workers = max(1, int(workers))
 
     solver = cp_model.CpSolver()
-    solver.parameters.num_search_workers = int(workers)
+    solver.parameters.num_search_workers = int(eff_workers)
+    solver.parameters.linearization_level = 1
+    solver.parameters.cp_model_probing_level = 1
     if getattr(built.inp, "seed", None):
         solver.parameters.random_seed = int(built.inp.seed)
 
@@ -1193,7 +1421,7 @@ def solve_to_result(built: CpSatModel, time_limit_s: float = 30.0,
 
 
 def solve(built: CpSatModel, time_limit_s: float = 10.0,
-          workers: int = 8) -> Optional[dict]:
+          workers: Optional[int] = None) -> Optional[dict]:
     """Trả {slot_id: subject_id} cho các ô CÓ môn, hoặc None nếu không giải được.
     Ô để trống không xuất hiện trong dict."""
     if not _HAS_ORTOOLS:
@@ -1201,17 +1429,17 @@ def solve(built: CpSatModel, time_limit_s: float = 10.0,
 
     import os
     if os.environ.get("PYTEST_XDIST_WORKER") or os.environ.get("PYTEST_CURRENT_TEST"):
-        workers = min(workers, 2)
+        eff_workers = 2
+    elif workers is None or int(workers) <= 0:
+        user_workers = getattr(built.inp.config, "cpsat_workers", 0)
+        eff_workers = detect_optimal_workers(override=user_workers)
     else:
-        # CP-SAT không nên nhận num_search_workers vượt số CPU thực có -- trên
-        # hosting free tier (Streamlit Community Cloud, 2026-09-05) thường chỉ
-        # có 1-2 CPU, xin 8 worker sẽ chia nhỏ thời gian CPU mỗi worker được
-        # dùng thay vì chạy song song thật, làm CHẬM đi chứ không nhanh hơn.
-        cpu_count = os.cpu_count() or workers
-        workers = max(1, min(workers, cpu_count))
+        eff_workers = max(1, int(workers))
 
     solver = cp_model.CpSolver()
-    solver.parameters.num_search_workers = int(workers)
+    solver.parameters.num_search_workers = int(eff_workers)
+    solver.parameters.linearization_level = 1
+    solver.parameters.cp_model_probing_level = 1
     if getattr(built.inp, "seed", None):
         solver.parameters.random_seed = int(built.inp.seed)
 

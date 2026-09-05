@@ -53,10 +53,14 @@ TEACHER_EXEMPT_LONE_SESSION_SOFT_PENALTY = 20  # (2026-09-05) GV trong lone_sess
                                   # là lựa chọn rẻ nhất cho hàm mục tiêu. Trọng số nhỏ này chỉ để GV
                                   # miễn trừ không thành "bãi rác" mặc định, KHÔNG đưa vào penalty_terms
                                   # II.4/II.8 nên không bao giờ kích hoạt hard-gate/relaxed_rules.
-TEACHER_EXEMPT_SPLIT_DAY_SOFT_PENALTY = 20  # tương tự, cho ngày chia lẻ (1 sáng + 1 chiều) của GV miễn trừ
-TEACHER_EXEMPT_LONE_DAY_SOFT_PENALTY = 10  # tương tự, cho ngày chỉ có đúng 1 tiết của GV miễn trừ
+TEACHER_EXEMPT_SPLIT_DAY_SOFT_PENALTY = 520  # (2026-09-05) Ngày chia lẻ (1 sáng + 1 chiều) của GV miễn trừ:
+                                   # giữ phạt nặng ngang TEACHER_SPLIT_DAY_PENALTY=520 để GV không phải đến trường
+                                   # 2 lần/ngày chỉ để dạy 2 tiết lẻ.
+TEACHER_EXEMPT_LONE_DAY_SOFT_PENALTY = 100  # tương tự, phạt khi ngày chỉ có đúng 1 tiết của GV miễn trừ
 TEACHER_AFTERNOON_BALANCE_BONUS = 0  # không ép rải tiết chiều trong greedy gây lẻ 1 tiết; đánh giá cân đối qua _teacher_quality_penalty
 TEACHER_MANDATORY_MORNING_BONUS = 280  # điểm thưởng khi xếp tiết vào các sáng bắt buộc (T2, T5, T6) cho GV tải cao
+TEACHER_STRICT_MORNING_MISS_PENALTY = 3500  # Điểm phạt nặng cho việc thiếu tiết sáng nghiêm ngặt (T2, T6)
+# để solver không bao giờ đánh đổi việc để GV nghỉ sáng T2/T6 với các tiêu chí mềm khác.
 TEACHER_COMPACT_SCHEDULE_PENALTY = 400  # điểm phạt khi MỞ THÊM một buổi chiều mới cho GV
                                   # thuộc danh sách "ưu tiên nghỉ chiều" (cấu hình trên web,
                                   # vd GV Thể dục). Phải lớn hơn TEACHER_SESSION_PAIR_BONUS=320,

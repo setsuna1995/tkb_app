@@ -51,6 +51,7 @@ def _check_hard_post_generation_rules(inp: SchedulingInput, state: _State, confi
         min_weekly_periods=getattr(config, "min_weekly_periods_for_mandatory_morning", 10),
         strict_weekdays=getattr(config, "strict_morning_weekdays", ()) or (),
         exempt_teacher_ids=frozenset(t.teacher_id for t in inp.teachers if is_bgh(t)),
+        ban_busy=getattr(inp, "ban_busy", None),
     )
     if missing > 0:
         violated.append("II.3")

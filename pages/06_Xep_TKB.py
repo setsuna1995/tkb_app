@@ -110,18 +110,30 @@ if st.button("🚀 Chạy xếp TKB", disabled=bool(over) and not proceed_anyway
 
         def _on_cpsat_progress(info):
             max_passes = max(info.get("max_passes", 1), 1)
-            if info["event"] == "pass_start":
+            event = info.get("event")
+            pass_no = info.get("pass", 1)
+            if event == "pass_start":
                 hard_rids = info.get("hard_rids") or []
                 relaxed = info.get("relaxed_so_far") or []
                 desc = (f"ràng buộc cứng còn lại: {', '.join(hard_rids)}" if hard_rids
                         else "phần còn lại (chỉ còn ràng buộc mềm)")
-                line = f"⏳ Lần thử {info['pass']}/{max_passes}: đang giải {desc}"
+                workers = info.get("workers")
+                w_str = f" ({workers} luồng CPU)" if workers else ""
+                line = f"⏳ Lần thử {pass_no}/{max_passes}{w_str}: đang giải {desc}"
                 if relaxed:
                     line += f" — đã phải nới lỏng trước đó: {', '.join(relaxed)}"
-                progress_bar.progress(min(0.95, (info["pass"] - 1) / max_passes), text=line)
+                progress_bar.progress(min(0.95, (pass_no - 1) / max_passes), text=line)
+            elif event == "solution":
+                sol_count = info.get("sol_count", 1)
+                obj = info.get("objective", 0)
+                wall_time = info.get("wall_time_s", 0.0)
+                line = f"💡 Nghiệm #{sol_count}: điểm phạt {obj:.0f} (sau {wall_time:.1f}s)"
+                progress_bar.progress(min(0.98, max(0.05, (pass_no - 0.5) / max_passes)), text=line)
             else:
-                line = f"✓ Lần thử {info['pass']} kết thúc: {info['status']} (mất {info['wall_time_s']:.1f}s)"
-                progress_bar.progress(min(0.99, info["pass"] / max_passes), text=line)
+                status_str = info.get("status", "HOÀN TẤT")
+                wall_time = info.get("wall_time_s", 0.0)
+                line = f"✓ Lần thử {pass_no} kết thúc: {status_str} (mất {wall_time:.1f}s)"
+                progress_bar.progress(min(0.99, pass_no / max_passes), text=line)
             log_lines.append(line)
             status_log.caption("  \n".join(log_lines[-8:]))
 
@@ -413,6 +425,7 @@ if result is not None:
             getattr(inp.config, "min_weekly_periods_for_mandatory_morning", 10),
             getattr(inp.config, "strict_morning_weekdays", ()) or (),
             frozenset(t.teacher_id for t in inp.teachers if is_bgh(t)),
+            ban_busy=getattr(inp, "ban_busy", None),
         )
         if missing_morning:
             hard_rule_violations["II.3"] = missing_morning
@@ -662,6 +675,7 @@ with st.expander("📅 Xếp nhiều tuần cùng lúc (tạm thời tắt)", ex
                     getattr(b_inp.config, "min_weekly_periods_for_mandatory_morning", 10),
                     getattr(b_inp.config, "strict_morning_weekdays", ()) or (),
                     frozenset(t.teacher_id for t in b_inp.teachers if is_bgh(t)),
+                    ban_busy=getattr(b_inp, "ban_busy", None),
                 )
                 if b_missing_morning:
                     b_hard_rule_violations["II.3"] = b_missing_morning

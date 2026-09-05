@@ -128,11 +128,27 @@ def _count_teacher_4_consecutive_mornings(slots: list[Slot], assigned: dict, slo
     return count_4
 
 
+def _is_teacher_busy_on_morning_quality(teacher_id: int, wd: int, slots: list[Slot], slot_teacher: dict, ban_busy: set) -> bool:
+    if not ban_busy:
+        return False
+    morn_slots = [s for s in slots if s.ts.weekday == wd and s.ts.session == "S"]
+    if not morn_slots:
+        return False
+    classes_for_teacher = {s.class_id for s in slots if slot_teacher.get(s.slot_id) == teacher_id}
+    candidate_slots = [s for s in morn_slots if s.class_id in classes_for_teacher]
+    if not candidate_slots:
+        return any((teacher_id, s.ts.ts_id) in ban_busy for s in morn_slots)
+    has_busy = any((teacher_id, s.ts.ts_id) in ban_busy for s in candidate_slots)
+    all_busy = all((teacher_id, s.ts.ts_id) in ban_busy for s in candidate_slots)
+    return has_busy and all_busy
+
+
 def _count_teacher_missing_mandatory_mornings(slots: list[Slot], assigned: dict, slot_teacher: dict,
                                                mandatory_mornings: tuple = (2, 5, 6),
                                                min_weekly_periods: int = 10,
                                                strict_weekdays: tuple = (),
-                                               exempt_teacher_ids: frozenset = frozenset()) -> int:
+                                               exempt_teacher_ids: frozenset = frozenset(),
+                                               ban_busy: set = None) -> int:
     """min_weekly_periods: chỉ ép GV có tải >= ngưỡng này phải có mặt các sáng bắt
     buộc. Mặc định 10 = đúng hằng số cũ nằm cứng trong hàm này; nay cấu hình được
     trên trang Cấu hình xếp lịch (2026-09-04).
@@ -140,7 +156,9 @@ def _count_teacher_missing_mandatory_mornings(slots: list[Slot], assigned: dict,
     strict_weekdays: các sáng mà MỌI GV đều phải có tiết, bỏ qua ngưỡng tải
     (yêu cầu của trường 2026-09-04: sáng Thứ 2 và Thứ 6 toàn thể GV phải có tiết).
     exempt_teacher_ids: GV được miễn khỏi phần strict này -- dành cho BGH, tải của
-    họ quá ít để trải đủ các sáng. Danh sách do caller tính từ chức vụ GV."""
+    họ quá ít để trải đủ các sáng. Danh sách do caller tính từ chức vụ GV.
+    ban_busy: tập (teacher_id, ts_id) các ô GV đã chủ động tích bận (2026-09-06).
+    GV đã tích bận toàn bộ sáng đó được miễn trừ không tính vi phạm."""
     teacher_morns = defaultdict(lambda: defaultdict(int))
     teacher_totals = defaultdict(int)
     for s in slots:
@@ -159,6 +177,8 @@ def _count_teacher_missing_mandatory_mornings(slots: list[Slot], assigned: dict,
         if tid not in exempt_teacher_ids:
             for wd in strict_weekdays:
                 if teacher_morns[tid][wd] == 0:
+                    if ban_busy and _is_teacher_busy_on_morning_quality(tid, wd, slots, slot_teacher, ban_busy):
+                        continue
                     missing += 1
         # Sáng bắt buộc thường: chỉ ép GV đủ tải, và không đếm trùng các sáng strict.
         if total >= min_weekly_periods:
@@ -166,6 +186,8 @@ def _count_teacher_missing_mandatory_mornings(slots: list[Slot], assigned: dict,
                 if wd in strict_weekdays:
                     continue
                 if teacher_morns[tid][wd] == 0:
+                    if ban_busy and _is_teacher_busy_on_morning_quality(tid, wd, slots, slot_teacher, ban_busy):
+                        continue
                     missing += 1
     return missing
 
@@ -195,7 +217,7 @@ def _count_teacher_missing_afternoon_duty(slots: list[Slot], assigned: dict, slo
 
 
 def _teacher_quality_penalty(slots: list[Slot], assigned: dict, slot_teacher: dict, config: SchedulingConfig,
-                              exempt_teacher_ids: frozenset = frozenset()) -> int:
+                              exempt_teacher_ids: frozenset = frozenset(), ban_busy: set = None) -> int:
     penalty = 0
     mand_morns = getattr(config, "mandatory_morning_weekdays", (2, 5, 6))
     min_lone_load = getattr(config, "min_weekly_periods_for_lone_penalty", 8)
@@ -224,6 +246,7 @@ def _teacher_quality_penalty(slots: list[Slot], assigned: dict, slot_teacher: di
         min_weekly_periods=getattr(config, "min_weekly_periods_for_mandatory_morning", 10),
         strict_weekdays=getattr(config, "strict_morning_weekdays", ()) or (),
         exempt_teacher_ids=exempt_teacher_ids,
+        ban_busy=ban_busy,
     ) * 800
     if getattr(config, "balance_afternoon_teachers", True):
         penalty += _count_teacher_missing_afternoon_duty(slots, assigned, slot_teacher) * 200
