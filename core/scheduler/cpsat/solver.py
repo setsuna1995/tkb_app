@@ -28,10 +28,10 @@ def build_result(built: CpSatModel, solver: cp_model.CpSolver, diagnostics: Opti
                 break
         assignment[slot.slot_id] = chosen_subj
 
-    cells_changed = 0
-    for slot in inp.slots:
-        if assignment.get(slot.slot_id) != slot.old_subject_id:
-            cells_changed += 1
+    cells_changed = sum(
+        1 for slot in inp.slots
+        if assignment.get(slot.slot_id) != slot.old_subject_id
+    )
     cells_total = len(inp.slots)
 
     relaxed_rules = []
@@ -172,20 +172,12 @@ class EarlyStoppingCallback(cp_model.CpSolverSolutionCallback if cp_model is not
 
         cutoff = now - self.plateau_window_s
         recent_candidates = [obj for (t, obj) in self.history if t <= cutoff]
-        if not recent_candidates:
-            base_obj = self.history[0][1]
-        else:
-            base_obj = recent_candidates[-1]
+        base_obj = recent_candidates[-1] if recent_candidates else self.history[0][1]
 
         improvement_abs = base_obj - self.best_obj
-        if base_obj > 0:
-            improvement_rate = improvement_abs / base_obj
-        else:
-            improvement_rate = 0.0
+        improvement_rate = (improvement_abs / base_obj) if base_obj > 0 else 0.0
 
-        if improvement_abs < self.min_improvement_abs or improvement_rate < self.min_improvement_rate:
-            return True
-        return False
+        return improvement_abs < self.min_improvement_abs or improvement_rate < self.min_improvement_rate
 
     def _watch(self):
         while not self.stop_event.is_set():
@@ -239,7 +231,6 @@ def _presolve_capacity_screening(built: CpSatModel) -> set[str]:
         if t_id is not None and t_id > 0:
             load[t_id] += n
 
-    res: set[str] = set()
     all_mand = set(mand_morns) | set(strict_morns)
     for wd in all_mand:
         morn_slots = [s for s in built.inp.slots if s.ts.weekday == wd and s.ts.session == "S"]
@@ -272,6 +263,33 @@ def _presolve_capacity_screening(built: CpSatModel) -> set[str]:
             return {"II.3"}
 
     return set()
+
+
+def _select_fallback_relaxations(hard_rids: Sequence[str]) -> set[str]:
+    """Lựa chọn quy tắc nới lỏng dự phòng theo thứ tự ưu tiên: II.4 -> II.8 -> II.3."""
+    for candidate in ("II.4", "II.8", "II.3"):
+        if candidate in hard_rids:
+            return {candidate}
+    return set(hard_rids)
+
+
+def _create_solver(built: CpSatModel, workers: Optional[int] = None) -> cp_model.CpSolver:
+    """Khởi tạo và cấu hình solver CP-SAT với số worker và tham số chuẩn."""
+    if os.environ.get("PYTEST_XDIST_WORKER"):
+        eff_workers = 2
+    elif workers is None or int(workers) <= 0:
+        user_workers = getattr(built.inp.config, "cpsat_workers", 0)
+        eff_workers = detect_optimal_workers(override=user_workers)
+    else:
+        eff_workers = max(1, int(workers))
+
+    solver = cp_model.CpSolver()
+    solver.parameters.num_search_workers = int(eff_workers)
+    solver.parameters.linearization_level = 1
+    solver.parameters.cp_model_probing_level = 1
+    if getattr(built.inp, "seed", None):
+        solver.parameters.random_seed = int(built.inp.seed)
+    return solver
 
 
 def _diagnose_and_solve(built: CpSatModel, solver: cp_model.CpSolver, time_limit_s: float,
@@ -351,10 +369,7 @@ def _diagnose_and_solve(built: CpSatModel, solver: cp_model.CpSolver, time_limit
                 "status": _STATUS_NAMES.get(status, str(status)), "wall_time_s": solver.WallTime(),
             })
 
-        if status in (cp_model.OPTIMAL, cp_model.FEASIBLE):
-            return diag
-
-        if not hard_rids:
+        if status in (cp_model.OPTIMAL, cp_model.FEASIBLE) or not hard_rids:
             return diag
 
         # Nếu INFEASIBLE: dùng gated model để trích xuất UNSAT core
@@ -376,30 +391,15 @@ def _diagnose_and_solve(built: CpSatModel, solver: cp_model.CpSolver, time_limit
             if diag["passes_run"] == 1:
                 diag["unsat_core"] = sorted(offending)
             if not offending:
-                # Ưu tiên nới lỏng II.4 trước nếu không trích xuất được core, bảo vệ tuyệt đối II.3
-                if "II.4" in hard_rids:
-                    offending = {"II.4"}
-                elif "II.8" in hard_rids:
-                    offending = {"II.8"}
-                else:
-                    offending = {"II.3"}
+                offending = _select_fallback_relaxations(hard_rids)
 
             relaxed |= offending
             diag["relaxed_by_diagnosis"] = sorted(relaxed)
             continue
 
-        # Nếu UNKNOWN (timeout): Nới lỏng ràng buộc tổ hợp nặng trước (II.4 rồi đến II.8),
-        # bảo vệ tuyệt đối II.3 (có mặt buổi sáng T2/T6 - yêu cầu bắt buộc của nhà trường).
+        # Nếu UNKNOWN (timeout): Nới lỏng quy tắc dự phòng theo thứ tự ưu tiên
         if status == cp_model.UNKNOWN:
-            if "II.4" in hard_rids:
-                offending = {"II.4"}
-            elif "II.8" in hard_rids:
-                offending = {"II.8"}
-            elif "II.3" in hard_rids:
-                offending = {"II.3"}
-            else:
-                offending = set(hard_rids)
-            relaxed |= offending
+            relaxed |= _select_fallback_relaxations(hard_rids)
             diag["relaxed_by_diagnosis"] = sorted(relaxed)
             continue
 
@@ -411,21 +411,7 @@ def solve_to_result(built: CpSatModel, time_limit_s: float = 30.0,
     if not _HAS_ORTOOLS or cp_model is None:
         raise CpSatUnavailable("ortools chưa được cài")
 
-    if os.environ.get("PYTEST_XDIST_WORKER"):
-        eff_workers = 2
-    elif workers is None or int(workers) <= 0:
-        user_workers = getattr(built.inp.config, "cpsat_workers", 0)
-        eff_workers = detect_optimal_workers(override=user_workers)
-    else:
-        eff_workers = max(1, int(workers))
-
-    solver = cp_model.CpSolver()
-    solver.parameters.num_search_workers = int(eff_workers)
-    solver.parameters.linearization_level = 1
-    solver.parameters.cp_model_probing_level = 1
-    if getattr(built.inp, "seed", None):
-        solver.parameters.random_seed = int(built.inp.seed)
-
+    solver = _create_solver(built, workers=workers)
     diag = _diagnose_and_solve(built, solver, float(time_limit_s), progress_cb=progress_cb)
     if diag["status"] not in (cp_model.OPTIMAL, cp_model.FEASIBLE):
         return None
@@ -439,27 +425,13 @@ def solve(built: CpSatModel, time_limit_s: float = 10.0,
     if not _HAS_ORTOOLS or cp_model is None:
         raise CpSatUnavailable("ortools chưa được cài")
 
-    if os.environ.get("PYTEST_XDIST_WORKER"):
-        eff_workers = 2
-    elif workers is None or int(workers) <= 0:
-        user_workers = getattr(built.inp.config, "cpsat_workers", 0)
-        eff_workers = detect_optimal_workers(override=user_workers)
-    else:
-        eff_workers = max(1, int(workers))
-
-    solver = cp_model.CpSolver()
-    solver.parameters.num_search_workers = int(eff_workers)
-    solver.parameters.linearization_level = 1
-    solver.parameters.cp_model_probing_level = 1
-    if getattr(built.inp, "seed", None):
-        solver.parameters.random_seed = int(built.inp.seed)
-
+    solver = _create_solver(built, workers=workers)
     diag = _diagnose_and_solve(built, solver, float(time_limit_s))
     if diag["status"] not in (cp_model.OPTIMAL, cp_model.FEASIBLE):
         return None
 
-    assignment = {}
-    for (slot_id, subject_id), var in built.x.items():
-        if solver.Value(var):
-            assignment[slot_id] = subject_id
-    return assignment
+    return {
+        slot_id: subject_id
+        for (slot_id, subject_id), var in built.x.items()
+        if solver.Value(var)
+    }
