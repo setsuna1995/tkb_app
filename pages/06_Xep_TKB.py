@@ -4,7 +4,7 @@ import streamlit as st
 from core import scheduler as sched
 from core.models import ROLE_GDTC, ROLE_HDTN, ROLE_KEP, ROLE_NANG, ROLE_NANG_KEP, WEEKDAY_NAMES, WEEKDAYS, is_bgh
 from core.validation import (
-    compute_quota_diff, find_consecutive_subject_days, find_heavy_afternoon_period3_violations,
+    compute_quota_diff, compute_tkb_health_score, find_consecutive_subject_days, find_heavy_afternoon_period3_violations,
     find_invalid_gdtc_periods, find_max_heavy_violations, find_morning_only_violations,
     find_single_pair_violations, find_subject_class_rule_violations, find_teacher_conflicts,
     find_teacher_day_cap_violations, find_teacher_gaps, find_teacher_unavailability_violations,
@@ -260,6 +260,36 @@ with tab_schedule:
                     rule_id = item.get("rule_id")
                     title = RULES[rule_id].title_vi if rule_id in RULES else rule_id
                     st.write(f"- {rule_id}: {title}")
+
+            # ── Bảng Đánh Giá Sức Khỏe TKB (Thang điểm 100) ──
+            health = compute_tkb_health_score(inp, result.assignment)
+            with st.container():
+                st.markdown(f"### 🩺 Bảng Đánh Giá Sức Khỏe TKB: **{health['overall_score']}/100** — *Xếp loại: {health['rating']}*")
+                h_col1, h_col2, h_col3, h_col4 = st.columns(4)
+                with h_col1:
+                    st.metric("Điểm Tổng Thể", f"{health['overall_score']}/100", delta=health["rating"],
+                              delta_color="normal" if health["overall_score"] >= 80 else "inverse")
+                with h_col2:
+                    st.metric("📚 Sư Phạm Học Sinh", f"{health['pedagogical_score']}/100")
+                with h_col3:
+                    st.metric("👩‍🏫 Tiện Nghi & Công Bằng GV", f"{health['teacher_score']}/100")
+                with h_col4:
+                    st.metric("⚖️ Tuân Thủ HĐSP", f"{health['compliance_score']}/100")
+
+                with st.expander(f"📋 Khuyến nghị sư phạm & Chi tiết đánh giá ({len(health['recommendations'])} mục)", expanded=(health["overall_score"] < 85)):
+                    for rec in health["recommendations"]:
+                        t = rec["type"]
+                        cat = rec.get("category", "")
+                        msg = rec["message"]
+                        if t == "error":
+                            st.error(f"**[{cat}]** {msg}")
+                        elif t == "warning":
+                            st.warning(f"**[{cat}]** {msg}")
+                        elif t == "info":
+                            st.info(f"**[{cat}]** {msg}")
+                        else:
+                            st.success(f"**[{cat}]** {msg}")
+                st.markdown("---")
 
             subject_names = {s.subject_id: s.name for s in inp.subjects}
             classes_sorted = sorted(inp.classes, key=lambda c: c.sort_order)

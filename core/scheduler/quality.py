@@ -3,7 +3,13 @@ from __future__ import annotations
 
 from collections import defaultdict
 from core.models import SchedulingConfig, Slot
-from core.scheduler.constants import TEACHER_LONE_SESSION_SPREAD_PENALTY
+from core.scheduler.constants import (
+    SUBJECT_CONSECUTIVE_DAY_SOFT_PENALTY,
+    TEACHER_BACK_TO_BACK_SHIFT_PENALTY,
+    TEACHER_GAP_EXCESS_PENALTY,
+    TEACHER_GAP_SECOND_PENALTY,
+    TEACHER_LONE_SESSION_SPREAD_PENALTY,
+)
 
 
 def _count_teacher_gaps(slots: list[Slot], assigned: dict, slot_teacher: dict) -> int:
@@ -215,14 +221,77 @@ def _count_teacher_missing_afternoon_duty(slots: list[Slot], assigned: dict, slo
     return missing
 
 
+def _count_teacher_excess_gaps(slots: list[Slot], assigned: dict, slot_teacher: dict) -> tuple[int, int]:
+    """Đếm số gap thứ 2 và thứ 3+ của từng giáo viên trong tuần để tính phạt lũy tiến."""
+    teacher_sessions = defaultdict(list)
+    for slot in slots:
+        subj = assigned.get(slot.slot_id)
+        if subj not in (None, -1):
+            tid = slot_teacher.get(slot.slot_id)
+            if tid is not None:
+                teacher_sessions[(tid, slot.ts.weekday, slot.ts.session)].append(slot.ts.period)
+    teacher_gaps = defaultdict(int)
+    for (tid, _wd, _sess), periods in teacher_sessions.items():
+        if len(periods) >= 2:
+            span = max(periods) - min(periods) + 1
+            teacher_gaps[tid] += (span - len(periods))
+    extra_gap1 = sum(max(0, g - 1) for g in teacher_gaps.values())
+    extra_gap2 = sum(max(0, g - 2) for g in teacher_gaps.values())
+    return extra_gap1, extra_gap2
+
+
+def _count_teacher_back_to_back_shifts(slots: list[Slot], assigned: dict, slot_teacher: dict) -> int:
+    """Đếm số ca nhảy gắt: Chiều muộn (tiết 4/5) -> Sáng hôm sau (tiết 1)."""
+    t_late = set()
+    t_early = set()
+    for s in slots:
+        subj = assigned.get(s.slot_id)
+        if subj not in (None, -1):
+            tid = slot_teacher.get(s.slot_id)
+            if tid is not None and tid > 0:
+                if s.ts.session == "C" and s.ts.period in (4, 5):
+                    t_late.add((tid, s.ts.weekday))
+                elif s.ts.session == "S" and s.ts.period == 1:
+                    t_early.add((tid, s.ts.weekday))
+
+    count = 0
+    for (tid, wd) in t_late:
+        if (tid, wd + 1) in t_early:
+            count += 1
+    return count
+
+
+def _count_subject_consecutive_days(slots: list[Slot], assigned: dict, need: dict) -> int:
+    """Đếm số lần môn 2-3 tiết/tuần bị xếp vào 2 ngày liền kề của cùng 1 lớp."""
+    cls_subj_days = defaultdict(set)
+    for s in slots:
+        subj = assigned.get(s.slot_id)
+        if subj not in (None, -1):
+            cls_subj_days[(s.class_id, subj)].add(s.ts.weekday)
+
+    consecutive_count = 0
+    for (cls_id, subj_id), days in cls_subj_days.items():
+        n = need.get((subj_id, cls_id), 0)
+        if n in (2, 3):
+            sorted_days = sorted(days)
+            for i in range(len(sorted_days) - 1):
+                if sorted_days[i + 1] == sorted_days[i] + 1:
+                    consecutive_count += 1
+    return consecutive_count
+
+
 def _teacher_quality_penalty(slots: list[Slot], assigned: dict, slot_teacher: dict, config: SchedulingConfig,
-                              exempt_teacher_ids: frozenset = frozenset(), ban_busy: set = None) -> int:
+                              exempt_teacher_ids: frozenset = frozenset(), ban_busy: set = None,
+                              need: dict = None) -> int:
     penalty = 0
     mand_morns = getattr(config, "mandatory_morning_weekdays", (2, 5, 6))
     min_lone_load = getattr(config, "min_weekly_periods_for_lone_penalty", 8)
     lone_exempt = getattr(config, "lone_session_exempt_teacher_ids", frozenset()) or frozenset()
     if getattr(config, "avoid_teacher_gaps", True):
         penalty += _count_teacher_gaps(slots, assigned, slot_teacher) * 350
+        extra1, extra2 = _count_teacher_excess_gaps(slots, assigned, slot_teacher)
+        penalty += extra1 * (TEACHER_GAP_SECOND_PENALTY - 350)
+        penalty += extra2 * (TEACHER_GAP_EXCESS_PENALTY - TEACHER_GAP_SECOND_PENALTY)
     if getattr(config, "avoid_teacher_lone_periods", True):
         penalty += _count_teacher_lone_sessions(slots, assigned, slot_teacher, min_weekly_periods=min_lone_load,
                                                  exempt_teacher_ids=lone_exempt) * 500
@@ -249,5 +318,8 @@ def _teacher_quality_penalty(slots: list[Slot], assigned: dict, slot_teacher: di
     ) * 800
     if getattr(config, "balance_afternoon_teachers", True):
         penalty += _count_teacher_missing_afternoon_duty(slots, assigned, slot_teacher) * 200
+    penalty += _count_teacher_back_to_back_shifts(slots, assigned, slot_teacher) * TEACHER_BACK_TO_BACK_SHIFT_PENALTY
+    if need is not None:
+        penalty += _count_subject_consecutive_days(slots, assigned, need) * SUBJECT_CONSECUTIVE_DAY_SOFT_PENALTY
     return penalty
 

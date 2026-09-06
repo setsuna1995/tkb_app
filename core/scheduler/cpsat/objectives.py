@@ -4,13 +4,18 @@ from __future__ import annotations
 from collections import defaultdict
 from core.models import SchedulingInput, is_bgh
 from core.scheduler.constants import (
+    SUBJECT_CONSECUTIVE_DAY_SOFT_PENALTY,
+    TEACHER_BACK_TO_BACK_SHIFT_PENALTY,
     TEACHER_COMPACT_SCHEDULE_PENALTY,
     TEACHER_EXEMPT_LONE_DAY_SOFT_PENALTY,
     TEACHER_EXEMPT_LONE_SESSION_SOFT_PENALTY,
     TEACHER_EXEMPT_SPLIT_DAY_SOFT_PENALTY,
+    TEACHER_GAP_EXCESS_PENALTY,
+    TEACHER_GAP_SECOND_PENALTY,
     TEACHER_LONE_SESSION_SPREAD_PENALTY,
     TEACHER_STRICT_MORNING_MISS_PENALTY,
 )
+from core.models import ROLE_HDTN
 from core.scheduler.placement import _build_effective_assigned_teacher
 from core.scheduler.cpsat.types import CpSatModel
 from core.scheduler.cpsat.constraints import _is_teacher_busy_morning
@@ -190,8 +195,11 @@ def _add_objective(built: CpSatModel) -> None:
                 if is_strict:
                     strict_morning_terms.append(miss)
 
-    # 3. II.7 Tiết trống giữa buổi (gaps)
+    # 3. II.7 Tiết trống giữa buổi (gaps) & Phạt lũy tiến khoảng trống cả tuần
+    excess_gap_terms_2nd = []
+    excess_gap_terms_3rd = []
     if getattr(config, "avoid_teacher_gaps", True):
+        all_teacher_gaps = defaultdict(list)
         for t in teachers:
             for (wd, sess) in sessions:
                 slots_sess = [s for s in inp.slots if s.ts.weekday == wd and s.ts.session == sess]
@@ -231,9 +239,22 @@ def _add_objective(built: CpSatModel) -> None:
                     m.Add(is_gap <= 1 - u_p[p])
                     penalty_terms["II.7"].append(is_gap)
                     sess_gaps.append(is_gap)
+                    all_teacher_gaps[t].append(is_gap)
 
                 if len(sess_gaps) >= 2:
                     m.Add(sum(sess_gaps) <= 1)
+
+        for t, t_gaps in all_teacher_gaps.items():
+            if len(t_gaps) >= 2:
+                eg1 = m.NewIntVar(0, len(t_gaps), f"excess_gap1_t{t}")
+                m.Add(eg1 >= sum(t_gaps) - 1)
+                m.Add(eg1 >= 0)
+                excess_gap_terms_2nd.append(eg1)
+            if len(t_gaps) >= 3:
+                eg2 = m.NewIntVar(0, len(t_gaps), f"excess_gap2_t{t}")
+                m.Add(eg2 >= sum(t_gaps) - 2)
+                m.Add(eg2 >= 0)
+                excess_gap_terms_3rd.append(eg2)
 
     # 4. II.14 >= 4 tiết sáng liên tiếp
     if getattr(config, "avoid_teacher_4_consecutive_morning", True):
@@ -273,6 +294,85 @@ def _add_objective(built: CpSatModel) -> None:
                 if (t, wd, sess) in used:
                     compact_terms.append(used[t, wd, sess])
 
+    # 6b. Chống nhảy ca gắt (Chiều muộn tiết 4/5 -> Sáng hôm sau tiết 1) - Tiêu chí phụ (soft tie-breaker)
+    for t in teachers:
+        for w in weekdays:
+            w_next = w + 1
+            if w_next not in weekdays:
+                continue
+            late_slots = [
+                s for s in inp.slots
+                if s.ts.weekday == w and s.ts.session == "C" and s.ts.period in (4, 5)
+            ]
+            early_slots = [
+                s for s in inp.slots
+                if s.ts.weekday == w_next and s.ts.session == "S" and s.ts.period == 1
+            ]
+            late_vars = [
+                x[s.slot_id, subj.subject_id]
+                for s in late_slots
+                for subj in inp.subjects
+                if (s.slot_id, subj.subject_id) in x and teacher_of.get((s.slot_id, subj.subject_id)) == t
+            ]
+            early_vars = [
+                x[s.slot_id, subj.subject_id]
+                for s in early_slots
+                for subj in inp.subjects
+                if (s.slot_id, subj.subject_id) in x and teacher_of.get((s.slot_id, subj.subject_id)) == t
+            ]
+            if late_vars and early_vars:
+                has_late = m.NewBoolVar(f"late_t{t}_wd{w}")
+                m.Add(sum(late_vars) >= 1).OnlyEnforceIf(has_late)
+                m.Add(sum(late_vars) == 0).OnlyEnforceIf(has_late.Not())
+
+                has_early = m.NewBoolVar(f"early_t{t}_wd{w_next}")
+                m.Add(sum(early_vars) >= 1).OnlyEnforceIf(has_early)
+                m.Add(sum(early_vars) == 0).OnlyEnforceIf(has_early.Not())
+
+                b2b = m.NewBoolVar(f"b2b_t{t}_wd{w}")
+                m.Add(b2b >= has_late + has_early - 1)
+                m.Add(b2b <= has_late)
+                m.Add(b2b <= has_early)
+                penalty_terms["_back_to_back_shift"].append(b2b)
+
+    # 6c. Giãn cách môn 2-3 tiết/tuần (Ưu tiên không xếp 2 ngày liên tiếp) - Tiêu chí phụ (soft tie-breaker)
+    for c in inp.classes:
+        cls_slots = built.slots_by_class.get(c.class_id, [])
+        for subj in inp.subjects:
+            if subj.role_code == ROLE_HDTN:
+                continue
+            n = inp.need.get((subj.subject_id, c.class_id), 0)
+            if n not in (2, 3):
+                continue
+            for w in weekdays:
+                w_next = w + 1
+                if w_next not in weekdays:
+                    continue
+                w_vars = [
+                    x[s.slot_id, subj.subject_id]
+                    for s in cls_slots
+                    if s.ts.weekday == w and (s.slot_id, subj.subject_id) in x
+                ]
+                w_next_vars = [
+                    x[s.slot_id, subj.subject_id]
+                    for s in cls_slots
+                    if s.ts.weekday == w_next and (s.slot_id, subj.subject_id) in x
+                ]
+                if w_vars and w_next_vars:
+                    taught_w = m.NewBoolVar(f"sub_c{c.class_id}_m{subj.subject_id}_wd{w}")
+                    m.Add(sum(w_vars) >= 1).OnlyEnforceIf(taught_w)
+                    m.Add(sum(w_vars) == 0).OnlyEnforceIf(taught_w.Not())
+
+                    taught_w_next = m.NewBoolVar(f"sub_c{c.class_id}_m{subj.subject_id}_wd{w_next}")
+                    m.Add(sum(w_next_vars) >= 1).OnlyEnforceIf(taught_w_next)
+                    m.Add(sum(w_next_vars) == 0).OnlyEnforceIf(taught_w_next.Not())
+
+                    consec = m.NewBoolVar(f"consec_c{c.class_id}_m{subj.subject_id}_wd{w}")
+                    m.Add(consec >= taught_w + taught_w_next - 1)
+                    m.Add(consec <= taught_w)
+                    m.Add(consec <= taught_w_next)
+                    penalty_terms["_subject_dispersion"].append(consec)
+
     built.penalty_terms = dict(penalty_terms)
 
     # 7. Theo dõi và tối thiểu hóa thay đổi ô cũ
@@ -295,6 +395,16 @@ def _add_objective(built: CpSatModel) -> None:
         obj_terms.append(TEACHER_COMPACT_SCHEDULE_PENALTY * sum(compact_terms))
     if penalty_terms.get("II.7"):
         obj_terms.append(350 * sum(penalty_terms["II.7"]))
+    if excess_gap_terms_2nd:
+        diff_2nd = max(0, TEACHER_GAP_SECOND_PENALTY - 350)
+        obj_terms.append(diff_2nd * sum(excess_gap_terms_2nd))
+    if excess_gap_terms_3rd:
+        diff_3rd = max(0, TEACHER_GAP_EXCESS_PENALTY - TEACHER_GAP_SECOND_PENALTY)
+        obj_terms.append(diff_3rd * sum(excess_gap_terms_3rd))
+    if penalty_terms.get("_back_to_back_shift"):
+        obj_terms.append(TEACHER_BACK_TO_BACK_SHIFT_PENALTY * sum(penalty_terms["_back_to_back_shift"]))
+    if penalty_terms.get("_subject_dispersion"):
+        obj_terms.append(SUBJECT_CONSECUTIVE_DAY_SOFT_PENALTY * sum(penalty_terms["_subject_dispersion"]))
     if penalty_terms.get("II.14"):
         obj_terms.append(300 * sum(penalty_terms["II.14"]))
     if lone_day_terms:

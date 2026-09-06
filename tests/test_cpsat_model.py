@@ -936,7 +936,7 @@ def test_objective_matches_quality_teacher_penalty():
     slot_teacher = {s.slot_id: eff_assigned.get((assignment[s.slot_id], s.class_id))
                     for s in inp.slots if s.slot_id in assignment}
     bgh_ids = frozenset(t.teacher_id for t in inp.teachers if is_bgh(t))
-    expected_penalty = _teacher_quality_penalty(inp.slots, assignment, slot_teacher, inp.config, exempt_teacher_ids=bgh_ids)
+    expected_penalty = _teacher_quality_penalty(inp.slots, assignment, slot_teacher, inp.config, exempt_teacher_ids=bgh_ids, need=inp.need)
     assert int(solver.ObjectiveValue()) == expected_penalty
 
 

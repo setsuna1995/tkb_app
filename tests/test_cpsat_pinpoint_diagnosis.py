@@ -139,11 +139,11 @@ def test_diagnose_multi_gate_keeps_other_gates_hard():
 
 
 def test_diagnose_base_model_infeasible_returns_empty_core_and_none():
-    """Khi bài toán bị bất khả thi ngay ở Base Model (ví dụ thiếu slot đáp ứng định mức):
+    """Khi bài toán bị bất khả thi ngay ở Base Model (ví dụ GV bận toàn bộ slot nhưng phải dạy):
     Solver trả về None, không crash, không lặp vô tận, passes_run <= 4."""
     inp = _tiny_input_no_monday()
-    # Ép cần 20 tiết trong khi chỉ có 8 slots
-    inp.need = {(1, 101): 20}
+    inp.need = {(1, 101): 4}
+    inp.ban_busy = {(10, s.ts.ts_id) for s in inp.slots}
 
     built = cpsat.build_model(inp)
     res = cpsat.solve_to_result(built, time_limit_s=5.0)

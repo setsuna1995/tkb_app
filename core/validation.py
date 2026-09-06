@@ -7,6 +7,16 @@ from __future__ import annotations
 from collections import defaultdict
 from typing import Optional
 
+from core.models import (
+    ROLE_GDTC, ROLE_HDTN, ROLE_NANG, ROLE_NANG_KEP, WEEKDAY_NAMES, SchedulingInput, is_bgh,
+)
+from core.scheduler.placement import _build_effective_assigned_teacher
+from core.scheduler.quality import (
+    _count_subject_consecutive_days,
+    _count_teacher_back_to_back_shifts,
+    _count_teacher_excess_gaps,
+)
+
 
 def compute_actual_counts(slots: list, assignment: dict) -> dict:
     counts = defaultdict(int)
@@ -413,3 +423,301 @@ def find_teacher_4_consecutive_morning_violations(slots: list, assignment: dict,
         if len(periods) >= 4 and teacher_totals[teacher_id] <= max_load_for_penalty:
             violations.append((teacher_id, wd))
     return violations
+
+
+def compute_tkb_health_score(inp: SchedulingInput, assignment: dict) -> dict:
+    """Đánh giá toàn diện sức khỏe TKB theo thang điểm 100 với 3 trụ cột:
+    1. Sư phạm học sinh (Pedagogical Quality - 40%)
+    2. Tiện nghi & Công bằng Giáo viên (Teacher Ergonomics & Fairness - 35%)
+    3. Tuân thủ HĐSP & Kế hoạch (HĐSP Compliance - 25%)
+    """
+    eff_assigned = _build_effective_assigned_teacher(inp)
+    slot_teacher = {
+        s.slot_id: eff_assigned.get((assignment[s.slot_id], s.class_id))
+        for s in inp.slots if s.slot_id in assignment and assignment[s.slot_id] is not None
+    }
+    bgh_ids = frozenset(t.teacher_id for t in inp.teachers if is_bgh(t))
+    class_map = {c.class_id: c.name for c in inp.classes}
+    subj_map = {s.subject_id: s.name for s in inp.subjects}
+    teacher_map = {t.teacher_id: t.name for t in inp.teachers}
+
+    recommendations = []
+
+    # ─────────────────────────────────────────────────────────────
+    # Trụ cột 1: SƯ PHẠM HỌC SINH (100đ)
+    # ─────────────────────────────────────────────────────────────
+    ped_penalty = 0.0
+
+    # 1.1 Giãn cách môn 2-3 tiết/tuần
+    cls_subj_days = defaultdict(set)
+    for s in inp.slots:
+        subj = assignment.get(s.slot_id)
+        if subj not in (None, -1):
+            cls_subj_days[(s.class_id, subj)].add(s.ts.weekday)
+
+    consec_subject_violations = []
+    for (cls_id, subj_id), days in cls_subj_days.items():
+        n = inp.need.get((subj_id, cls_id), 0)
+        # Bỏ qua HĐTN
+        subj_obj = next((sb for sb in inp.subjects if sb.subject_id == subj_id), None)
+        if subj_obj and subj_obj.role_code == ROLE_HDTN:
+            continue
+        if n in (2, 3):
+            sorted_days = sorted(days)
+            for i in range(len(sorted_days) - 1):
+                if sorted_days[i + 1] == sorted_days[i] + 1:
+                    w1, w2 = sorted_days[i], sorted_days[i + 1]
+                    consec_subject_violations.append((cls_id, subj_id, w1, w2))
+                    c_name = class_map.get(cls_id, f"Lớp #{cls_id}")
+                    s_name = subj_map.get(subj_id, f"Môn #{subj_id}")
+                    w1_str = WEEKDAY_NAMES.get(w1, f"T{w1}")
+                    w2_str = WEEKDAY_NAMES.get(w2, f"T{w2}")
+                    if len(consec_subject_violations) <= 3:
+                        recommendations.append({
+                            "type": "info",
+                            "category": "Sư phạm",
+                            "message": f"{c_name}: Môn {s_name} học 2 ngày liên tiếp ({w1_str} - {w2_str}) — khuyến nghị giãn cách thêm nếu điều kiện khung cho phép.",
+                        })
+    # Tiêu chí phụ: chỉ trừ nhẹ tối đa 5 điểm toàn trường để không lấn át tiêu chuẩn chính của trường
+    ped_penalty += min(5.0, len(consec_subject_violations) * 0.5)
+
+    # 1.2 Trần môn nặng liên tiếp (> 3 tiết)
+    heavy_ids = {s.subject_id for s in inp.subjects if s.role_code in (ROLE_NANG, ROLE_NANG_KEP)}
+    heavy_run_violations = []
+    if heavy_ids:
+        max_heavy = getattr(inp.config, "max_heavy_consecutive", 3)
+        heavy_run_violations = find_max_heavy_violations(inp.slots, assignment, heavy_ids, max_heavy)
+        for (cid, wd, sess, start_p, length) in heavy_run_violations:
+            c_name = class_map.get(cid, f"Lớp #{cid}")
+            sess_name = "Sáng" if sess == "S" else "Chiều"
+            wd_str = WEEKDAY_NAMES.get(wd, f"Thứ {wd}")
+            recommendations.append({
+                "type": "warning",
+                "category": "Sư phạm",
+                "message": f"{c_name}: Có chuỗi {length} tiết môn Nặng liên tiếp vào {wd_str} {sess_name} (bắt đầu từ tiết {start_p}).",
+            })
+    ped_penalty += len(heavy_run_violations) * 15.0
+
+    # 1.3 Môn nặng tiết 3 chiều
+    heavy_p3_violations = []
+    if getattr(inp.config, "avoid_heavy_afternoon_period3", True) and heavy_ids:
+        heavy_p3_violations = find_heavy_afternoon_period3_violations(inp.slots, assignment, heavy_ids)
+        for (cid, sid, wd, sess, per) in heavy_p3_violations:
+            c_name = class_map.get(cid, f"Lớp #{cid}")
+            s_name = subj_map.get(sid, f"Môn #{sid}")
+            wd_str = WEEKDAY_NAMES.get(wd, f"Thứ {wd}")
+            recommendations.append({
+                "type": "warning",
+                "category": "Sư phạm",
+                "message": f"{c_name}: Môn {s_name} xếp vào tiết 3 chiều ({wd_str}) — học sinh dễ mệt mỏi cuối ngày.",
+            })
+    ped_penalty += len(heavy_p3_violations) * 10.0
+
+    # 1.4 GDTC ngoài khung giờ
+    gdtc_id = next((s.subject_id for s in inp.subjects if s.role_code == ROLE_GDTC), None)
+    gdtc_violations = []
+    if gdtc_id:
+        gdtc_violations = find_invalid_gdtc_periods(
+            inp.slots, assignment, gdtc_id,
+            getattr(inp.config, "gdtc_morning_allowed_periods", (1, 2, 3, 4)),
+            getattr(inp.config, "gdtc_afternoon_allowed_periods", (2, 3)),
+        )
+        for (cid, wd, sess, per) in gdtc_violations:
+            c_name = class_map.get(cid, f"Lớp #{cid}")
+            sess_name = "Sáng" if sess == "S" else "Chiều"
+            wd_str = WEEKDAY_NAMES.get(wd, f"Thứ {wd}")
+            recommendations.append({
+                "type": "warning",
+                "category": "Sư phạm",
+                "message": f"{c_name}: Tiết GDTC xếp vào tiết {per} {sess_name} ({wd_str}) ngoài khung giờ thể chất chuẩn.",
+            })
+    ped_penalty += len(gdtc_violations) * 10.0
+
+    pedagogical_score = max(0.0, min(100.0, 100.0 - ped_penalty))
+
+    # ─────────────────────────────────────────────────────────────
+    # Trụ cột 2: TIỆN NGHI & CÔNG BẰNG GIÁO VIÊN (100đ)
+    # ─────────────────────────────────────────────────────────────
+    teacher_penalty = 0.0
+
+    # 2.1 Tiết trống giữa buổi & Lũy tiến gaps
+    gaps_list = find_teacher_gaps(inp.slots, assignment, inp.assigned_teacher)
+    extra_gap1, extra_gap2 = _count_teacher_excess_gaps(inp.slots, assignment, slot_teacher)
+    gap_deduction = min(30.0, len(gaps_list) * 1.5) + min(10.0, extra_gap1 * 1.0) + min(10.0, extra_gap2 * 2.0)
+    teacher_penalty += gap_deduction
+    for tid, wd, sess, p_list in gaps_list[:5]:
+        tname = teacher_map.get(tid, f"GV #{tid}")
+        sess_name = "Sáng" if sess == "S" else "Chiều"
+        wd_str = WEEKDAY_NAMES.get(wd, f"Thứ {wd}")
+        recommendations.append({
+            "type": "warning",
+            "category": "Giáo viên",
+            "message": f"{tname}: Bị trống tiết vào {wd_str} {sess_name} (tiết dạy: {', '.join(str(p) for p in p_list)}).",
+        })
+
+    # 2.2 Chống nhảy ca gắt (chiều muộn -> sáng sớm) - Tiêu chí phụ
+    t_late = set()
+    t_early = set()
+    for s in inp.slots:
+        subj = assignment.get(s.slot_id)
+        if subj not in (None, -1):
+            tid = slot_teacher.get(s.slot_id)
+            if tid is not None and tid > 0:
+                if s.ts.session == "C" and s.ts.period in (4, 5):
+                    t_late.add((tid, s.ts.weekday, s.ts.period))
+                elif s.ts.session == "S" and s.ts.period == 1:
+                    t_early.add((tid, s.ts.weekday))
+
+    b2b_violations = []
+    for (tid, wd, p_late) in t_late:
+        if (tid, wd + 1) in t_early:
+            b2b_violations.append((tid, wd, p_late))
+            tname = teacher_map.get(tid, f"GV #{tid}")
+            wd_str = WEEKDAY_NAMES.get(wd, f"Thứ {wd}")
+            wd_next_str = WEEKDAY_NAMES.get(wd + 1, f"Thứ {wd+1}")
+            if len(b2b_violations) <= 3:
+                recommendations.append({
+                    "type": "info",
+                    "category": "Giáo viên",
+                    "message": f"{tname}: Dạy chiều muộn {wd_str} (tiết {p_late}) và sáng sớm hôm sau {wd_next_str} (tiết 1) — thời gian nghỉ ngơi hơi sát.",
+                })
+    teacher_penalty += min(3.0, len(b2b_violations) * 1.0)
+
+    # 2.3 Trần dạy 5 tiết/ngày
+    max_teacher_day = getattr(inp.config, "max_teacher_periods_per_day", 5)
+    day_cap_violations = find_teacher_day_cap_violations(inp.slots, assignment, inp.assigned_teacher, max_teacher_day)
+    for tid, wd, count in day_cap_violations:
+        tname = teacher_map.get(tid, f"GV #{tid}")
+        wd_str = WEEKDAY_NAMES.get(wd, f"Thứ {wd}")
+        recommendations.append({
+            "type": "error",
+            "category": "Giáo viên",
+            "message": f"{tname}: Dạy {count} tiết vào {wd_str} (vượt trần {max_teacher_day} tiết/ngày).",
+        })
+    teacher_penalty += len(day_cap_violations) * 15.0
+
+    # 2.4 Dạy 4 tiết sáng liên tiếp
+    consec_morning_violations = []
+    if getattr(inp.config, "avoid_teacher_4_consecutive_morning", True):
+        consec_morning_violations = find_teacher_4_consecutive_morning_violations(inp.slots, assignment, inp.assigned_teacher)
+        for tid, wd in consec_morning_violations:
+            tname = teacher_map.get(tid, f"GV #{tid}")
+            wd_str = WEEKDAY_NAMES.get(wd, f"Thứ {wd}")
+            recommendations.append({
+                "type": "info",
+                "category": "Giáo viên",
+                "message": f"{tname}: Dạy 4 tiết liên tục sáng {wd_str}.",
+            })
+    teacher_penalty += len(consec_morning_violations) * 5.0
+
+    teacher_score = max(0.0, min(100.0, 100.0 - teacher_penalty))
+
+    # ─────────────────────────────────────────────────────────────
+    # Trụ cột 3: TUÂN THỦ HĐSP & KẾ HOẠCH (100đ)
+    # ─────────────────────────────────────────────────────────────
+    compliance_penalty = 0.0
+
+    # 3.1 Trùng lịch
+    conflicts = find_teacher_conflicts(inp.slots, assignment, inp.assigned_teacher)
+    compliance_penalty += len(conflicts) * 100.0
+    for tid, wd, sess, per, c_list in conflicts:
+        tname = teacher_map.get(tid, f"GV #{tid}")
+        sess_name = "Sáng" if sess == "S" else "Chiều"
+        wd_str = WEEKDAY_NAMES.get(wd, f"Thứ {wd}")
+        c_names = ", ".join(class_map.get(cid, f"Lớp #{cid}") for cid in c_list)
+        recommendations.append({
+            "type": "error",
+            "category": "Tuân thủ",
+            "message": f"{tname}: Bị trùng lịch tại {wd_str} {sess_name} tiết {per} giữa các lớp {c_names}.",
+        })
+
+    # 3.2 Vi phạm giờ bận
+    busy_violations = find_teacher_unavailability_violations(inp.slots, assignment, inp.assigned_teacher, inp.ban_busy)
+    compliance_penalty += len(busy_violations) * 50.0
+    for tid, cid, wd, sess, per in busy_violations:
+        tname = teacher_map.get(tid, f"GV #{tid}")
+        c_name = class_map.get(cid, f"Lớp #{cid}")
+        sess_name = "Sáng" if sess == "S" else "Chiều"
+        wd_str = WEEKDAY_NAMES.get(wd, f"Thứ {wd}")
+        recommendations.append({
+            "type": "error",
+            "category": "Tuân thủ",
+            "message": f"{tname}: Xếp lịch dạy {c_name} vào khung giờ đã báo bận ({wd_str} {sess_name} tiết {per}).",
+        })
+
+    # 3.3 Buổi lẻ 1 tiết (II.4) & Ngày lẻ (II.4)
+    min_lone_load = getattr(inp.config, "min_weekly_periods_for_lone_penalty", 8)
+    lone_exempt_ids = getattr(inp.config, "lone_session_exempt_teacher_ids", frozenset()) or frozenset()
+    lone_sessions = find_teacher_lone_session_violations(inp.slots, assignment, inp.assigned_teacher, min_lone_load, lone_exempt_ids)
+    lone_days = find_teacher_lone_day_violations(inp.slots, assignment, inp.assigned_teacher, min_lone_load, lone_exempt_ids)
+    compliance_penalty += (len(lone_sessions) + len(lone_days)) * 15.0
+
+    # 3.4 Ngày chia lẻ (II.8)
+    split_days = find_teacher_split_day_violations(inp.slots, assignment, inp.assigned_teacher, min_lone_load, lone_exempt_ids)
+    compliance_penalty += len(split_days) * 15.0
+
+    # 3.5 Thiếu sáng bắt buộc (II.3)
+    missing_morning = find_teacher_missing_mandatory_morning_violations(
+        inp.slots, assignment, inp.assigned_teacher,
+        getattr(inp.config, "mandatory_morning_weekdays", (2, 5, 6)),
+        getattr(inp.config, "min_weekly_periods_for_mandatory_morning", 10),
+        getattr(inp.config, "strict_morning_weekdays", ()) or (),
+        bgh_ids,
+        ban_busy=getattr(inp, "ban_busy", None),
+    )
+    compliance_penalty += min(20.0, len(missing_morning) * 4.0)
+
+    compliance_score = max(0.0, min(100.0, 100.0 - compliance_penalty))
+
+    # ─────────────────────────────────────────────────────────────
+    # Tổng kết điểm & xếp loại
+    # ─────────────────────────────────────────────────────────────
+    overall_score = round(0.40 * pedagogical_score + 0.35 * teacher_score + 0.25 * compliance_score, 1)
+
+    if overall_score >= 90.0:
+        rating = "Xuất sắc"
+        badge_color = "#28a745"
+    elif overall_score >= 80.0:
+        rating = "Tốt"
+        badge_color = "#17a2b8"
+    elif overall_score >= 70.0:
+        rating = "Khá"
+        badge_color = "#ffc107"
+    else:
+        rating = "Cần cải thiện"
+        badge_color = "#dc3545"
+
+    if not recommendations:
+        recommendations.append({
+            "type": "success",
+            "category": "Tổng quan",
+            "message": "Thời khóa biểu đạt tiêu chuẩn xuất sắc: các môn học phân bổ khoa học, giáo viên không bị phân mảnh lịch dạy.",
+        })
+
+    return {
+        "overall_score": overall_score,
+        "pedagogical_score": round(pedagogical_score, 1),
+        "teacher_score": round(teacher_score, 1),
+        "compliance_score": round(compliance_score, 1),
+        "rating": rating,
+        "badge_color": badge_color,
+        "metrics": {
+            "consecutive_subject_days": len(consec_subject_violations),
+            "heavy_excess_runs": len(heavy_run_violations),
+            "heavy_afternoon_p3": len(heavy_p3_violations),
+            "gdtc_violations": len(gdtc_violations),
+            "teacher_gaps_total": len(gaps_list),
+            "teacher_excess_gaps": extra_gap1 + extra_gap2,
+            "teacher_back_to_back": len(b2b_violations),
+            "teacher_4_consec_mornings": len(consec_morning_violations),
+            "teacher_day_cap_violations": len(day_cap_violations),
+            "conflicts": len(conflicts),
+            "busy_violations": len(busy_violations),
+            "lone_sessions": len(lone_sessions),
+            "lone_days": len(lone_days),
+            "split_days": len(split_days),
+            "missing_mornings": len(missing_morning),
+        },
+        "recommendations": recommendations,
+    }
+

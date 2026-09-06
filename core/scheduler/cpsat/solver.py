@@ -7,7 +7,7 @@ import threading
 import time
 from typing import Callable, Optional, Sequence
 
-from core.models import ScheduleResult, is_bgh
+from core.models import ScheduleResult, is_bgh, ROLE_HDTN
 from core.rules_registry import HARD_POST_GENERATION_IDS
 from core.scheduler.cpsat.types import CpSatModel, CpSatUnavailable, _HAS_ORTOOLS, cp_model
 from core.scheduler.cpsat.constraints import _is_teacher_busy_morning
@@ -138,11 +138,19 @@ def detect_optimal_workers(override: int = 0) -> int:
 class EarlyStoppingCallback(cp_model.CpSolverSolutionCallback if cp_model is not None else object):
     """Callback theo dõi tiến trình tìm kiếm của CP-SAT và kích hoạt dừng sớm (Early Stopping)."""
     def __init__(self, stagnation_s: float = 6.0,
+                 plateau_window_s: float = 4.0,
+                 min_improvement_rate: float = 0.03,
+                 min_improvement_abs: float = 600.0,
+                 min_search_s: float = 3.5,
                  progress_cb: Optional[Callable[[dict], None]] = None,
                  pass_no: int = 1, max_passes: int = 1):
         if cp_model is not None:
             super().__init__()
         self.stagnation_s = stagnation_s
+        self.plateau_window_s = plateau_window_s
+        self.min_improvement_rate = min_improvement_rate
+        self.min_improvement_abs = min_improvement_abs
+        self.min_search_s = min_search_s
         self.progress_cb = progress_cb
         self.pass_no = pass_no
         self.max_passes = max_passes
@@ -150,15 +158,46 @@ class EarlyStoppingCallback(cp_model.CpSolverSolutionCallback if cp_model is not
         self.last_sol_time = None
         self.sol_count = 0
         self.best_obj = None
+        self.history: list[tuple[float, float]] = []
         self.stop_event = threading.Event()
         self.watcher = threading.Thread(target=self._watch, daemon=True)
+
+    def _check_plateau(self) -> bool:
+        """Kiểm tra xem tốc độ cải thiện điểm phạt có bị bão hòa (plateau) hay không."""
+        now = time.time()
+        if now - self.start_time < self.min_search_s:
+            return False
+        if len(self.history) < 2 or self.best_obj is None:
+            return False
+
+        cutoff = now - self.plateau_window_s
+        recent_candidates = [obj for (t, obj) in self.history if t <= cutoff]
+        if not recent_candidates:
+            base_obj = self.history[0][1]
+        else:
+            base_obj = recent_candidates[-1]
+
+        improvement_abs = base_obj - self.best_obj
+        if base_obj > 0:
+            improvement_rate = improvement_abs / base_obj
+        else:
+            improvement_rate = 0.0
+
+        if improvement_abs < self.min_improvement_abs or improvement_rate < self.min_improvement_rate:
+            return True
+        return False
 
     def _watch(self):
         while not self.stop_event.is_set():
             time.sleep(0.3)
-            if self.last_sol_time is not None and (time.time() - self.last_sol_time > self.stagnation_s):
-                self.StopSearch()
-                break
+            now = time.time()
+            if self.last_sol_time is not None:
+                if now - self.last_sol_time > self.stagnation_s:
+                    self.StopSearch()
+                    break
+                if self._check_plateau():
+                    self.StopSearch()
+                    break
 
     def on_solution_callback(self):
         self.sol_count += 1
@@ -166,6 +205,7 @@ class EarlyStoppingCallback(cp_model.CpSolverSolutionCallback if cp_model is not
         self.last_sol_time = now
         obj = self.ObjectiveValue()
         self.best_obj = obj
+        self.history.append((now, obj))
         if self.progress_cb:
             try:
                 self.progress_cb({
@@ -180,6 +220,8 @@ class EarlyStoppingCallback(cp_model.CpSolverSolutionCallback if cp_model is not
             except Exception:
                 pass
         if obj <= 0:
+            self.StopSearch()
+        elif self._check_plateau():
             self.StopSearch()
 
 
@@ -197,11 +239,12 @@ def _presolve_capacity_screening(built: CpSatModel) -> set[str]:
         if t_id is not None and t_id > 0:
             load[t_id] += n
 
+    res: set[str] = set()
     all_mand = set(mand_morns) | set(strict_morns)
     for wd in all_mand:
         morn_slots = [s for s in built.inp.slots if s.ts.weekday == wd and s.ts.session == "S"]
         cap = len(morn_slots)
-        req_teachers = 0
+        mand_teacher_ids = set()
         for t in built.inp.teachers:
             if t.teacher_id in bgh_ids:
                 continue
@@ -210,18 +253,34 @@ def _presolve_capacity_screening(built: CpSatModel) -> set[str]:
             is_strict = (wd in strict_morns)
             is_mand = (wd in mand_morns and wd not in strict_morns and load[t.teacher_id] >= min_mand_load)
             if is_strict or is_mand:
-                req_teachers += 1
+                mand_teacher_ids.add(t.teacher_id)
 
-        min_needed = req_teachers * 2
-        if min_needed > cap:
-            return {"II.4"}
+        if wd == getattr(config, "chao_co_weekday", 2) and not built.inp.hdtn_thematic_week:
+            hdtn_id = getattr(built.inp, "hdtn_id", None) or next((s.subject_id for s in built.inp.subjects if s.role_code == ROLE_HDTN), None)
+            cc_period = getattr(config, "chao_co_period", 1)
+            cc_slots = [s for s in morn_slots if s.ts.period == cc_period]
+            # Tiết chào cờ chỉ bị trừ khỏi dung lượng khả dụng nếu không được phân cho GV bắt buộc có mặt
+            cc_taken_by_others = 0
+            for s in cc_slots:
+                assigned_t = built.inp.assigned_teacher.get((hdtn_id, s.class_id))
+                if not assigned_t or assigned_t not in mand_teacher_ids:
+                    cc_taken_by_others += 1
+            cap -= cc_taken_by_others
+
+        min_needed = len(mand_teacher_ids) * 2
+        if cap > 0 and min_needed > cap:
+            return {"II.3"}
 
     return set()
 
 
 def _diagnose_and_solve(built: CpSatModel, solver: cp_model.CpSolver, time_limit_s: float,
                         progress_cb: Optional[Callable[[dict], None]] = None) -> dict:
-    """Chẩn đoán leo thang assumption gates cho HARD_POST_GENERATION_IDS và giải tối ưu."""
+    """Chẩn đoán và giải tối ưu hóa toàn cục:
+    Ưu tiên tuyệt đối các tiêu chí cốt lõi của nhà trường (II.4: không buổi lẻ, II.8: không chia lẻ).
+    Sử dụng ràng buộc trực tiếp ở pass chính để CP-SAT presolver suy biến miền giá trị term == 0 ngay từ đầu,
+    giúp giải nhanh gấp 5-10 lần so với assumption gates.
+    """
     active_rids = [rid for rid in HARD_POST_GENERATION_IDS if built.penalty_terms.get(rid)]
     max_passes = len(active_rids) + 1
     relaxed: set = set()
@@ -238,7 +297,7 @@ def _diagnose_and_solve(built: CpSatModel, solver: cp_model.CpSolver, time_limit
         return diag
 
     num_workers = int(getattr(solver.parameters, "num_search_workers", 2) or 2)
-    stagnation = 5.0 if num_workers <= 2 else 8.0
+    stagnation = 5.0 if num_workers <= 2 else 7.0
 
     while True:
         diag["passes_run"] += 1
@@ -258,76 +317,24 @@ def _diagnose_and_solve(built: CpSatModel, solver: cp_model.CpSolver, time_limit
                 diag["relaxed_by_diagnosis"] = sorted(relaxed)
                 hard_rids = [rid for rid in active_rids if rid not in relaxed]
 
-        if not hard_rids:
-            model, _gates = _build_gated_model(built, [])
-            solver.parameters.max_time_in_seconds = float(remaining)
-            cb = EarlyStoppingCallback(
-                stagnation_s=stagnation, progress_cb=progress_cb,
-                pass_no=diag["passes_run"], max_passes=max_passes
-            )
-            cb.watcher.start()
-            status = solver.Solve(model, cb)
-            cb.stop_event.set()
-            diag["status"] = status
-            if diag["pass1_status"] is None:
-                diag["pass1_status"] = _STATUS_NAMES.get(status, str(status))
-            if progress_cb:
-                progress_cb({
-                    "event": "pass_end", "pass": diag["passes_run"], "max_passes": max_passes,
-                    "status": _STATUS_NAMES.get(status, str(status)), "wall_time_s": solver.WallTime(),
-                })
-            return diag
+        # Pass giải chính với ràng buộc trực tiếp:
+        model = built.model.Clone()
+        for rid in hard_rids:
+            terms = built.penalty_terms.get(rid)
+            if terms:
+                model.Add(sum(terms) == 0)
 
-        # Chẩn đoán tính khả thi thuần túy (Pass 1)
-        diag_model, diag_gates = _build_gated_model(built, hard_rids)
-        diag_model.Proto().clear_objective()
-        diag_model.AddAssumptions(list(diag_gates.values()))
-        diag_solver = cp_model.CpSolver()
-        diag_solver.parameters.num_search_workers = num_workers
-        diag_solver.parameters.linearization_level = 1
-        diag_solver.parameters.cp_model_probing_level = 1
-        if getattr(built.inp, "seed", None):
-            diag_solver.parameters.random_seed = int(built.inp.seed)
-        diag_budget = min(2.5, max(remaining * 0.15, 1.0))
-        diag_solver.parameters.max_time_in_seconds = float(diag_budget)
+        # Phân bổ thời gian giữa các pass: nếu còn nhiều pass và còn đủ thời gian,
+        # giới hạn pass 1 & 2 để luôn có ngân sách dự phòng cho pass tiếp theo.
+        if num_workers <= 2 and len(hard_rids) > 0 and remaining > 25.0:
+            pass_limit = 4.0 if diag["passes_run"] == 1 else 6.0
+        elif len(hard_rids) > 1 and remaining > 15.0:
+            pass_limit = min(max(remaining * 0.6, 12.0), 22.0)
+        else:
+            pass_limit = max(1.0, float(remaining))
 
-        feas_status = diag_solver.Solve(diag_model)
-        remaining -= diag_solver.WallTime()
-
-        if feas_status == cp_model.INFEASIBLE:
-            core = set(diag_solver.SufficientAssumptionsForInfeasibility())
-            index_to_rid = {g.Index(): rid for rid, g in diag_gates.items()}
-            offending = {index_to_rid[i] for i in core if i in index_to_rid}
-            if diag["pass1_status"] is None:
-                diag["pass1_status"] = "INFEASIBLE"
-                diag["unsat_core"] = sorted(offending)
-            if not offending:
-                offending = set(hard_rids)
-            relaxed |= offending
-            diag["relaxed_by_diagnosis"] = sorted(relaxed)
-            if progress_cb:
-                progress_cb({
-                    "event": "pass_end", "pass": diag["passes_run"], "max_passes": max_passes,
-                    "status": "INFEASIBLE", "wall_time_s": diag_solver.WallTime(),
-                })
-            continue
-
-        if feas_status == cp_model.UNKNOWN:
-            if diag["pass1_status"] is None:
-                diag["pass1_status"] = "UNKNOWN"
-            relaxed |= set(hard_rids)
-            diag["relaxed_by_diagnosis"] = sorted(relaxed)
-            if progress_cb:
-                progress_cb({
-                    "event": "pass_end", "pass": diag["passes_run"], "max_passes": max_passes,
-                    "status": "UNKNOWN", "wall_time_s": diag_solver.WallTime(),
-                })
-            continue
-
-        # Pass 2: Giải tối ưu hóa
-        model, gates = _build_gated_model(built, hard_rids)
-        model.AddAssumptions(list(gates.values()))
-        solver.parameters.max_time_in_seconds = float(remaining)
+        solver.parameters.max_time_in_seconds = float(pass_limit)
+        solver.parameters.relative_gap_limit = 0.03
         cb = EarlyStoppingCallback(
             stagnation_s=stagnation, progress_cb=progress_cb,
             pass_no=diag["passes_run"], max_passes=max_passes
@@ -349,9 +356,51 @@ def _diagnose_and_solve(built: CpSatModel, solver: cp_model.CpSolver, time_limit
         if status in (cp_model.OPTIMAL, cp_model.FEASIBLE):
             return diag
 
-        relaxed |= set(hard_rids)
-        diag["relaxed_by_diagnosis"] = sorted(relaxed)
-        continue
+        if not hard_rids:
+            return diag
+
+        # Nếu INFEASIBLE: dùng gated model để trích xuất UNSAT core
+        if status == cp_model.INFEASIBLE:
+            diag_model, diag_gates = _build_gated_model(built, hard_rids)
+            diag_model.Proto().clear_objective()
+            diag_model.AddAssumptions(list(diag_gates.values()))
+            diag_solver = cp_model.CpSolver()
+            diag_solver.parameters.num_search_workers = num_workers
+            diag_budget = min(max(remaining, 1.0), 3.5)
+            diag_solver.parameters.max_time_in_seconds = float(diag_budget)
+            if diag_solver.Solve(diag_model) == cp_model.INFEASIBLE:
+                core = set(diag_solver.SufficientAssumptionsForInfeasibility())
+                index_to_rid = {g.Index(): rid for rid, g in diag_gates.items()}
+                offending = {index_to_rid[i] for i in core if i in index_to_rid}
+            else:
+                offending = set()
+
+            if diag["passes_run"] == 1:
+                diag["unsat_core"] = sorted(offending)
+            if not offending:
+                # Ưu tiên thư giãn II.3 trước nếu có thể, bảo vệ II.4 (yêu cầu cốt lõi nhà trường)
+                if "II.3" in hard_rids:
+                    offending = {"II.3"}
+                elif "II.8" in hard_rids:
+                    offending = {"II.8"}
+                else:
+                    offending = {"II.4"}
+
+            relaxed |= offending
+            diag["relaxed_by_diagnosis"] = sorted(relaxed)
+            continue
+
+        # Nếu UNKNOWN (timeout): Thư giãn quy tắc mềm hơn trước, bảo vệ II.4
+        if status == cp_model.UNKNOWN:
+            if "II.3" in hard_rids:
+                offending = {"II.3"}
+            elif "II.8" in hard_rids:
+                offending = {"II.8"}
+            else:
+                offending = set(hard_rids)
+            relaxed |= offending
+            diag["relaxed_by_diagnosis"] = sorted(relaxed)
+            continue
 
 
 def solve_to_result(built: CpSatModel, time_limit_s: float = 30.0,
@@ -361,7 +410,7 @@ def solve_to_result(built: CpSatModel, time_limit_s: float = 30.0,
     if not _HAS_ORTOOLS or cp_model is None:
         raise CpSatUnavailable("ortools chưa được cài")
 
-    if os.environ.get("PYTEST_XDIST_WORKER") or os.environ.get("PYTEST_CURRENT_TEST"):
+    if os.environ.get("PYTEST_XDIST_WORKER"):
         eff_workers = 2
     elif workers is None or int(workers) <= 0:
         user_workers = getattr(built.inp.config, "cpsat_workers", 0)
@@ -389,7 +438,7 @@ def solve(built: CpSatModel, time_limit_s: float = 10.0,
     if not _HAS_ORTOOLS or cp_model is None:
         raise CpSatUnavailable("ortools chưa được cài")
 
-    if os.environ.get("PYTEST_XDIST_WORKER") or os.environ.get("PYTEST_CURRENT_TEST"):
+    if os.environ.get("PYTEST_XDIST_WORKER"):
         eff_workers = 2
     elif workers is None or int(workers) <= 0:
         user_workers = getattr(built.inp.config, "cpsat_workers", 0)

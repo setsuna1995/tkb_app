@@ -10,6 +10,8 @@ from collections import defaultdict
 from typing import Callable, Optional, Sequence
 
 from core.models import SchedulingInput, ScheduleResult
+from core.roles import resolve_roles
+from core.scheduler.placement import _build_effective_assigned_teacher
 from core.scheduler.cpsat.types import (
     CpSatModel,
     CpSatUnavailable,
@@ -54,12 +56,76 @@ def build_model(inp: SchedulingInput) -> CpSatModel:
         slots_by_class[s.class_id].append(s)
         slots_by_ts[s.ts.ts_id].append(s)
 
+    config = inp.config
+    role_index = resolve_roles(inp.subjects, inp.extra_kep_ids, inp.hdtn_thematic_week,
+                               config.single_pair_subject_ids)
+    effective_assigned = _build_effective_assigned_teacher(inp)
+
+    morning_only = set(getattr(config, "morning_only_subject_ids", None) or ())
+    heavy_morning_only = getattr(config, "heavy_subjects_morning_only", False)
+    avoid_p3_heavy = getattr(config, "avoid_heavy_afternoon_period3", True)
+    gdtc_id = role_index.gdtc_id
+    gdtc_morning_allowed = getattr(config, "gdtc_morning_allowed_periods", (1, 2, 3, 4))
+    gdtc_afternoon_allowed = getattr(config, "gdtc_afternoon_allowed_periods", (2, 3))
+    gdtc_avoid_period = config.gdtc_avoid_period
+    ban_busy = set(inp.ban_busy) if inp.ban_busy else set()
+    allowed_cells = inp.subject_class_allowed_cells or {}
+
+    chao_co_slots = set()
+    shl_slots = set()
+    if not inp.hdtn_thematic_week and role_index.hdtn_id is not None:
+        for s in inp.slots:
+            if (s.ts.weekday == config.chao_co_weekday and s.ts.session == "S"
+                    and s.ts.period == config.chao_co_period
+                    and inp.need.get((role_index.hdtn_id, s.class_id), 0) > 0):
+                chao_co_slots.add(s.slot_id)
+
+        class_has_chieu = defaultdict(bool)
+        for s in inp.slots:
+            if s.ts.session == "C":
+                class_has_chieu[s.class_id] = True
+        for c_id, c_slots in slots_by_class.items():
+            if inp.need.get((role_index.hdtn_id, c_id), 0) >= 2:
+                target_wd = 6 if class_has_chieu[c_id] else 7
+                day_slots = [s for s in c_slots if s.ts.session == "S" and s.ts.weekday == target_wd]
+                if day_slots:
+                    shl_target = max(day_slots, key=lambda s: s.ts.period)
+                    shl_slots.add(shl_target.slot_id)
+
     x = {}
     for s in inp.slots:
         for subj in inp.subjects:
-            if inp.need.get((subj.subject_id, s.class_id), 0) > 0:
-                x[s.slot_id, subj.subject_id] = m.NewBoolVar(
-                    f"x_s{s.slot_id}_m{subj.subject_id}")
+            s_id = subj.subject_id
+            if inp.need.get((s_id, s.class_id), 0) <= 0:
+                continue
+
+            # Domain Pruning
+            if s.slot_id in chao_co_slots and s_id != role_index.hdtn_id:
+                continue
+            if s.slot_id in shl_slots and s_id != role_index.hdtn_id:
+                continue
+            if s_id in morning_only and s.ts.session == "C":
+                continue
+            if heavy_morning_only and s_id in role_index.heavy_ids and s.ts.session == "C":
+                continue
+            if avoid_p3_heavy and s_id in role_index.heavy_ids and s.ts.session == "C" and s.ts.period == 3:
+                continue
+            if s_id == gdtc_id:
+                if s.ts.session == "S" and gdtc_morning_allowed and s.ts.period not in gdtc_morning_allowed:
+                    continue
+                if s.ts.session == "C" and gdtc_afternoon_allowed and s.ts.period not in gdtc_afternoon_allowed:
+                    continue
+                if s.ts.period == gdtc_avoid_period:
+                    continue
+            if (s_id, s.class_id) in allowed_cells:
+                allowed = allowed_cells[s_id, s.class_id]
+                if allowed is not None and (s.ts.weekday, s.ts.session) not in allowed:
+                    continue
+            t_id = effective_assigned.get((s_id, s.class_id))
+            if t_id is not None and (t_id, s.ts.ts_id) in ban_busy:
+                continue
+
+            x[s.slot_id, s_id] = m.NewBoolVar(f"x_s{s.slot_id}_m{s_id}")
 
     for s in inp.slots:
         vs = [x[s.slot_id, subj.subject_id] for subj in inp.subjects
@@ -85,6 +151,7 @@ def build_model(inp: SchedulingInput) -> CpSatModel:
     built = CpSatModel(model=m, x=x, inp=inp,
                        slots_by_class=dict(slots_by_class),
                        slots_by_ts=dict(slots_by_ts))
+    built.role_index = role_index
     _add_teacher_constraints(built)
     _add_subject_constraints(built)
     _add_class_constraints(built)
