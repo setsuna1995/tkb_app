@@ -177,62 +177,50 @@ with tab_schedule:
     )
 
     sched_config = repo.get_scheduling_config(conn)
-    use_cpsat_run = st.checkbox(
-        "🚀 Sử dụng bộ giải tối ưu toàn cục CP-SAT (Khuyên dùng — Triệt tiêu vi phạm II.3, II.4, II.8)",
-        value=bool(getattr(sched_config, "use_cpsat", True)),
-        help="Giải toán bằng ràng buộc toán học toàn cục thay vì tìm kiếm ngẫu nhiên. Khuyên dùng để đảm bảo chất lượng thời khóa biểu cao nhất.",
-    )
+    st.caption("✨ Động cơ lập lịch: **Google OR-Tools CP-SAT** (Tối ưu hóa toàn cục, triệt tiêu vi phạm II.3, II.4, II.8)")
 
     if st.button("🚀 Chạy xếp TKB", type="primary"):
         inp = repo.build_scheduling_input(
             conn, parity=parity, seed=seed, extra_kep_ids=extra_kep_ids,
             hdtn_thematic_week=hdtn_thematic_week, week_no=chosen_week,
         )
-        inp.config.use_cpsat = bool(use_cpsat_run)
 
-        if use_cpsat_run:
-            # Thanh tiến trình theo TỪNG ĐỢT giải (không mượt theo giây -- CP-SAT
-            # chặn luồng Python trong lúc Solve(), xem cpsat_model._diagnose_and_solve's
-            # docstring), nhưng vẫn hơn hẳn spinner tĩnh không có thông tin gì
-            # (2026-09-05, yêu cầu người dùng "biết sắp xếp đến đâu rồi").
-            progress_bar = st.progress(0, text="Đang chuẩn bị mô hình CP-SAT...")
-            status_log = st.empty()
-            log_lines = []
+        # Thanh tiến trình theo TỪNG ĐỢT giải CP-SAT
+        progress_bar = st.progress(0, text="Đang khởi tạo mô hình toán học CP-SAT...")
+        status_log = st.empty()
+        log_lines = []
 
-            def _on_cpsat_progress(info):
-                max_passes = max(info.get("max_passes", 1), 1)
-                event = info.get("event")
-                pass_no = info.get("pass", 1)
-                if event == "pass_start":
-                    hard_rids = info.get("hard_rids") or []
-                    relaxed = info.get("relaxed_so_far") or []
-                    desc = (f"ràng buộc cứng còn lại: {', '.join(hard_rids)}" if hard_rids
-                            else "phần còn lại (chỉ còn ràng buộc mềm)")
-                    workers = info.get("workers")
-                    w_str = f" ({workers} luồng CPU)" if workers else ""
-                    line = f"⏳ Lần thử {pass_no}/{max_passes}{w_str}: đang giải {desc}"
-                    if relaxed:
-                        line += f" — đã phải nới lỏng trước đó: {', '.join(relaxed)}"
-                    progress_bar.progress(min(0.95, (pass_no - 1) / max_passes), text=line)
-                elif event == "solution":
-                    sol_count = info.get("sol_count", 1)
-                    obj = info.get("objective", 0)
-                    wall_time = info.get("wall_time_s", 0.0)
-                    line = f"💡 Nghiệm #{sol_count}: điểm phạt {obj:.0f} (sau {wall_time:.1f}s)"
-                    progress_bar.progress(min(0.98, max(0.05, (pass_no - 0.5) / max_passes)), text=line)
-                else:
-                    status_str = info.get("status", "HOÀN TẤT")
-                    wall_time = info.get("wall_time_s", 0.0)
-                    line = f"✓ Lần thử {pass_no} kết thúc: {status_str} (mất {wall_time:.1f}s)"
-                    progress_bar.progress(min(0.99, pass_no / max_passes), text=line)
-                log_lines.append(line)
-                status_log.caption("  \n".join(log_lines[-8:]))
+        def _on_cpsat_progress(info):
+            max_passes = max(info.get("max_passes", 1), 1)
+            event = info.get("event")
+            pass_no = info.get("pass", 1)
+            if event == "pass_start":
+                hard_rids = info.get("hard_rids") or []
+                relaxed = info.get("relaxed_so_far") or []
+                desc = (f"ràng buộc cứng còn lại: {', '.join(hard_rids)}" if hard_rids
+                        else "phần còn lại (chỉ còn ràng buộc mềm)")
+                workers = info.get("workers")
+                w_str = f" ({workers} luồng CPU)" if workers else ""
+                line = f"⏳ Lần thử {pass_no}/{max_passes}{w_str}: đang giải {desc}"
+                if relaxed:
+                    line += f" — đã phải nới lỏng trước đó: {', '.join(relaxed)}"
+                progress_bar.progress(min(0.95, (pass_no - 1) / max_passes), text=line)
+            elif event == "solution":
+                sol_count = info.get("sol_count", 1)
+                obj = info.get("objective", 0)
+                wall_time = info.get("wall_time_s", 0.0)
+                line = f"💡 Nghiệm #{sol_count}: điểm phạt {obj:.0f} (sau {wall_time:.1f}s)"
+                progress_bar.progress(min(0.98, max(0.05, (pass_no - 0.5) / max_passes)), text=line)
+            else:
+                status_str = info.get("status", "HOÀN TẤT")
+                wall_time = info.get("wall_time_s", 0.0)
+                line = f"✓ Lần thử {pass_no} kết thúc: {status_str} (mất {wall_time:.1f}s)"
+                progress_bar.progress(min(0.99, pass_no / max_passes), text=line)
+            log_lines.append(line)
+            status_log.caption("  \n".join(log_lines[-8:]))
 
-            result = sched.run(inp, progress_cb=_on_cpsat_progress)
-            progress_bar.progress(1.0, text="Hoàn tất.")
-        else:
-            with st.spinner("Đang xếp thời khóa biểu bằng bộ giải Heuristic..."):
-                result = sched.run(inp)
+        result = sched.run(inp, progress_cb=_on_cpsat_progress)
+        progress_bar.progress(1.0, text="Hoàn tất.")
 
         st.session_state["last_result"] = result
         st.session_state["last_input"] = inp
@@ -246,10 +234,7 @@ with tab_schedule:
         if not result.success:
             st.error(result.failure_reason)
         else:
-            if getattr(result, "solver_name", "") == "cpsat":
-                st.info("✨ Tối ưu hóa bằng CP-SAT (toàn cục)")
-            elif inp and getattr(inp.config, "use_cpsat", False):
-                st.warning("⚠️ CP-SAT quá giờ hoặc không khả thi, đã tự động chuyển sang bộ giải dự phòng.")
+            st.info("✨ Tối ưu hóa bằng CP-SAT (toàn cục)")
 
             if result.successes_found > 0:
                 st.success(

@@ -30,7 +30,7 @@ Dựa trên thuật toán phân cụm Leiden từ Knowledge Graph của GitNexus
 
 | Cụm (Community) | Tệp chính | Vai trò & Trách nhiệm |
 |---|---|---|
-| **Scheduler** | `core/scheduler/engine.py`<br/>`core/scheduler/cpsat_model.py`<br/>`core/scheduler/constants.py`<br/>`core/scheduler/quality.py` | Lõi xếp TKB toàn trường. Bao gồm: bộ giải toàn cục Google OR-Tools CP-SAT (Pass 1: chẩn đoán khả thi thuần túy; Pass 2: tối ưu đa mục tiêu với Early Stopping) và bộ giải Heuristic ngẫu nhiên dự phòng. |
+| **Scheduler** | `core/scheduler/engine.py`<br/>`core/scheduler/cpsat_model.py`<br/>`core/scheduler/constants.py`<br/>`core/scheduler/quality.py` | Lõi xếp TKB toàn trường. Độc quyền sử dụng bộ giải tối ưu toàn cục Google OR-Tools CP-SAT (Pass 1: chẩn đoán khả thi thuần túy; Pass 2: tối ưu đa mục tiêu với Early Stopping). Động cơ Heuristic cũ đã được loại bỏ hoàn toàn. |
 | **Validation** | `core/validation/*.py`<br/>`core/rules_registry.py` | Kiểm tra vi phạm 18 tiêu chí (I.1 - II.15) đối với kết quả xếp TKB hoặc dữ liệu nhập vào. |
 | **Repositories** | `data/repositories/*.py`<br/>`data/db.py` | Tương tác SQLite CRUD với các bảng phân công, giáo viên, lớp học, cấu hình tuần/tiết/phòng. |
 | **Io_excel** | `data/io_excel/importer.py`<br/>`data/io_excel/exporter.py` | Đọc/ghi biểu mẫu Excel chuẩn của Bộ GD&ĐT, giữ nguyên định dạng viền, màu sắc, phông chữ. |
@@ -54,35 +54,30 @@ sequenceDiagram
     User->>UI: Bấm "Chạy xếp TKB"
     UI->>Engine: sched.run(inp, progress_cb=_on_cpsat_progress)
     
-    alt use_cpsat = True
-        Engine->>CPSat: build_model(inp)
-        Engine->>CPSat: solve_to_result(built, time_limit_s=45, progress_cb)
-        
-        rect rgb(240, 248, 255)
-            Note over CPSat,Solver: Pass 1: Chẩn đoán tính khả thi thuần túy (Pure Feasibility)
-            CPSat->>Solver: Solve(diag_model không có hàm mục tiêu)
-            alt Infeasible
-                Solver-->>CPSat: Trích xuất UNSAT Core (ví dụ: II.4 kẹt với II.3)
-                CPSat->>CPSat: Tự động nới lỏng sang ràng buộc mềm
-            end
+    Engine->>CPSat: build_model(inp)
+    Engine->>CPSat: solve_to_result(built, time_limit_s=45, progress_cb)
+    
+    rect rgb(240, 248, 255)
+        Note over CPSat,Solver: Pass 1: Chẩn đoán tính khả thi thuần túy (Pure Feasibility)
+        CPSat->>Solver: Solve(diag_model không có hàm mục tiêu)
+        alt Infeasible
+            Solver-->>CPSat: Trích xuất UNSAT Core (ví dụ: II.4 kẹt với II.3)
+            CPSat->>CPSat: Tự động nới lỏng sang ràng buộc mềm
         end
-
-        rect rgb(245, 255, 245)
-            Note over CPSat,Solver: Pass 2: Tối ưu điểm mềm với Early Stopping
-            CPSat->>Solver: Solve(model + gates, EarlyStoppingCallback)
-            loop Cải tiến nghiệm
-                Solver-->>CPSat: on_solution_callback(obj)
-                CPSat-->>UI: progress_cb(event="solution", obj, wall_time)
-                UI-->>User: Cập nhật nghiệm cải tiến trên giao diện
-            end
-            Solver-->>CPSat: Dừng sau 10s bão hòa hoặc đạt cận tối ưu
-        end
-        
-        CPSat->>Engine: ScheduleResult (thành công 100%)
-    else Fallback hoặc Heuristic thuần
-        Engine->>Engine: Chạy giải thuật Heuristic với vòng lặp thử
     end
 
+    rect rgb(245, 255, 245)
+        Note over CPSat,Solver: Pass 2: Tối ưu điểm mềm với Early Stopping
+        CPSat->>Solver: Solve(model + gates, EarlyStoppingCallback)
+        loop Cải tiến nghiệm
+            Solver-->>CPSat: on_solution_callback(obj)
+            CPSat-->>UI: progress_cb(event="solution", obj, wall_time)
+            UI-->>User: Cập nhật nghiệm cải tiến trên giao diện
+        end
+        Solver-->>CPSat: Dừng sau khi điểm phạt bão hòa hoặc đạt cận tối ưu
+    end
+    
+    CPSat->>Engine: ScheduleResult
     Engine-->>UI: ScheduleResult
     UI->>Val: Kiểm tra vi phạm các tiêu chí
     UI-->>User: Hiển thị ma trận TKB và thanh log hoàn tất

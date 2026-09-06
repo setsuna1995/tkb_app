@@ -281,20 +281,23 @@ with tab5:
     st.subheader("⚡ Cấu hình Bộ giải Tối ưu hóa Toàn cục CP-SAT (Google OR-Tools)")
     st.caption(
         "Bộ giải CP-SAT mô hình hóa toàn bộ thời khóa biểu thành bài toán quy hoạch thỏa mãn ràng buộc (Constraint Programming) "
-        "giúp tìm ra phương án tối ưu toàn cục chỉ trong vài chục giây."
+        "giúp tìm ra phương án tối ưu toàn cục chỉ trong vài chục giây. Động cơ cũ (heuristic) đã được loại bỏ hoàn toàn."
     )
 
+    st.success("✨ **Trạng thái:** Google OR-Tools CP-SAT là bộ giải mặc định và duy nhất của hệ thống.")
+
     col_cp1, col_cp2 = st.columns(2)
-    use_cpsat = col_cp1.checkbox(
-        "Kích hoạt bộ giải tối ưu toàn cục CP-SAT (Khuyên dùng)",
-        value=getattr(config, "use_cpsat", True),
-        help="Bật để giải tự động tối ưu hóa toàn bộ TKB. Nếu quá giờ hoặc không tìm được, hệ thống sẽ tự động fallback sang thuật toán dự phòng.",
-    )
-    cpsat_time_limit_seconds = col_cp2.number_input(
+    cpsat_time_limit_seconds = col_cp1.number_input(
         "Giới hạn thời gian giải cho CP-SAT (giây):",
         min_value=5, max_value=300,
         value=int(getattr(config, "cpsat_time_limit_seconds", 45)),
         help="Thời gian tối đa bộ giải được phép chạy (mặc định 45s). Thường bộ giải tìm ra nghiệm tối ưu chỉ sau 15-25 giây.",
+    )
+
+    cpsat_minimize_changes = col_cp2.checkbox(
+        "Ưu tiên giữ nguyên tối đa ô TKB cũ",
+        value=getattr(config, "cpsat_minimize_changes", False),
+        help="Khi bật, bộ giải sẽ cố gắng giữ nguyên tối đa các tiết của TKB hiện có, hạn chế tối đa xáo trộn thời khóa biểu cũ khi xếp tuần mới.",
     )
 
     col_cp3, col_cp4 = st.columns(2)
@@ -314,12 +317,6 @@ with tab5:
         index=worker_idx,
         format_func=lambda k: worker_options[k],
         help="Tự động nhận diện: Khi chạy trên Streamlit Cloud giới hạn tài nguyên sẽ dùng 2 luồng nhẹ nhàng; trên PC cục bộ dùng 4 luồng mượt mà.",
-    )
-
-    cpsat_minimize_changes = col_cp4.checkbox(
-        "Ưu tiên giữ nguyên tối đa ô TKB cũ",
-        value=getattr(config, "cpsat_minimize_changes", False),
-        help="Khi bật, bộ giải sẽ cố gắng giữ nguyên tối đa các tiết của TKB hiện có, hạn chế tối đa xáo trộn thời khóa biểu cũ khi xếp tuần mới.",
     )
 
 st.write("---")
@@ -367,7 +364,7 @@ if st.button("💾 Lưu toàn bộ cấu hình xếp lịch", type="primary"):
         avoid_heavy_afternoon_period3=bool(avoid_heavy_afternoon_period3),
         avoid_teacher_4_consecutive_morning=bool(avoid_teacher_4_consecutive_morning),
         min_weekly_periods_for_lone_penalty=int(min_weekly_periods_for_lone_penalty),
-        use_cpsat=bool(use_cpsat),
+        use_cpsat=True,
         cpsat_time_limit_seconds=int(cpsat_time_limit_seconds),
         cpsat_minimize_changes=bool(cpsat_minimize_changes),
         cpsat_workers=int(chosen_workers),

@@ -40,23 +40,20 @@ def conn(tmp_path):
 
 
 @pytest.mark.slow
-def test_use_cpsat_false_preserves_legacy_engine_behavior(conn):
-    """Test 1 (Task 8): use_cpsat=False không đổi gì so với engine cũ."""
+def test_sched_run_exclusively_uses_cpsat(conn):
+    """Test 1: sched.run() luôn sử dụng solver CP-SAT làm động cơ độc quyền."""
     inp = repo.build_scheduling_input(conn, parity="C", seed=2026)
-    inp.config.use_cpsat = False
     result = sched.run(inp)
 
     assert result.success is True
-    assert result.solver_name == "heuristic"
-    assert result.attempts_tried >= 1
+    assert result.solver_name == "cpsat"
 
 
 @pytest.mark.slow
 def test_cpsat_solution_passes_all_validation_functions(conn):
-    """Test 2 (Task 8): use_cpsat=True cho lời giải hợp lệ qua toàn bộ core/validation.py."""
+    """Test 2: CP-SAT cho lời giải hợp lệ qua toàn bộ core/validation.py."""
     inp = repo.build_scheduling_input(conn, parity="C", seed=2026)
-    inp.config.use_cpsat = True
-    inp.config.cpsat_time_limit_seconds = 5
+    inp.config.cpsat_time_limit_seconds = 15
     result = sched.run(inp)
 
     assert result.success is True, result.failure_reason
@@ -123,61 +120,24 @@ def test_cpsat_solution_passes_all_validation_functions(conn):
     assert sub_cls_violations == [], f"Subject class rule violations: {sub_cls_violations}"
 
 
-@pytest.mark.slow
-def test_cpsat_does_not_lose_to_legacy_engine_on_any_metric(conn):
-    """Test 3 (Task 8): CP-SAT có tổng điểm phạt chất lượng thấp hơn vượt trội so với engine cũ."""
-    from core.scheduler.quality import _teacher_quality_penalty
-
-    inp_legacy = repo.build_scheduling_input(conn, parity="C", seed=2026)
-    inp_legacy.config.use_cpsat = False
-    res_legacy = sched.run(inp_legacy)
-    assert res_legacy.success is True
-
-    inp_cpsat = repo.build_scheduling_input(conn, parity="C", seed=2026)
-    inp_cpsat.config.use_cpsat = True
-    inp_cpsat.config.cpsat_time_limit_seconds = 15
-    res_cpsat = sched.run(inp_cpsat)
-    assert res_cpsat.success is True
-    assert res_cpsat.solver_name == "cpsat"
-
-    from core.scheduler.placement import _build_effective_assigned_teacher
-    eff_assigned = _build_effective_assigned_teacher(inp_cpsat)
-    slot_teacher_legacy = {s.slot_id: eff_assigned.get((res_legacy.assignment.get(s.slot_id), s.class_id))
-                          for s in inp_legacy.slots if s.slot_id in res_legacy.assignment}
-    slot_teacher_cpsat = {s.slot_id: eff_assigned.get((res_cpsat.assignment.get(s.slot_id), s.class_id))
-                         for s in inp_cpsat.slots if s.slot_id in res_cpsat.assignment}
-
-    cfg = inp_cpsat.config
-    pen_legacy = _teacher_quality_penalty(inp_legacy.slots, res_legacy.assignment, slot_teacher_legacy, cfg)
-    pen_cpsat = _teacher_quality_penalty(inp_cpsat.slots, res_cpsat.assignment, slot_teacher_cpsat, cfg)
-    assert pen_cpsat < pen_legacy, f"Tổng điểm phạt CP-SAT ({pen_cpsat}) không tốt hơn legacy ({pen_legacy})"
-
-    # Các tiêu chí HĐSP chính CP-SAT đều vượt trội so với engine cũ
-    assert _count_teacher_gaps(inp_cpsat.slots, res_cpsat.assignment, slot_teacher_cpsat) <= \
-           _count_teacher_gaps(inp_legacy.slots, res_legacy.assignment, slot_teacher_legacy)
-    assert _count_teacher_4_consecutive_mornings(inp_cpsat.slots, res_cpsat.assignment, slot_teacher_cpsat) <= \
-           _count_teacher_4_consecutive_mornings(inp_legacy.slots, res_legacy.assignment, slot_teacher_legacy)
-
-
-def test_fallback_when_ortools_unavailable(conn, monkeypatch):
-    """Test 4 (Task 8): Khi ortools không khả dụng -> fallback êm sang engine cũ."""
+def test_when_ortools_unavailable_returns_clear_failure(conn, monkeypatch):
+    """Test 3: Khi ortools không khả dụng -> trả về ScheduleResult failure rõ ràng."""
     from core.scheduler import cpsat_model
     monkeypatch.setattr(cpsat_model, "_HAS_ORTOOLS", False)
 
     inp = repo.build_scheduling_input(conn, parity="C", seed=2026)
-    inp.config.use_cpsat = True
     result = sched.run(inp)
 
-    assert result.success is True
-    assert result.solver_name == "heuristic"
+    assert result.success is False
+    assert result.solver_name == "cpsat"
+    assert "ortools" in result.failure_reason
 
 
-def test_fallback_when_timeout(conn):
-    """Test 5 (Task 8): Khi đặt thời gian quá ngắn (0s) -> fallback êm sang engine cũ."""
+def test_when_timeout_zero_returns_failure(conn):
+    """Test 4: Khi đặt thời gian quá ngắn (0s) -> trả về ScheduleResult failure từ CP-SAT."""
     inp = repo.build_scheduling_input(conn, parity="C", seed=2026)
-    inp.config.use_cpsat = True
     inp.config.cpsat_time_limit_seconds = 0
     result = sched.run(inp)
 
-    assert result.success is True
-    assert result.solver_name == "heuristic"
+    assert result.success is False
+    assert result.solver_name == "cpsat"
