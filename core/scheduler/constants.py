@@ -70,6 +70,8 @@ TEACHER_GAP_SECOND_PENALTY = 700      # Phạt thêm cho tiết trống thứ 2 
 TEACHER_GAP_EXCESS_PENALTY = 1500     # Phạt rất nặng cho tiết trống thứ 3 trở đi của cùng 1 GV (chống dồn gap)
 TEACHER_BACK_TO_BACK_SHIFT_PENALTY = 25  # Phạt nhẹ khi GV dạy chiều muộn hôm trước và sáng sớm hôm sau (tiêu chí phụ)
 SUBJECT_CONSECUTIVE_DAY_SOFT_PENALTY = 10  # Phạt nhẹ khi môn 2-3 tiết xếp 2 ngày liên tiếp (tiêu chí phụ, tie-breaker nếu có thể)
+MORNING_ACADEMIC_UNDERLOAD_SOFT_PENALTY = 120  # Phạt mềm khi buổi sáng (>= 3 tiết) có < 2 tiết học thuật cốt lõi
+
 
 # Buổi không được chọn làm buổi nghỉ của GV: sáng Thứ 2/5/6 (hoạt động cố định
 # buổi sáng những ngày này), và chiều Thứ 5/6 (đã bị khoá hẳn khỏi TKB ở

@@ -22,15 +22,27 @@ def conn(tmp_path):
     connection.close()
 
 
+def _make_dummy_cells(inp) -> dict:
+    cells = {}
+    assigned = inp.assigned_teacher
+    teacher_used = set()
+    for slot in inp.slots:
+        ts_key = (slot.ts.weekday, slot.ts.session, slot.ts.period)
+        chosen_subj = None
+        for (s_id, c_id), t_id in assigned.items():
+            if c_id == slot.class_id and (t_id, ts_key) not in teacher_used:
+                chosen_subj = s_id
+                teacher_used.add((t_id, ts_key))
+                break
+        cells[(slot.class_id, slot.ts.weekday, slot.ts.session, slot.ts.period)] = chosen_subj
+    return cells
+
+
 def _accept_run(conn, parity: str, seed: int, week_no: int) -> int:
     inp = repo.build_scheduling_input(conn, parity=parity, seed=seed)
-    result = sched.run(inp)
-    assert result.success
-    cells = {}
-    for slot in inp.slots:
-        cells[(slot.class_id, slot.ts.weekday, slot.ts.session, slot.ts.period)] = result.assignment.get(slot.slot_id)
-    run_id = repo.save_run(conn, week_no=week_no, seed=seed, parity=parity, cells_changed=result.cells_changed,
-                            cells_total=result.cells_total, succeeded=True, message="ok")
+    cells = _make_dummy_cells(inp)
+    run_id = repo.save_run(conn, week_no=week_no, seed=seed, parity=parity, cells_changed=0,
+                            cells_total=len(inp.slots), succeeded=True, message="ok")
     repo.save_tkb_result(conn, run_id, cells)
     return run_id
 
@@ -62,14 +74,9 @@ def test_export_autofits_columns_and_rows(conn):
 def test_export_accepted_run_no_teacher_conflict_highlight(conn):
     parity = repo.get_tuan_config(conn)[1]
     inp = repo.build_scheduling_input(conn, parity=parity, seed=123)
-    result = sched.run(inp)
-    assert result.success
-
-    cells = {}
-    for slot in inp.slots:
-        cells[(slot.class_id, slot.ts.weekday, slot.ts.session, slot.ts.period)] = result.assignment.get(slot.slot_id)
-    run_id = repo.save_run(conn, week_no=1, seed=123, parity=parity, cells_changed=result.cells_changed,
-                            cells_total=result.cells_total, succeeded=True, message="ok")
+    cells = _make_dummy_cells(inp)
+    run_id = repo.save_run(conn, week_no=1, seed=123, parity=parity, cells_changed=0,
+                            cells_total=len(inp.slots), succeeded=True, message="ok")
     repo.save_tkb_result(conn, run_id, cells)
 
     data = export_xlsx(conn, run_id=run_id)

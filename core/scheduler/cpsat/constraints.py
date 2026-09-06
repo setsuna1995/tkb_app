@@ -325,6 +325,42 @@ def _add_class_constraints(built: CpSatModel) -> None:
         m.Add(sum(vs) >= 2 * used)
         m.Add(sum(vs) <= len(group_slots) * used)
 
+    # 8. Cân bằng tải học thuật buổi sáng (trần cứng max_academic_per_morning)
+    if getattr(config, "balance_morning_academic_load", True):
+        academic_ids = {
+            s.subject_id for s in inp.subjects
+            if any(s.name.startswith(h) for h in ('Toán', 'Ngữ văn', 'Ngoại ngữ', 'Khoa học tự nhiên'))
+        }
+        if academic_ids:
+            morning_slots_by_class_day = defaultdict(list)
+            for s in inp.slots:
+                if s.ts.session == "S":
+                    morning_slots_by_class_day[s.class_id, s.ts.weekday].append(s)
+
+            class_has_afternoon = {s.class_id for s in inp.slots if s.ts.session == "C"}
+            class_mornings_count = defaultdict(int)
+            for (cid, _wd) in morning_slots_by_class_day.keys():
+                class_mornings_count[cid] += 1
+
+            for (class_id, weekday), group_slots in morning_slots_by_class_day.items():
+                if len(group_slots) <= config.max_academic_per_morning:
+                    continue
+                c_mornings = class_mornings_count[class_id]
+                c_academic_need = sum(inp.need.get((sid, class_id), 0) for sid in academic_ids)
+                if class_id not in class_has_afternoon and c_mornings > 0:
+                    effective_max = max(config.max_academic_per_morning, (c_academic_need + c_mornings - 1) // c_mornings)
+                else:
+                    effective_max = config.max_academic_per_morning
+
+                academic_vars = [
+                    x[s.slot_id, subj_id]
+                    for s in group_slots
+                    for subj_id in academic_ids
+                    if (s.slot_id, subj_id) in x
+                ]
+                if academic_vars:
+                    m.Add(sum(academic_vars) <= effective_max)
+
 
 def _add_block_constraints(built: CpSatModel) -> None:
     """Ràng buộc tính liền kề cho môn KÉP (block_size >= 2) và môn 1 CẶP (single_pair_ids)."""

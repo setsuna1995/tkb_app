@@ -157,6 +157,9 @@ class SchedulingConfig:
     # với cơ chế Early Stopping bão hòa nghiệm và chẩn đoán Pure Feasibility, solver thường hoàn thành ở ~15s-25s.
     cpsat_minimize_changes: bool = False  # Ưu tiên giữ tối đa ô TKB cũ (mặc định Tắt để giải tự do)
     cpsat_workers: int = 0  # Số workers CPU cho CP-SAT. 0 = Tự động thích ứng môi trường (Cloud 2, PC 4); > 0 = ép cứng.
+    balance_morning_academic_load: bool = True  # Cân bằng và xen kẽ môn học thuật (Toán, Văn, Anh, KHTN) buổi sáng
+    max_academic_per_morning: int = 3  # Trần cứng: Tối đa 3 tiết học thuật/buổi sáng (luôn có >=1 tiết nhẹ)
+    min_academic_per_morning: int = 2  # Sàn mềm: Khuyến khích >= 2 tiết học thuật/buổi sáng (tránh buổi sáng quá nhàn)
 
 
 

@@ -14,6 +14,7 @@ from core.scheduler.constants import (
     TEACHER_GAP_SECOND_PENALTY,
     TEACHER_LONE_SESSION_SPREAD_PENALTY,
     TEACHER_STRICT_MORNING_MISS_PENALTY,
+    MORNING_ACADEMIC_UNDERLOAD_SOFT_PENALTY,
 )
 from core.models import ROLE_HDTN
 from core.scheduler.placement import _build_effective_assigned_teacher
@@ -373,6 +374,34 @@ def _add_objective(built: CpSatModel) -> None:
                     m.Add(consec <= taught_w_next)
                     penalty_terms["_subject_dispersion"].append(consec)
 
+    # 6d. Cân bằng tải học thuật buổi sáng (phạt mềm khi buổi sáng >= 3 tiết có < min_academic tiết học thuật)
+    if getattr(config, "balance_morning_academic_load", True):
+        academic_ids = {
+            s.subject_id for s in inp.subjects
+            if any(s.name.startswith(h) for h in ('Toán', 'Ngữ văn', 'Ngoại ngữ', 'Khoa học tự nhiên'))
+        }
+        min_academic = getattr(config, "min_academic_per_morning", 2)
+        if academic_ids and min_academic > 0:
+            morning_slots_by_class_day = defaultdict(list)
+            for s in inp.slots:
+                if s.ts.session == "S":
+                    morning_slots_by_class_day[s.class_id, s.ts.weekday].append(s)
+
+            for (class_id, weekday), group_slots in morning_slots_by_class_day.items():
+                if len(group_slots) < 3:
+                    continue
+                academic_vars = [
+                    x[s.slot_id, subj_id]
+                    for s in group_slots
+                    for subj_id in academic_ids
+                    if (s.slot_id, subj_id) in x
+                ]
+                if academic_vars:
+                    underload = m.NewBoolVar(f"acad_underload_c{class_id}_wd{weekday}")
+                    m.Add(sum(academic_vars) <= min_academic - 1).OnlyEnforceIf(underload)
+                    m.Add(sum(academic_vars) >= min_academic).OnlyEnforceIf(underload.Not())
+                    penalty_terms["_morning_academic_underload"].append(underload)
+
     built.penalty_terms = dict(penalty_terms)
 
     # 7. Theo dõi và tối thiểu hóa thay đổi ô cũ
@@ -405,6 +434,8 @@ def _add_objective(built: CpSatModel) -> None:
         obj_terms.append(TEACHER_BACK_TO_BACK_SHIFT_PENALTY * sum(penalty_terms["_back_to_back_shift"]))
     if penalty_terms.get("_subject_dispersion"):
         obj_terms.append(SUBJECT_CONSECUTIVE_DAY_SOFT_PENALTY * sum(penalty_terms["_subject_dispersion"]))
+    if penalty_terms.get("_morning_academic_underload"):
+        obj_terms.append(MORNING_ACADEMIC_UNDERLOAD_SOFT_PENALTY * sum(penalty_terms["_morning_academic_underload"]))
     if penalty_terms.get("II.14"):
         obj_terms.append(300 * sum(penalty_terms["II.14"]))
     if lone_day_terms:

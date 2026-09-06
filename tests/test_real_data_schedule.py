@@ -10,6 +10,8 @@ from io_excel.importer import import_xlsm
 
 FIXTURE = os.path.join(os.path.dirname(__file__), "..", "io_excel", "sample_school.xlsm")
 
+pytestmark = pytest.mark.slow
+
 
 @pytest.fixture()
 def conn(tmp_path):

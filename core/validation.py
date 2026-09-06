@@ -179,6 +179,43 @@ def find_max_heavy_violations(slots: list, assignment: dict, heavy_ids: set, max
     return violations
 
 
+def find_morning_academic_overload_violations(slots: list, assignment: dict, academic_ids: set, max_academic: int = 3) -> list:
+    """Returns [(class_id, weekday, count), ...] where count > max_academic in morning session."""
+    morn_counts = defaultdict(int)
+    for slot in slots:
+        if slot.ts.session == "S":
+            subj_id = assignment.get(slot.slot_id)
+            if subj_id is not None and subj_id in academic_ids:
+                morn_counts[(slot.class_id, slot.ts.weekday)] += 1
+
+    violations = []
+    for (class_id, weekday), count in morn_counts.items():
+        if count > max_academic:
+            violations.append((class_id, weekday, count))
+    return sorted(violations)
+
+
+def find_morning_academic_underload_violations(slots: list, assignment: dict, academic_ids: set, min_academic: int = 2) -> list:
+    """Returns [(class_id, weekday, count), ...] where count < min_academic in morning session
+    for mornings having at least 3 periods total."""
+    morn_counts = defaultdict(int)
+    morn_total_slots = defaultdict(int)
+    for slot in slots:
+        if slot.ts.session == "S":
+            morn_total_slots[(slot.class_id, slot.ts.weekday)] += 1
+            subj_id = assignment.get(slot.slot_id)
+            if subj_id is not None and subj_id in academic_ids:
+                morn_counts[(slot.class_id, slot.ts.weekday)] += 1
+
+    violations = []
+    for (class_id, weekday), total_periods in morn_total_slots.items():
+        if total_periods >= 3:
+            count = morn_counts.get((class_id, weekday), 0)
+            if count < min_academic:
+                violations.append((class_id, weekday, count))
+    return sorted(violations)
+
+
 def find_subject_class_rule_violations(slots: list, assignment: dict, subject_class_rules: list) -> list:
     """Returns [(class_id, subject_id, weekday, session, period), ...] for any placement
     violating subject_class_rules (allowed (weekday, session) cells)."""
@@ -533,6 +570,40 @@ def compute_tkb_health_score(inp: SchedulingInput, assignment: dict) -> dict:
             })
     ped_penalty += len(gdtc_violations) * 10.0
 
+    # 1.5 Cân bằng tải môn học thuật buổi sáng (Toán, Văn, Ngoại ngữ, KHTN)
+    academic_ids = {
+        s.subject_id for s in inp.subjects
+        if any(s.name.startswith(h) for h in ('Toán', 'Ngữ văn', 'Ngoại ngữ', 'Khoa học tự nhiên'))
+    }
+    acad_overload_violations = []
+    acad_underload_violations = []
+    if academic_ids:
+        max_acad = getattr(inp.config, "max_academic_per_morning", 3)
+        min_acad = getattr(inp.config, "min_academic_per_morning", 2)
+        acad_overload_violations = find_morning_academic_overload_violations(
+            inp.slots, assignment, academic_ids, max_academic=max_acad
+        )
+        for (cid, wd, cnt) in acad_overload_violations:
+            c_name = class_map.get(cid, f"Lớp #{cid}")
+            wd_str = WEEKDAY_NAMES.get(wd, f"Thứ {wd}")
+            recommendations.append({
+                "type": "warning",
+                "category": "Sư phạm",
+                "message": f"{c_name}: Buổi {wd_str} sáng có {cnt} tiết môn học thuật cốt lõi (> {max_acad} tiết) — học sinh bị quá tải.",
+            })
+        acad_underload_violations = find_morning_academic_underload_violations(
+            inp.slots, assignment, academic_ids, min_academic=min_acad
+        )
+        for (cid, wd, cnt) in acad_underload_violations:
+            c_name = class_map.get(cid, f"Lớp #{cid}")
+            wd_str = WEEKDAY_NAMES.get(wd, f"Thứ {wd}")
+            recommendations.append({
+                "type": "info",
+                "category": "Sư phạm",
+                "message": f"{c_name}: Buổi {wd_str} sáng chỉ có {cnt} tiết môn học thuật (< {min_acad} tiết) — phân bố tải chưa đều.",
+            })
+    ped_penalty += min(20.0, len(acad_overload_violations) * 10.0 + len(acad_underload_violations) * 2.0)
+
     pedagogical_score = max(0.0, min(100.0, 100.0 - ped_penalty))
 
     # ─────────────────────────────────────────────────────────────
@@ -706,6 +777,8 @@ def compute_tkb_health_score(inp: SchedulingInput, assignment: dict) -> dict:
             "heavy_excess_runs": len(heavy_run_violations),
             "heavy_afternoon_p3": len(heavy_p3_violations),
             "gdtc_violations": len(gdtc_violations),
+            "morning_academic_overload": len(acad_overload_violations),
+            "morning_academic_underload": len(acad_underload_violations),
             "teacher_gaps_total": len(gaps_list),
             "teacher_excess_gaps": extra_gap1 + extra_gap2,
             "teacher_back_to_back": len(b2b_violations),
