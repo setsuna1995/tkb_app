@@ -13,6 +13,7 @@ from data import db
 LEGACY_DB_PATH = str(Path(__file__).parent / "tkb_app_data.db")
 SCHOOLS_DIR = Path(__file__).parent / "schools"
 SAMPLE_SCHOOL_XLSM_PATH = Path(__file__).parent / "io_excel" / "sample_school.xlsm"
+TEMPLATE_DB_PATH = Path(__file__).parent / "data" / "sample_truong_thcs.db"
 
 ROLE_CODE_LABELS = {0: "Thường", 1: "Nặng", 2: "Kép", 3: "Nặng+Kép", 4: "GDTC", 5: "HDTN"}
 ROLE_LABEL_TO_CODE = {v: k for k, v in ROLE_CODE_LABELS.items()}
@@ -123,6 +124,10 @@ def _seed_sample_school_if_empty() -> None:
     pre-populated from the bundled sample dataset so the app is never empty."""
     if any(SCHOOLS_DIR.glob("*.db")):
         return
+    if TEMPLATE_DB_PATH.exists():
+        dest = SCHOOLS_DIR / "truong-thcs.db"
+        shutil.copy2(TEMPLATE_DB_PATH, dest)
+        return
     slug = create_school("Trường mẫu (dữ liệu mẫu)")
     connection = get_conn(slug)
     try:
@@ -198,18 +203,26 @@ def require_school() -> str:
         return slug
     st.session_state.pop("school_slug", None)
 
-    st.title("Chọn trường")
     schools = list_schools()
+    if schools and not st.session_state.get("explicit_school_switch"):
+        # Tự động chọn trường THCS (2026-2027) làm trường mẫu mặc định
+        default_school = next((s for s in schools if s["slug"] == "truong-thcs"), schools[0])
+        st.session_state["school_slug"] = default_school["slug"]
+        return default_school["slug"]
+
+    st.title("Chọn trường")
     if schools:
         pick = st.selectbox("Trường", schools, format_func=lambda s: s["name"], key="school_pick")
         if st.button("Vào trường này"):
             st.session_state["school_slug"] = pick["slug"]
+            st.session_state.pop("explicit_school_switch", None)
             st.rerun()
     with st.expander("➕ Tạo trường mới", expanded=not schools):
         new_name = st.text_input("Tên trường mới", key="new_school_name")
         if st.button("Tạo trường") and new_name.strip():
             new_slug = create_school(new_name.strip())
             st.session_state["school_slug"] = new_slug
+            st.session_state.pop("explicit_school_switch", None)
             st.rerun()
     st.stop()
 
@@ -222,6 +235,7 @@ def sidebar_school_switcher() -> None:
     with st.sidebar:
         if st.button(f"🏫 Đổi trường ({names.get(slug, slug)})"):
             st.session_state.pop("school_slug", None)
+            st.session_state["explicit_school_switch"] = True
             st.rerun()
 
 

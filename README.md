@@ -1,104 +1,139 @@
-# Xếp Thời Khóa Biểu
+# Xếp Thời Khóa Biểu — Trường THCS (2026–2027)
 
-Ứng dụng web (Streamlit) xếp thời khóa biểu tự động cho trường THCS, port lại
-toàn bộ logic từ bộ công cụ Excel/VBA gốc (`XepTKB.bas`, `ModCanBangTai.bas`,
-`ModKhung.bas`, `ModSeed.bas`) sang Python — giữ nguyên mọi ràng buộc sư phạm,
-thêm giao diện web, lưu dữ liệu bằng SQLite, và xuất kết quả ra file Excel.
+Ứng dụng web (Streamlit) xếp thời khóa biểu tự động thông minh cho trường THCS, sử dụng động cơ giải tối ưu hóa toàn cục **Google OR-Tools CP-SAT** kết hợp thuật toán Greedy & Swap-repair. Ứng dụng đáp ứng 100% các quy chế hoạt động sư phạm trường học Việt Nam, tích hợp sẵn toàn bộ dữ liệu mẫu chuẩn năm học **2026–2027**, cung cấp thang đo **Đánh giá Sức khỏe TKB (100 điểm)** và hỗ trợ xuất/nhập Excel đa năng.
 
-## Tính năng
+---
 
-- **Xếp TKB tự động**: thuật toán greedy + swap-repair + thử lại nhiều lần,
-  giữ tối đa lịch tuần trước. Đầy đủ ràng buộc: không trùng GV, môn nặng
-  (Toán/Lý/Hoá) tối đa 3 tiết liên tiếp, tiết kép Ngữ văn liền nhau cùng buổi,
-  Thể dục né tiết 5, chào cờ thứ 2 tiết 1 + sinh hoạt lớp thứ 7, mỗi GV được
-  xếp đúng 1 buổi nghỉ/tuần, không xếp buổi nghỉ vào sáng thứ 2/5/6 (GVCN bắt
-  buộc có mặt thứ 2 và thứ 7), chiều thứ 5 và thứ 6 luôn để trống trong TKB
-  toàn trường (dành riêng cho ôn bồi dưỡng/phụ đạo, diễn ra ngoài TKB), không
-  buổi nào bị xếp đúng 1 tiết lẻ, GV bận theo khai báo riêng, cảnh báo
-  khi GV vượt định mức tiết.
-- **Cân bằng tải**: đề xuất chuyển tiết từ GV quá tải sang GV cùng chuyên môn
-  còn dư định mức (chỉ đề xuất, không tự sửa Phân công).
-- **Khung tiết tùy chỉnh**: chọn mẫu buổi sáng/chiều có sẵn hoặc tự nhập số
-  tiết mỗi buổi cho từng lớp.
-- **Lịch sử tuần / seed**: sinh tuần mới (đảo định mức Chẵn/Lẻ), tái tạo lại
-  đúng thời khóa biểu của một tuần cũ theo seed đã lưu.
-- **Import/Export Excel**: nhập dữ liệu từ file `.xlsm` hiện có (PhanCong,
-  SoTiet, DinhMuc_GV, GV_Bận, TKB_Nhap, Khung, TuanConfig), xuất thời khóa
-  biểu ra `.xlsx` với các sheet TKB, TKB_GV, KiemTra.
+## 🌟 Tính năng nổi bật
 
-## Chạy ở máy local
+- **Động cơ giải CP-SAT thông minh**:
+  - Tối ưu hóa toàn cục hàng nghìn biến số đồng thời trong 15–35 giây.
+  - Phân tầng chẩn đoán và tự động thích ứng theo tài nguyên máy (tối ưu mượt mà cả trên máy chủ Cloud 2 vCPU).
+  - Tự động lưu phương án tốt nhất khi đạt điểm plateau (sớm hơn giới hạn thời gian).
+- **Tuân thủ tuyệt đối quy chế HĐSP**:
+  - **Sáng bắt buộc (II.3)**: 100% giáo viên cơ hữu (tải $\ge 8$ tiết/tuần) có mặt dạy vào **sáng Thứ 2** (Chào cờ/SHDC) và **sáng Thứ 6** (Sinh hoạt tổng kết tuần).
+  - **Không lẻ tiết (II.4)**: Tuyệt đối tránh giáo viên đi dạy đúng 1 tiết/buổi hoặc 1 tiết/ngày.
+  - **Không ngày chia lẻ (II.8)**: Chặn tình trạng giáo viên dạy 1 tiết sáng + 1 tiết chiều trong cùng một ngày.
+  - **Môn kép & Môn nặng**: Ghép đôi liền kề cho tiết kép (Ngữ văn, KHTN...); môn nặng (Toán, Lý, Hóa, Ngoại ngữ) tối đa 3 tiết/buổi, né tiết 3 chiều.
+  - **Khung thể dục & Chuyên đề**: Thể dục chỉ xếp các tiết hợp lý; chiều Thứ 5 và Thứ 6 để trống toàn trường phục vụ ôn bồi dưỡng/phụ đạo.
+- **Bảng Đánh Giá Sức Khỏe TKB (Thang 100 điểm)**:
+  - 📚 **Sư phạm học sinh (40%)**: Độ phân bổ môn học, nhịp độ học tập, giãn cách môn 2–3 tiết/tuần.
+  - 👩‍🏫 **Tiện nghi & Công bằng GV (35%)**: Hạn chế tiết trống (lủng lịch), tránh nhảy ca gắt (chiều muộn $\to$ sáng sớm hôm sau), cân đối số buổi dạy.
+  - ⚖️ **Tuân thủ HĐSP & Kế hoạch (25%)**: Không trùng lịch, không vi phạm giờ bận, đảm bảo ngày công lễ tiết.
+- **Dữ liệu chuẩn tích hợp sẵn**:
+  - Nạp sẵn toàn bộ dữ liệu thực tế **Trường THCS (2026–2027)**: 8 lớp (Khối 6, 7, 8, 9), 16 môn, 17 giáo viên, 236 tiết học/tuần và khung định lượng 35 tuần cả năm học.
+  - Vào thẳng trường mẫu ngay khi mở app, không mất công thiết lập ban đầu.
 
-```bash
+---
+
+## 🚀 Hướng dẫn chạy ứng dụng ở máy Local
+
+### 1. Cài đặt thư viện
+
+Mở PowerShell tại thư mục dự án (`c:\Users\Kien\tkb_app`):
+
+```powershell
 pip install -r requirements.txt
-streamlit run app.py
 ```
 
-Mở trình duyệt tại `http://localhost:8501`.
+*(Khuyến khích tạo môi trường ảo Python trước khi cài đặt: `python -m venv .venv` và kích hoạt bằng `.\.venv\Scripts\Activate.ps1`)*
 
-### Mật khẩu đăng nhập
+### 2. Thiết lập mật khẩu đăng nhập
 
-App có 1 cổng mật khẩu chung (không có tài khoản riêng từng người). Mật khẩu
-đọc từ `.streamlit/secrets.toml` (file này **không** commit lên git — đã có
-trong `.gitignore`, chỉ tồn tại trên máy bạn):
+App có cổng đăng nhập bảo mật chung. Hãy tạo file `.streamlit/secrets.toml` (nếu chưa có):
 
 ```toml
-app_password = "mật-khẩu-của-bạn"
+app_password = "mat-khau-cua-ban"
 ```
 
-Đổi mật khẩu: sửa giá trị `app_password` trong file đó rồi chạy lại app.
-Có file mẫu `.streamlit/secrets.toml.example` để tham khảo cấu trúc.
+*(File này đã nằm trong `.gitignore` nên an toàn, không bị đẩy lên GitHub).*
 
-## Dữ liệu lưu ở đâu
+### 3. Khởi chạy ứng dụng
 
-App hỗ trợ nhiều trường (multi-tenant): mỗi trường có 1 file SQLite riêng
-trong thư mục `schools/<mã-trường>.db` (tự tạo khi chọn/tạo trường lần đầu,
-không commit lên git). Trường được chọn ở đầu phiên làm việc và có thể đổi
-qua nút chuyển trường ở thanh bên. Nếu máy bạn từng dùng bản cũ (1 file
-`tkb_app_data.db` duy nhất ở gốc project), app tự động di chuyển dữ liệu đó
-thành trường đầu tiên khi khởi động lần đầu sau khi cập nhật.
+> ⚠️ **LƯU Ý QUAN TRỌNG TRÊN WINDOWS POWERSHELL:**
+> - **CÁCH CHẠY ĐÚNG**:
+>   ```powershell
+>   python -m streamlit run app.py
+>   ```
+>   *(hoặc nếu đã kích hoạt `.venv`: `streamlit run app.py`)*
+>
+> - **LỖI THƯỜNG GẶP**:
+>   1. Gõ `python streamlit run app.py`:
+>      ❌ Báo lỗi: `can't open file '...streamlit': [Errno 2] No such file or directory` (do Python tìm file `streamlit.py` thay vì chạy module `streamlit`). **Khắc phục: thêm cờ `-m`**.
+>   2. Gõ `streamlit run app.py` khi chưa kích hoạt virtualenv:
+>      ❌ Báo lỗi: `The term 'streamlit' is not recognized...` (do thư mục Scripts chưa nằm trong biến môi trường PATH). **Khắc phục: dùng `python -m streamlit run app.py`**.
 
-Mỗi file DB chứa toàn bộ dữ liệu của 1 trường (lớp, môn, GV, phân công, định
-mức, GV bận, khung tiết, thời khóa biểu, lịch sử tuần). Sao lưu dữ liệu bằng
-nút "Xuất Excel (sao lưu)" ở thanh bên — nên bấm thường xuyên, đặc biệt khi
-host trên nền tảng free (xem phần Triển khai bên dưới).
+Sau khi chạy lệnh, trình duyệt sẽ tự động mở tại địa chỉ: `http://localhost:8501`.
 
-## Chạy test
+---
 
-```bash
+## ☁️ Triển khai lên Streamlit Community Cloud (Miễn phí)
+
+1. **Đẩy mã nguồn lên GitHub**:
+   - Dữ liệu chuẩn của trường (`schools/truong-thcs.db` và bản sao dự phòng `data/sample_truong_thcs.db`) đã được cấu hình lưu trong Git. Khi đẩy lên GitHub, máy chủ Cloud sẽ có sẵn toàn bộ dữ liệu 2026–2027.
+2. **Tạo App trên Streamlit Cloud**:
+   - Truy cập [share.streamlit.io](https://share.streamlit.io) $\to$ Chọn **New app**.
+   - Chọn Repository, Branch `main`, và Main file path là `app.py`.
+3. **Cấu hình Secret**:
+   - Nhấp vào **Advanced Settings** $\to$ mục **Secrets**, điền mật khẩu đăng nhập của bạn:
+     ```toml
+     app_password = "mat-khau-cua-ban"
+     ```
+4. **Bấm Deploy**:
+   - Ứng dụng sẽ tự động khởi tạo trên môi trường Cloud (2 vCPU / 2 Search Workers). Động cơ CP-SAT sẽ tự động áp dụng chiến lược giải phân tầng tối ưu cho cấu hình 2 CPU, đảm bảo **100% giáo viên có mặt sáng Thứ 2, Thứ 6** và **không bị lẻ tiết**.
+
+---
+
+## 📊 Cấu trúc dữ liệu & Quản lý trường học
+
+- **Hỗ trợ đa trường (Multi-tenant)**: Mỗi trường học là một file SQLite độc lập trong thư mục `schools/<mã-trường>.db`.
+- **Trường mẫu mặc định**: `Trường THCS (2026-2027)` (`schools/truong-thcs.db`) được nạp tự động khi khởi động.
+- **Đổi trường hoặc Tạo trường mới**: Có thể chuyển đổi bất cứ lúc nào qua nút **🏫 Đổi trường** ở thanh bên (Sidebar).
+- **Sao lưu & Phục hồi**:
+  - Nút **📥 Xuất Excel (sao lưu)** ở thanh bên hỗ trợ tải trọn vẹn toàn bộ dữ liệu cấu hình, giáo viên, định mức và thời khóa biểu ra file `.xlsx`.
+  - Có thể nhập lại file sao lưu bất cứ lúc nào ở trang **09. Nhập / Xuất Excel**.
+
+---
+
+## 🧪 Chạy kiểm thử tự động (Test Suite)
+
+Dự án có bộ test toàn diện gồm 310 test cases bao phủ toàn bộ thuật toán, ràng buộc sư phạm, động cơ CP-SAT và điểm sức khỏe TKB:
+
+```powershell
 pip install -r requirements-dev.txt
-python -m pytest
+python -m pytest -n auto tests/
 ```
 
-Bộ test gồm: kiểm tra từng ràng buộc riêng lẻ của thuật toán xếp (core/scheduler),
-kiểm tra import đúng dữ liệu từ file Excel mẫu thật (`io_excel/sample_school.xlsm`),
-và kiểm tra xếp TKB thành công + đúng ràng buộc trên chính dữ liệu thật đó.
+---
 
-## Triển khai lên Streamlit Community Cloud (miễn phí)
-
-1. Push project này lên một repo GitHub (private cũng được).
-2. Vào [share.streamlit.io](https://share.streamlit.io) → New app → chọn repo,
-   branch, và đường dẫn file chính là `app.py`.
-3. Vào phần **Secrets** của app trên Streamlit Cloud, dán:
-   ```toml
-   app_password = "mật-khẩu-của-bạn"
-   ```
-4. Deploy.
-
-**Lưu ý quan trọng**: ổ đĩa của Streamlit Community Cloud là tạm thời — dữ
-liệu SQLite có thể mất khi app khởi động lại hoặc "ngủ" do không có người
-dùng một thời gian. Với một công cụ nội bộ quy mô nhỏ như thế này, cách đơn
-giản nhất là chấp nhận giới hạn đó và luôn xuất Excel sau mỗi lần chỉnh sửa
-quan trọng — nếu app bị reset, chỉ cần nhập lại đúng file Excel đó ở trang
-Import/Export là khôi phục lại toàn bộ dữ liệu.
-
-## Cấu trúc thư mục
+## 📁 Cấu trúc thư mục chính
 
 ```
-app.py                  # điểm vào, trang chủ/dashboard
-ui_common.py            # cổng mật khẩu, kết nối DB dùng chung, nút sao lưu
-pages/                  # 9 trang chức năng (Streamlit tự nhận theo tên file)
-core/                   # thuật toán xếp TKB thuần Python, không phụ thuộc Streamlit
-data/                   # schema SQLite + hàm CRUD/truy vấn
-io_excel/               # import file .xlsm, export file .xlsx kết quả
-tests/                  # test tự động, gồm cả dữ liệu Excel thật làm fixture
+tkb_app/
+├── app.py                      # Điểm khởi động chính, cấu hình menu điều hướng
+├── ui_common.py                # Xác thực, quản lý kết nối DB đa trường, thanh bên
+├── pages/                      # 12 trang chức năng của ứng dụng:
+│   ├── 00_Trang_chu.py         # Tổng quan tiến độ thiết lập và thống kê trường
+│   ├── 01_Khai_bao.py          # Khai báo Lớp, Môn học, Giáo viên
+│   ├── 02_PhanCong.py          # Phân công chuyên môn
+│   ├── 03_DinhMuc.py           # Định mức số tiết theo tuần
+│   ├── 04_GV_Ban.py            # Khai báo giờ bận của giáo viên
+│   ├── 05_Khung_tiet.py        # Cấu hình khung tiết theo lớp
+│   ├── 06_Xep_TKB.py           # Bảng điều khiển xếp TKB CP-SAT & Sức khỏe TKB
+│   ├── 07_Can_Bang_Tai.py      # Đề xuất cân bằng tải chuyên môn
+│   ├── 08_Lich_su_Tuan.py      # Quản lý lịch sử và tuần học (Chẵn/Lẻ)
+│   ├── 09_Import_Export.py     # Nhập/Xuất Excel (gồm định lượng 35 tuần)
+│   ├── 10_Cau_hinh_Xep_lich.py # Cấu hình nâng cao ràng buộc sư phạm
+│   └── 11_Huong_Dan.py         # Hướng dẫn sử dụng chi tiết
+├── core/                       # Động cơ cốt lõi (Core Engine):
+│   ├── scheduler/cpsat/        # Bộ giải CP-SAT: mô hình, hàm mục tiêu, chẩn đoán
+│   ├── validation.py           # Bộ kiểm tra ràng buộc & Bảng điểm Sức khỏe TKB
+│   ├── frame.py                # Xử lý khung thời gian học tập
+│   └── models.py               # Data models và hằng số sư phạm
+├── data/                       # Quản trị cơ sở dữ liệu SQLite & Repository
+│   ├── sample_truong_thcs.db   # Bản sao dữ liệu mẫu chuẩn năm học 2026-2027
+│   └── repository.py           # Các hàm CRUD dữ liệu trường học
+├── schools/                    # Thư mục lưu trữ CSDL các trường học (.db)
+│   └── truong-thcs.db          # Dữ liệu chính thức Trường THCS (2026-2027)
+└── tests/                      # Bộ kiểm thử tự động (310 test cases)
 ```

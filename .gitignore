@@ -2,6 +2,8 @@ __pycache__/
 *.pyc
 .streamlit/secrets.toml
 *.db
+!schools/truong-thcs.db
+!data/sample_truong_thcs.db
 *.db-journal
 *.db-shm
 *.db-wal

@@ -326,10 +326,8 @@ def _diagnose_and_solve(built: CpSatModel, solver: cp_model.CpSolver, time_limit
 
         # Phân bổ thời gian giữa các pass: nếu còn nhiều pass và còn đủ thời gian,
         # giới hạn pass 1 & 2 để luôn có ngân sách dự phòng cho pass tiếp theo.
-        if num_workers <= 2 and len(hard_rids) > 0 and remaining > 25.0:
-            pass_limit = 4.0 if diag["passes_run"] == 1 else 6.0
-        elif len(hard_rids) > 1 and remaining > 15.0:
-            pass_limit = min(max(remaining * 0.6, 12.0), 22.0)
+        if len(hard_rids) > 1 and remaining > 15.0:
+            pass_limit = min(max(remaining * 0.6, 15.0), 25.0)
         else:
             pass_limit = max(1.0, float(remaining))
 
@@ -378,24 +376,27 @@ def _diagnose_and_solve(built: CpSatModel, solver: cp_model.CpSolver, time_limit
             if diag["passes_run"] == 1:
                 diag["unsat_core"] = sorted(offending)
             if not offending:
-                # Ưu tiên thư giãn II.3 trước nếu có thể, bảo vệ II.4 (yêu cầu cốt lõi nhà trường)
-                if "II.3" in hard_rids:
-                    offending = {"II.3"}
+                # Ưu tiên nới lỏng II.4 trước nếu không trích xuất được core, bảo vệ tuyệt đối II.3
+                if "II.4" in hard_rids:
+                    offending = {"II.4"}
                 elif "II.8" in hard_rids:
                     offending = {"II.8"}
                 else:
-                    offending = {"II.4"}
+                    offending = {"II.3"}
 
             relaxed |= offending
             diag["relaxed_by_diagnosis"] = sorted(relaxed)
             continue
 
-        # Nếu UNKNOWN (timeout): Thư giãn quy tắc mềm hơn trước, bảo vệ II.4
+        # Nếu UNKNOWN (timeout): Nới lỏng ràng buộc tổ hợp nặng trước (II.4 rồi đến II.8),
+        # bảo vệ tuyệt đối II.3 (có mặt buổi sáng T2/T6 - yêu cầu bắt buộc của nhà trường).
         if status == cp_model.UNKNOWN:
-            if "II.3" in hard_rids:
-                offending = {"II.3"}
+            if "II.4" in hard_rids:
+                offending = {"II.4"}
             elif "II.8" in hard_rids:
                 offending = {"II.8"}
+            elif "II.3" in hard_rids:
+                offending = {"II.3"}
             else:
                 offending = set(hard_rids)
             relaxed |= offending
