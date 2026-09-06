@@ -177,3 +177,10 @@ def test_runs_weekly_queries(conn):
     assert len(runs_w5) >= 1
     assert runs_w5[0]["week_no"] == 5
 
+
+def test_export_by_week_no(conn):
+    _accept_run(conn, "C", seed=9999, week_no=7)
+    data = export_xlsx(conn, week_no=7)
+    wb = openpyxl.load_workbook(io.BytesIO(data))
+    assert set(wb.sheetnames) == {"TKB_Mon", "TKB", "TKB_GV"}
+

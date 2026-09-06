@@ -343,8 +343,6 @@ def _add_class_constraints(built: CpSatModel) -> None:
                 class_mornings_count[cid] += 1
 
             for (class_id, weekday), group_slots in morning_slots_by_class_day.items():
-                if len(group_slots) <= config.max_academic_per_morning:
-                    continue
                 c_mornings = class_mornings_count[class_id]
                 c_academic_need = sum(inp.need.get((sid, class_id), 0) for sid in academic_ids)
                 if class_id not in class_has_afternoon and c_mornings > 0:
@@ -359,7 +357,11 @@ def _add_class_constraints(built: CpSatModel) -> None:
                     if (s.slot_id, subj_id) in x
                 ]
                 if academic_vars:
-                    m.Add(sum(academic_vars) <= effective_max)
+                    if len(group_slots) > effective_max:
+                        m.Add(sum(academic_vars) <= effective_max)
+                    # Sàn cứng: Buổi sáng có từ 3 tiết trở lên phải có ít nhất 1 môn học thuật cốt lõi
+                    if len(group_slots) >= 3 and c_academic_need >= c_mornings and c_mornings > 0:
+                        m.Add(sum(academic_vars) >= 1)
 
 
 def _add_block_constraints(built: CpSatModel) -> None:

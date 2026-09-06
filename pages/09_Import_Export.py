@@ -67,24 +67,107 @@ if uploaded_weekly is not None and c_w2.button("Nạp file định lượng"):
             st.error(f"Lỗi: {e}")
 
 st.divider()
-st.subheader("Xuất kết quả ra Excel")
-latest_run = repo.get_latest_run(conn)
-run_id = latest_run["run_id"] if latest_run and latest_run["succeeded"] else None
-if run_id:
-    st.caption(f"Xuất theo lần xếp gần nhất đã chấp nhận (run #{run_id}).")
-else:
-    st.caption("Chưa có lần xếp nào được chấp nhận — xuất theo lịch hiện tại (TKB_Nhap).")
+st.subheader("📤 Xuất kết quả ra Excel theo tuần")
+st.caption(
+    "Xuất thời khóa biểu chính thức của từng tuần theo đúng định lượng số tiết của tuần đó. "
+    "File Excel tải về giữ nguyên mẫu biểu chuẩn của trường gồm 3 sheet: TKB_Mon, TKB (lớp) và TKB_GV."
+)
 
-try:
-    data = export_xlsx(conn, run_id=run_id)
-    if st.download_button(
-        "📤 Xuất file .xlsx", data=data, file_name="TKB_xuat.xlsx",
-        mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-    ):
-        repo.set_meta(conn, "last_exported_at", datetime.now().strftime("%d/%m/%Y %H:%M"))
-        st.success("Đã xuất file.")
-except Exception as e:
-    st.error(f"Không thể xuất: {e}")
+saved_weeks = repo.list_saved_weeks(conn)
+
+tab_export_week, tab_export_other = st.tabs([
+    "📅 Xuất theo Tuần (1 - 35)",
+    "📑 Xuất Bản Nháp / Gộp Chẵn Lẻ",
+])
+
+with tab_export_week:
+    c_hk, c_w = st.columns([1, 2])
+    hk_choice = c_hk.selectbox(
+        "Lọc theo học kỳ:",
+        ["Tất cả các tuần (1 - 35)", "Học kỳ I (Tuần 1 - 18)", "Học kỳ II (Tuần 19 - 35)"],
+        key="exp_hk_pick",
+    )
+    if "Học kỳ I" in hk_choice:
+        available_weeks = list(range(1, 19))
+    elif "Học kỳ II" in hk_choice:
+        available_weeks = list(range(19, 36))
+    else:
+        available_weeks = list(range(1, 36))
+
+    default_idx = 0
+    if saved_weeks:
+        first_saved_in_range = next((i for i, w in enumerate(available_weeks) if w in saved_weeks), 0)
+        default_idx = first_saved_in_range
+
+    chosen_export_week = c_w.selectbox(
+        "Chọn tuần muốn xuất Excel:",
+        options=available_weeks,
+        index=default_idx,
+        format_func=lambda w: f"Tuần {w}{' — ✅ Đã lưu' if w in saved_weeks else ' (chưa có TKB)'}",
+        key="exp_week_select",
+    )
+
+    run_for_week = repo.get_latest_run_by_week(conn, chosen_export_week)
+    if run_for_week:
+        st.success(
+            f"✅ **Thời khóa biểu Tuần {chosen_export_week}** — "
+            f"Đã lưu lúc: **{run_for_week['created_at']}** | "
+            f"Seed: **{run_for_week['seed']}** | "
+            f"Tổng số tiết đã xếp: **{run_for_week['cells_total']}**"
+        )
+        try:
+            week_data = export_xlsx(conn, run_id=run_for_week["run_id"])
+            st.download_button(
+                f"📥 Tải file Excel Tuần {chosen_export_week} (.xlsx)",
+                data=week_data,
+                file_name=f"TKB_Tuan_{chosen_export_week}.xlsx",
+                mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                key=f"btn_export_week_{chosen_export_week}",
+                type="primary",
+            )
+        except Exception as e:
+            st.error(f"Không thể xuất file Excel Tuần {chosen_export_week}: {e}")
+    else:
+        st.warning(
+            f"Tuần {chosen_export_week} chưa có thời khóa biểu chính thức được lưu trong cơ sở dữ liệu. "
+            f"Vui lòng vào trang **Xếp TKB** để tạo và lưu thời khóa biểu cho tuần này trước."
+        )
+        if saved_weeks:
+            st.caption(f"Các tuần đã có TKB chính thức: **{', '.join(f'Tuần {w}' for w in saved_weeks)}**")
+
+with tab_export_other:
+    st.markdown("##### 1. Xuất theo bản TKB Nháp hiện tại")
+    st.caption("Xuất toàn bộ ô dữ liệu đang có trong bảng TKB_Nhap hiện thời.")
+    try:
+        data_nhap = export_xlsx(conn, run_id=None)
+        st.download_button(
+            "📤 Tải TKB Nháp hiện tại (.xlsx)",
+            data=data_nhap,
+            file_name="TKB_Nhap_hien_tai.xlsx",
+            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+            key="btn_export_nhap",
+        )
+    except Exception as e:
+        st.error(f"Lỗi xuất TKB Nháp: {e}")
+
+    st.markdown("---")
+    st.markdown("##### 2. Xuất gộp 2 tuần Chẵn & Lẻ (6 sheets)")
+    st.caption("Gộp lần chấp nhận gần nhất của cả tuần Chẵn và tuần Lẻ vào 1 file Excel duy nhất gồm 6 sheet.")
+    try:
+        from io_excel.exporter import export_xlsx_both_parities
+        data_both, warnings = export_xlsx_both_parities(conn)
+        if warnings:
+            for w in warnings:
+                st.warning(w)
+        st.download_button(
+            "📤 Tải TKB Gộp Chẵn - Lẻ (.xlsx)",
+            data=data_both,
+            file_name="TKB_Chan_Le_Gop.xlsx",
+            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+            key="btn_export_both_parities",
+        )
+    except Exception as e:
+        st.caption(f"Xuất gộp chẵn lẻ: {e}")
 
 sidebar_backup_export(conn)
 sidebar_school_switcher()

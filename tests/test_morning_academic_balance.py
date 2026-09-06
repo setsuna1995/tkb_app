@@ -238,5 +238,30 @@ def test_health_score_includes_morning_academic_metrics():
     assert any("quá tải" in rec["message"] for rec in health["recommendations"])
 
 
+def test_cpsat_morning_academic_hard_floor_prevents_zero_academic():
+    """Kiểm tra sàn cứng >= 1: Không bao giờ có buổi sáng >= 3 tiết nào bị 'trắng' môn học thuật (0 tiết)."""
+    import core.scheduler.cpsat_model as cpsat
 
+    academic_counts = [
+        (1, "Toán học", 3),
+        (2, "Ngữ văn", 3),
+    ]
+    # 6 tiết học thuật cho 3 buổi sáng (Thứ 2, 3, 4) -> Mỗi buổi sáng có 4 tiết
+    light_counts = [
+        (3, "Tin học", 2),
+        (4, "Giáo dục thể chất", 2),
+        (5, "Lịch sử và Địa lí", 2),
+    ]
+    inp = _make_scheduling_input_for_balance(academic_counts, light_counts)
 
+    built = cpsat.build_model(inp)
+    assignment = cpsat.solve(built, time_limit_s=5.0)
+    assert assignment is not None, "Phải giải thành công"
+
+    academic_ids = {1, 2}
+    counts = {
+        wd: sum(1 for s in inp.slots if s.ts.weekday == wd and s.ts.session == "S" and assignment.get(s.slot_id) in academic_ids)
+        for wd in (2, 3, 4)
+    }
+    for wd, cnt in counts.items():
+        assert cnt >= 1, f"Sáng thứ {wd} có {cnt} tiết học thuật (< 1), vi phạm sàn cứng!"

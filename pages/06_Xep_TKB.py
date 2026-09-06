@@ -38,7 +38,7 @@ def _format_rule_item(rule_id: str, item: tuple) -> str:
 
 
 
-def _render_saved_tkb(conn, cells: dict, classes: list, subjects: list, teachers: list):
+def _render_saved_tkb(conn, cells: dict, classes: list, subjects: list, teachers: list, key_prefix: str = ""):
     assignments = repo.get_assignments(conn)
     subj_map = {s.subject_id: s.name for s in subjects}
     teach_map = {t.teacher_id: t.name for t in teachers}
@@ -49,12 +49,12 @@ def _render_saved_tkb(conn, cells: dict, classes: list, subjects: list, teachers
         "Chế độ hiển thị thời khóa biểu:",
         ["🏫 Xem theo Lớp học", "👩‍🏫 Xem theo Giáo viên"],
         horizontal=True,
-        key="saved_tkb_view_mode",
+        key=f"{key_prefix}saved_tkb_view_mode",
     )
 
     if view_mode == "🏫 Xem theo Lớp học":
         cls_names = [c.name for c in classes_sorted]
-        c_choice = st.selectbox("Chọn lớp để xem chi tiết:", cls_names, key="saved_cls_pick")
+        c_choice = st.selectbox("Chọn lớp để xem chi tiết:", cls_names, key=f"{key_prefix}saved_cls_pick")
         chosen_cls = next(c for c in classes_sorted if c.name == c_choice)
 
         rows = []
@@ -77,7 +77,7 @@ def _render_saved_tkb(conn, cells: dict, classes: list, subjects: list, teachers
         st.dataframe(pd.DataFrame(rows), hide_index=True, width="stretch")
     else:
         t_names = [t.name for t in teachers_sorted]
-        t_choice = st.selectbox("Chọn giáo viên để xem lịch dạy:", t_names, key="saved_t_pick")
+        t_choice = st.selectbox("Chọn giáo viên để xem lịch dạy:", t_names, key=f"{key_prefix}saved_t_pick")
         chosen_t = next(t for t in teachers_sorted if t.name == t_choice)
 
         t_grid = {}
@@ -230,7 +230,7 @@ with tab_schedule:
     inp = st.session_state.get("last_input")
     scheduled_week = st.session_state.get("last_scheduled_week")
 
-    if result is not None:
+    if result is not None and scheduled_week == chosen_week:
         if not result.success:
             st.error(result.failure_reason)
         else:
@@ -501,7 +501,7 @@ with tab_schedule:
                 if pair_violations:
                     st.error(f"❌ Phát hiện {len(pair_violations)} trường hợp môn 1 cặp liền tiết bị phân bổ sai quy tắc.")
 
-            # Kiểm tra trần tiết dạy/ngày của Giáo viên (Tiêu chí II.2)
+# Kiểm tra trần tiết dạy/ngày của Giáo viên (Tiêu chí II.2)
             max_teacher_day = getattr(inp.config, "max_teacher_periods_per_day", 5)
             day_cap_violations = find_teacher_day_cap_violations(inp.slots, result.assignment, inp.assigned_teacher, max_teacher_day)
             if day_cap_violations:
@@ -618,11 +618,12 @@ with tab_schedule:
                 hide_index=True, width="stretch",
             )
 
-            col_acc1, col_acc2 = st.columns([1, 1])
+            col_acc1, col_acc2, col_acc3 = st.columns([1.2, 1.2, 1])
             with col_acc1:
                 if st.button(
-                    "✅ Chấp nhận và lưu làm lịch chính thức", type="primary",
+                    f"✅ Chấp nhận & Lưu Tuần {scheduled_week}", type="primary",
                     disabled=bool(hard_rule_violations) and not proceed_with_hard_violations,
+                    key="btn_accept_save_fresh_result",
                 ):
                     cells = {
                         (s.class_id, s.ts.weekday, s.ts.session, s.ts.period): result.assignment.get(s.slot_id)
@@ -635,9 +636,10 @@ with tab_schedule:
                                             True, "OK")
                     repo.save_tkb_result(conn, run_id, cells)
                     st.session_state["just_saved_week"] = save_week_no
-                    st.success(f"Đã lưu làm thời khóa biểu chính thức cho Tuần {save_week_no}.")
+                    st.session_state["saved_success_msg"] = f"🎉 Đã lưu thành công thời khóa biểu chính thức cho Tuần {save_week_no}!"
                     st.session_state.pop("last_result", None)
                     st.session_state.pop("last_input", None)
+                    st.session_state.pop("last_scheduled_week", None)
                     st.rerun()
 
             with col_acc2:
@@ -657,6 +659,64 @@ with tab_schedule:
                     )
                 except Exception as ex_fresh:
                     st.caption(f"Xuất Excel: {ex_fresh}")
+
+            with col_acc3:
+                if st.button(f"❌ Hủy phương án này", key="btn_cancel_fresh_result", help=f"Quay lại thời khóa biểu chính thức cũ của Tuần {scheduled_week}"):
+                    st.session_state.pop("last_result", None)
+                    st.session_state.pop("last_input", None)
+                    st.session_state.pop("last_scheduled_week", None)
+                    st.rerun()
+
+    else:
+        # ── Hiển thị Thời khóa biểu chính thức đã lưu của Tuần {chosen_week} (nếu có) ──
+        saved_run = repo.get_latest_run_by_week(conn, chosen_week)
+        saved_success = st.session_state.pop("saved_success_msg", None)
+        if saved_success:
+            st.success(saved_success)
+
+        if saved_run:
+            st.markdown("---")
+            st.success(
+                f"📖 **Thời khóa biểu chính thức đang áp dụng: Tuần {chosen_week}** — "
+                f"Đã lưu lúc: **{saved_run['created_at']}** | "
+                f"Seed: **{saved_run['seed']}** | Tổng số tiết đã xếp: **{saved_run['cells_total']}**\n\n"
+                f"*(Nếu bạn muốn xếp lại lịch mới cho Tuần {chosen_week}, hãy tùy chỉnh ở trên và bấm nút **'🚀 Chạy xếp TKB'**)*"
+            )
+
+            col_s_dl, col_s_nhap = st.columns([1, 1])
+            with col_s_dl:
+                try:
+                    week_xlsx = export_xlsx(conn, run_id=saved_run["run_id"])
+                    st.download_button(
+                        f"📥 Xuất Excel Tuần {chosen_week} (.xlsx)",
+                        data=week_xlsx,
+                        file_name=f"TKB_Tuan_{chosen_week}.xlsx",
+                        mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                        key=f"btn_dl_active_week_{chosen_week}_{saved_run['run_id']}",
+                        type="primary",
+                    )
+                except Exception as ex:
+                    st.error(f"Lỗi xuất Excel: {ex}")
+
+            with col_s_nhap:
+                if st.button(f"🔄 Nạp Tuần {chosen_week} vào TKB Nháp", key=f"btn_load_to_nhap_tab1_{chosen_week}"):
+                    saved_cells = repo.get_tkb_result(conn, saved_run["run_id"])
+                    repo.bulk_replace_tkb_nhap(conn, saved_cells)
+                    st.success(f"Đã nạp thành công TKB Tuần {chosen_week} vào bản nháp!")
+                    st.rerun()
+
+            st.markdown(f"##### Chi tiết Thời khóa biểu Tuần {chosen_week}")
+            saved_cells = repo.get_tkb_result(conn, saved_run["run_id"])
+            _render_saved_tkb(conn, saved_cells, classes, subjects, repo.list_teachers(conn), key_prefix=f"tab1_w{chosen_week}_")
+        else:
+            st.markdown("---")
+            saved_weeks = repo.list_saved_weeks(conn)
+            st.info(
+                f"ℹ️ **Tuần {chosen_week}** chưa có thời khóa biểu chính thức được lưu trong hệ thống.\n\n"
+                f"Nhấn nút **'🚀 Chạy xếp TKB'** ở trên để tạo và lưu thời khóa biểu cho Tuần {chosen_week}."
+            )
+            if saved_weeks:
+                st.caption(f"📌 Các tuần đã có TKB chính thức: **{', '.join(f'Tuần {w}' for w in saved_weeks)}**")
 
     st.write("---")
     with st.expander("📅 Xếp nhiều tuần cùng lúc (tạm thời tắt)", expanded=False):
@@ -952,7 +1012,7 @@ with tab_history:
 
         st.markdown("---")
         saved_cells = repo.get_tkb_result(conn, run_for_week["run_id"])
-        _render_saved_tkb(conn, saved_cells, classes, subjects, repo.list_teachers(conn))
+        _render_saved_tkb(conn, saved_cells, classes, subjects, repo.list_teachers(conn), key_prefix="tab2_")
 
 
 sidebar_backup_export(conn)

@@ -143,7 +143,7 @@ def _fill_result_sheets(ws_raw, ws_tkb, ws_gv, cells, classes, frame_templates, 
                 row_idx += 1
 
 
-def export_xlsx(conn, run_id=None, cells=None) -> bytes:
+def export_xlsx(conn, run_id=None, cells=None, week_no=None) -> bytes:
     classes = repo.list_classes(conn)
     subjects = repo.list_subjects(conn)
     teacher_names = {t.teacher_id: t.name for t in repo.list_teachers(conn)}
@@ -153,7 +153,13 @@ def export_xlsx(conn, run_id=None, cells=None) -> bytes:
     all_class_allowed_cells = repo.get_all_class_allowed_cells(conn)
 
     if cells is None:
-        if run_id is not None:
+        if week_no is not None:
+            w_run = repo.get_latest_run_by_week(conn, week_no)
+            if w_run is not None:
+                cells = repo.get_tkb_result(conn, w_run["run_id"])
+            else:
+                cells = repo.get_tkb_nhap(conn)
+        elif run_id is not None:
             cells = repo.get_tkb_result(conn, run_id)
         else:
             cells = repo.get_tkb_nhap(conn)
