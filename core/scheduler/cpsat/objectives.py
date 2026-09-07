@@ -177,8 +177,12 @@ def _add_objective(built: CpSatModel) -> None:
 
     # 2. II.3 Thiếu sáng bắt buộc
     all_mand_strict = sorted(set(mand_morns) | set(strict_morns))
+    teachers_by_id = {t.teacher_id: t for t in inp.teachers}
     for t in teachers:
+        t_obj = teachers_by_id.get(t)
         for wd in all_mand_strict:
+            if t_obj and t_obj.pinned_full_day_off == wd:
+                continue
             is_busy = _is_teacher_busy_morning(inp, t, wd)
             is_strict = (wd in strict_morns and t not in bgh_ids and not is_busy)
             is_mand = (wd in mand_morns and wd not in strict_morns and load[t] >= min_mand_load and not is_busy)

@@ -239,6 +239,8 @@ def _presolve_capacity_screening(built: CpSatModel) -> set[str]:
         for t in built.inp.teachers:
             if t.teacher_id in bgh_ids:
                 continue
+            if t.pinned_full_day_off == wd:
+                continue
             if _is_teacher_busy_morning(built.inp, t.teacher_id, wd):
                 continue
             is_strict = (wd in strict_morns)

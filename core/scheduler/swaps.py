@@ -550,10 +550,11 @@ def _repair_teacher_missing_mandatory_mornings(inp, state: _State, role_index,
         # Sáng "strict" (mọi GV phải có tiết) được sửa cho MỌI GV trừ nhóm miễn trừ;
         # các sáng bắt buộc thường vẫn chỉ sửa cho GV đủ tải. Nếu bỏ qua vế strict ở
         # đây thì luật đó chỉ đếm được vi phạm chứ không có gì cố đạt nó (2026-09-04).
+        pinned_day_offs = {t.teacher_id: t.pinned_full_day_off for t in getattr(inp, "teachers", ()) if getattr(t, "pinned_full_day_off", None) is not None}
         missing_pairs = [
             (tid, wd)
             for tid, total in teacher_totals.items()
-            if tid > 0
+            if tid > 0 and pinned_day_offs.get(tid) != wd
             for wd in set(mandatory_mornings) | set(strict_weekdays)
             if len(state.teacher_session_periods.get((tid, wd, "S"), [])) == 0
             and ((wd in strict_weekdays and tid not in exempt_teacher_ids)

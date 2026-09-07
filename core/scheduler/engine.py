@@ -21,12 +21,14 @@ def _check_hard_post_generation_rules(inp: SchedulingInput, state: _State, confi
     violated = []
     total = 0
     mand_morns = getattr(config, "mandatory_morning_weekdays", (2, 5, 6))
+    pinned_day_offs = {t.teacher_id: t.pinned_full_day_off for t in getattr(inp, "teachers", ()) if getattr(t, "pinned_full_day_off", None) is not None}
     missing = _count_teacher_missing_mandatory_mornings(
         inp.slots, state.assigned, state.slot_teacher, mand_morns,
         min_weekly_periods=getattr(config, "min_weekly_periods_for_mandatory_morning", 10),
         strict_weekdays=getattr(config, "strict_morning_weekdays", ()) or (),
         exempt_teacher_ids=frozenset(t.teacher_id for t in inp.teachers if is_bgh(t)),
         ban_busy=getattr(inp, "ban_busy", None),
+        pinned_day_offs=pinned_day_offs,
     )
     if missing > 0:
         violated.append("II.3")

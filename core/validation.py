@@ -305,7 +305,8 @@ def find_teacher_missing_mandatory_morning_violations(slots: list, assignment: d
                                                         min_weekly_periods: int = 10,
                                                         strict_weekdays: tuple = (),
                                                         exempt_teacher_ids: frozenset = frozenset(),
-                                                        ban_busy: set = None) -> list:
+                                                        ban_busy: set = None,
+                                                        pinned_day_offs: dict = None) -> list:
     """Returns [(teacher_id, weekday), ...] for teachers at/above min_weekly_periods
     who end up with zero periods on a mandatory morning -- Tiêu chí II.3: catches an
     accidental empty forbidden morning beyond the teacher's one designated off-slot.
@@ -313,7 +314,9 @@ def find_teacher_missing_mandatory_morning_violations(slots: list, assignment: d
     so this check and the engine's post-generation gate (core/scheduler/engine.py)
     never disagree -- INCLUDING the threshold, which callers must pass through from
     config.min_weekly_periods_for_mandatory_morning (2026-09-04).
-    ban_busy: tập các ô GV đã tích bận (2026-09-06); GV đã tích bận toàn bộ sáng được miễn trừ."""
+    ban_busy: tập các ô GV đã tích bận (2026-09-06); GV đã tích bận toàn bộ sáng được miễn trừ.
+    pinned_day_offs: dict mapping teacher_id -> pinned_full_day_off; GV được BGH duyệt
+    nghỉ trọn ngày đó được miễn trừ không tính vi phạm sáng bắt buộc."""
     teacher_morns = defaultdict(lambda: defaultdict(int))
     teacher_totals = defaultdict(int)
     for slot in slots:
@@ -332,6 +335,8 @@ def find_teacher_missing_mandatory_morning_violations(slots: list, assignment: d
     for teacher_id, total in teacher_totals.items():
         if teacher_id not in exempt_teacher_ids:
             for wd in strict_weekdays:
+                if pinned_day_offs and pinned_day_offs.get(teacher_id) == wd:
+                    continue
                 if teacher_morns[teacher_id][wd] == 0:
                     if ban_busy and _is_teacher_busy_on_morning(teacher_id, wd, slots, assigned_teacher, ban_busy):
                         continue
@@ -339,6 +344,8 @@ def find_teacher_missing_mandatory_morning_violations(slots: list, assignment: d
         if total >= min_weekly_periods:
             for wd in mandatory_mornings:
                 if wd in strict_weekdays:
+                    continue
+                if pinned_day_offs and pinned_day_offs.get(teacher_id) == wd:
                     continue
                 if teacher_morns[teacher_id][wd] == 0:
                     if ban_busy and _is_teacher_busy_on_morning(teacher_id, wd, slots, assigned_teacher, ban_busy):
@@ -729,6 +736,7 @@ def compute_tkb_health_score(inp: SchedulingInput, assignment: dict) -> dict:
     compliance_penalty += len(split_days) * 15.0
 
     # 3.5 Thiếu sáng bắt buộc (II.3)
+    pinned_day_offs = {t.teacher_id: t.pinned_full_day_off for t in getattr(inp, "teachers", ()) if getattr(t, "pinned_full_day_off", None) is not None}
     missing_morning = find_teacher_missing_mandatory_morning_violations(
         inp.slots, assignment, inp.assigned_teacher,
         getattr(inp.config, "mandatory_morning_weekdays", (2, 5, 6)),
@@ -736,6 +744,7 @@ def compute_tkb_health_score(inp: SchedulingInput, assignment: dict) -> dict:
         getattr(inp.config, "strict_morning_weekdays", ()) or (),
         bgh_ids,
         ban_busy=getattr(inp, "ban_busy", None),
+        pinned_day_offs=pinned_day_offs,
     )
     compliance_penalty += min(20.0, len(missing_morning) * 4.0)
 

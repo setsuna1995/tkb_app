@@ -46,7 +46,7 @@ def _assign_off_slots(teacher_ids: set, teachers_by_id: dict, rng: random.Random
         pinned_weekdays = set()
         if t and t.pinned_full_day_off is not None:
             wd = t.pinned_full_day_off
-            if wd in WEEKDAYS and (wd, "S") not in forbidden and (wd, "C") not in forbidden:
+            if wd in WEEKDAYS:
                 pinned_cells |= {(wd, "S"), (wd, "C")}
                 pinned_weekdays.add(wd)
         if t and t.pinned_afternoon_off is not None:

@@ -85,9 +85,8 @@ def _add_off_day_constraints(built: CpSatModel, vars_by_teacher_session: dict) -
         pinned_weekdays = set()
         if teacher and teacher.pinned_full_day_off is not None:
             wd = teacher.pinned_full_day_off
-            if (wd, "S") not in forbidden and (wd, "C") not in forbidden:
-                pinned |= {(wd, "S"), (wd, "C")}
-                pinned_weekdays.add(wd)
+            pinned |= {(wd, "S"), (wd, "C")}
+            pinned_weekdays.add(wd)
         if teacher and teacher.pinned_afternoon_off is not None:
             wd = teacher.pinned_afternoon_off
             if (wd, "C") not in forbidden and wd not in pinned_weekdays:
@@ -103,7 +102,7 @@ def _add_off_day_constraints(built: CpSatModel, vars_by_teacher_session: dict) -
 
         off_vars = []
         for (wd, sess) in all_wd_sess:
-            if (wd, sess) in forbidden:
+            if (wd, sess) in forbidden and (wd, sess) not in pinned:
                 continue
             off_var = m.NewBoolVar(f"off_t{teacher_id}_wd{wd}_{sess}")
             off_vars.append(off_var)
