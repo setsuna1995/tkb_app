@@ -16,6 +16,7 @@ from core.rules_registry import RULES
 from data import repository as repo
 from io_excel.exporter import export_xlsx
 from ui_common import get_conn, require_auth, require_school, sidebar_backup_export, sidebar_school_switcher
+from ui_theme import render_callout, render_page_header, render_status_badge
 
 
 def _format_rule_item(rule_id: str, item: tuple) -> str:
@@ -107,17 +108,29 @@ def _render_saved_tkb(conn, cells: dict, classes: list, subjects: list, teachers
 require_auth()
 school_slug = require_school()
 conn = get_conn(school_slug)
-st.title("Xếp thời khóa biểu")
+
+render_page_header(
+    title="Xếp Thời Khóa Biểu & Xuất Excel Theo Tuần",
+    subtitle="Tối ưu hóa toàn trường bằng bộ giải Google OR-Tools CP-SAT & Xuất bảng biểu chuẩn Bộ GD&ĐT",
+    badge="Trung tâm xếp lịch",
+    icon="🚀",
+)
 
 classes = repo.list_classes(conn)
 subjects = repo.list_subjects(conn)
 if not classes or not subjects:
-    st.info("Chưa có lớp/môn. Vào trang Khai báo hoặc Nhập/Xuất Excel trước.")
+    render_callout(
+        "Chưa có dữ liệu Lớp học hoặc Môn học. Vào trang **Khai báo** hoặc **Nhập / Xuất Excel** trước.",
+        level="warning",
+        title="Thiếu dữ liệu nền tảng",
+    )
+    sidebar_backup_export(conn)
+    sidebar_school_switcher()
     st.stop()
 
 tab_schedule, tab_history = st.tabs([
     "🚀 Xếp Thời khóa biểu mới",
-    "📖 Xem lại & Xuất Excel TKB các tuần (1 - 35)",
+    "📥 Xuất Excel & Xem Lại TKB Các Tuần (1 - 35)",
 ])
 
 with tab_schedule:
@@ -139,8 +152,29 @@ with tab_schedule:
         key="sched_week_select",
     )
     parity = "C" if chosen_week % 2 == 0 else "L"
-    st.write(f"Tuần đang xếp: **Tuần {chosen_week}**, seed = {seed or '(ngẫu nhiên mỗi lần chạy)'}")
-    st.caption(f"🎯 **Định lượng:** Tự động áp dụng phân bổ số tiết định lượng theo chuẩn của **Tuần {chosen_week}**.")
+
+    # Hàng thông tin tuần & Nút xuất nhanh Excel nếu tuần này đã có kết quả
+    col_w_head1, col_w_head2 = st.columns([3, 2])
+    with col_w_head1:
+        st.write(f"Tuần đang xếp: **Tuần {chosen_week}**, seed = {seed or '(ngẫu nhiên mỗi lần chạy)'}")
+        st.caption(f"🎯 **Định lượng:** Tự động áp dụng phân bổ số tiết định lượng theo chuẩn của **Tuần {chosen_week}**.")
+    with col_w_head2:
+        run_now = repo.get_latest_run_by_week(conn, chosen_week)
+        if run_now:
+            try:
+                instant_xlsx = export_xlsx(conn, run_id=run_now["run_id"])
+                st.download_button(
+                    f"📥 Xuất ngay Excel Tuần {chosen_week} (.xlsx)",
+                    data=instant_xlsx,
+                    file_name=f"TKB_Tuan_{chosen_week}.xlsx",
+                    mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                    key=f"btn_quick_export_top_{chosen_week}",
+                    type="primary",
+                    use_container_width=True,
+                )
+            except Exception:
+                pass
+
 
     quota_view = repo.get_teacher_quota_view(conn, week_no=chosen_week)
     over = [q for q in quota_view if q["cap"] > 0 and q["load"] > q["cap"]]
