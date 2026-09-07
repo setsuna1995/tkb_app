@@ -4,14 +4,24 @@ import streamlit as st
 from core import frame as frame_mod
 from core import setup_status
 from data import repository as repo
-from ui_common import get_conn, require_auth, require_school, sidebar_backup_export, sidebar_fixed_rules, \
-    sidebar_school_switcher
+from ui_common import (
+    get_conn,
+    require_auth,
+    require_school,
+    sidebar_backup_export,
+    sidebar_fixed_rules,
+    sidebar_school_switcher,
+)
+from ui_theme import (
+    render_callout,
+    render_kpi_row,
+    render_page_header,
+    render_status_badge,
+)
 
 require_auth()
 school_slug = require_school()
 conn = get_conn(school_slug)
-
-st.title("Xếp Thời Khóa Biểu")
 
 seed, parity = repo.get_tuan_config(conn)
 classes = repo.list_classes(conn)
@@ -21,13 +31,12 @@ config = repo.get_scheduling_config(conn)
 saved_weeks = repo.list_saved_weeks(conn)
 current_week = saved_weeks[0] if saved_weeks else 1
 
-col1, col2, col3, col4 = st.columns(4)
-col1.metric("Số lớp", len(classes))
-col2.metric("Số môn", len(subjects))
-col3.metric("Số giáo viên", len(teachers))
-col4.metric("Tuần đang xếp", f"Tuần {current_week}")
-
-st.subheader("Tiến độ thiết lập")
+render_page_header(
+    title="Trung Tâm Điều Hành Thời Khóa Biểu",
+    subtitle="Hệ thống xếp lịch tự động & kiểm soát 18 tiêu chí chuyên môn THCS / THPT",
+    badge=f"Tuần {current_week}",
+    icon="🏫",
+)
 
 assignments = repo.get_assignments(conn)
 ppw = repo.get_periods_per_week(conn)
@@ -47,6 +56,15 @@ for c in classes:
 
 num_teachers_with_busy = sum(1 for t in teachers if repo.get_teacher_busy_cells(conn, t.teacher_id))
 
+render_kpi_row([
+    {"title": "Số lớp học", "value": len(classes), "subtitle": "Đã thiết lập khung tiết", "icon": "👥", "variant": "primary"},
+    {"title": "Số môn học", "value": len(subjects), "subtitle": "Phân loại chuyên môn", "icon": "📚", "variant": "info"},
+    {"title": "Số giáo viên", "value": len(teachers), "subtitle": f"{num_teachers_with_busy} GV báo bận", "icon": "👨‍🏫", "variant": "warning"},
+    {"title": "Tuần xếp lịch", "value": f"Tuần {current_week}", "subtitle": f"Seed: {seed}", "icon": "🗓️", "variant": "success"},
+])
+
+st.markdown("### 📋 Tiến độ chuẩn bị dữ liệu")
+
 setup_steps = [
     ("Khai báo", setup_status.check_khai_bao(len(classes), len(subjects), len(teachers)), "01_Khai_bao"),
     ("Phân công", setup_status.check_phan_cong(ppw, assignments), "02_PhanCong"),
@@ -54,61 +72,60 @@ setup_steps = [
     ("Khung tiết", setup_status.check_khung_tiet(class_totals, class_quota_by_parity), "05_Khung_tiet"),
     ("GV bận", setup_status.check_gv_ban(len(teachers), num_teachers_with_busy), "04_GV_Ban"),
 ]
+
 status_df = pd.DataFrame([
-    {"Bước": label, "Trạng thái": "✅" if status.ok else "⚠️", "Ghi chú": status.detail}
+    {"Bước": label, "Trạng thái": "✅ Đạt chuẩn" if status.ok else "⚠️ Cần chú ý", "Ghi chú": status.detail}
     for label, status, _page in setup_steps
 ])
-st.dataframe(status_df, hide_index=True, width="stretch")
+st.dataframe(status_df, hide_index=True, use_container_width=True)
 
 link_cols = st.columns(len(setup_steps))
 for col, (label, _status, page) in zip(link_cols, setup_steps):
-    col.page_link(f"pages/{page}.py", label=f"→ {label}")
+    col.page_link(f"pages/{page}.py", label=f"Đi đến {label} →", use_container_width=True)
 
 if len(classes) == 0:
-    st.info(
-        "Chưa có dữ liệu. Vào trang **Nhập / Xuất Excel** để nhập từ file .xlsm hiện có, "
-        "hoặc trang **Khai báo** để nhập tay từ đầu."
+    render_callout(
+        "Chưa có dữ liệu trường học. Vào trang **Nhập / Xuất Excel** để nhập file .xlsm mẫu, "
+        "hoặc vào trang **Khai báo** để nhập dữ liệu Lớp / Môn / Giáo viên từ đầu.",
+        level="info",
+        title="Dữ liệu ban đầu",
     )
 
-st.divider()
-st.subheader("Thời khóa biểu gần nhất")
+st.markdown("### 🕘 Thời khóa biểu gần nhất")
 latest_run = repo.get_latest_run(conn)
 if latest_run:
-    st.write(
-        f"Lần xếp gần nhất: **{latest_run['created_at']}** "
-        f"(tuần {latest_run.get('week_no') or '1'}, seed = {latest_run['seed']}, "
-        f"{latest_run['cells_total']} ô)"
+    render_callout(
+        f"Lần xếp gần nhất vào lúc **{latest_run['created_at']}** (Tuần {latest_run.get('week_no') or '1'}, "
+        f"Seed = {latest_run['seed']}, tổng cộng **{latest_run['cells_total']}** ô tiết học đã được phân bổ thành công).",
+        level="success",
+        title="Trạng thái Thời khóa biểu",
     )
 else:
-    st.info("Chưa có lần xếp thời khóa biểu nào.")
+    render_callout(
+        "Chưa có lượt xếp thời khóa biểu nào. Hãy vào trang **Xếp TKB tự động** để bắt đầu xếp lịch.",
+        level="info",
+        title="Chưa có dữ liệu TKB",
+    )
 
 if teachers:
     quota_view = repo.get_teacher_quota_view(conn, week_no=current_week)
     over = [q for q in quota_view if q["cap"] > 0 and q["over"] > 0]
     under = [q for q in quota_view if q["under"] > 0]
     if over:
-        st.warning(
-            "Có giáo viên vượt trần định mức (> trần chuẩn): "
-            + ", ".join(f"{q['name']} (+{round(q['over'], 1):g}t)" for q in over)
+        render_callout(
+            "Phát hiện giáo viên vượt trần định mức (> trần chuẩn): "
+            + ", ".join(f"**{q['name']}** (+{round(q['over'], 1):g}t)" for q in over),
+            level="warning",
+            title="Cảnh báo định mức vượt trần",
         )
     if under:
         min_floor = repo.get_min_floor(conn)
-        st.warning(
-            f"Có giáo viên dưới sàn định mức tối thiểu (< sàn chuẩn {min_floor}t): "
-            + ", ".join(f"{q['name']} (thiếu {round(q['under'], 1):g}t)" for q in under)
+        render_callout(
+            f"Phát hiện giáo viên dưới sàn định mức tối thiểu (< sàn chuẩn {min_floor}t): "
+            + ", ".join(f"**{q['name']}** (thiếu {round(q['under'], 1):g}t)" for q in under),
+            level="warning",
+            title="Cảnh báo định mức thiếu sàn",
         )
-
-st.markdown(
-    """
-Dùng thanh điều hướng bên trái để:
-1. **Thiết lập dữ liệu** — khai báo lớp / môn / giáo viên, phân công, định mức, GV bận, khung tiết
-2. **Xếp & sửa thời khóa biểu** — chạy xếp tự động, sửa tay, xem lịch sử tuần
-3. **Dữ liệu** — nhập / xuất Excel
-
-**Sắp có**: tra cứu TKB theo từng giáo viên, phân công dạy thay khi GV nghỉ đột xuất
-(xem `reports/tkb-app-review-2026-07-09.md` — mục #12, #13).
-"""
-)
 
 sidebar_backup_export(conn)
 sidebar_fixed_rules(conn)
