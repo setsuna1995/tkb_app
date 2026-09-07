@@ -499,7 +499,9 @@ def _add_block_constraints(built: CpSatModel) -> None:
 
 
 def _is_teacher_busy_morning(inp: SchedulingInput, teacher_id: int, weekday: int) -> bool:
-    """Kiểm tra xem GV có bị bận toàn bộ các ô sáng thứ `weekday` hay không."""
+    """Kiểm tra xem GV có bị bận buổi sáng thứ `weekday` hay không.
+    Nếu số tiết rảnh khả dụng của GV trong buổi sáng đó < 2 tiết, coi như bận
+    (vì theo II.4 không thể xếp buổi 1 tiết cho GV)."""
     if not inp.ban_busy:
         return False
     morn_slots = [s for s in inp.slots if s.ts.weekday == weekday and s.ts.session == "S"]
@@ -511,7 +513,7 @@ def _is_teacher_busy_morning(inp: SchedulingInput, teacher_id: int, weekday: int
         if any(eff.get((subj.subject_id, s.class_id)) == teacher_id for subj in inp.subjects)
     ]
     if not candidate_slots:
-        return any((teacher_id, s.ts.ts_id) in inp.ban_busy for s in morn_slots)
-    has_busy = any((teacher_id, s.ts.ts_id) in inp.ban_busy for s in candidate_slots)
-    all_busy = all((teacher_id, s.ts.ts_id) in inp.ban_busy for s in candidate_slots)
-    return has_busy and all_busy
+        free_periods = {s.ts.period for s in morn_slots if (teacher_id, s.ts.ts_id) not in inp.ban_busy}
+        return len(free_periods) < 2
+    free_periods = {s.ts.period for s in candidate_slots if (teacher_id, s.ts.ts_id) not in inp.ban_busy}
+    return len(free_periods) < 2

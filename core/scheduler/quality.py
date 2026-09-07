@@ -142,10 +142,10 @@ def _is_teacher_busy_on_morning_quality(teacher_id: int, wd: int, slots: list[Sl
     classes_for_teacher = {s.class_id for s in slots if slot_teacher.get(s.slot_id) == teacher_id}
     candidate_slots = [s for s in morn_slots if s.class_id in classes_for_teacher]
     if not candidate_slots:
-        return any((teacher_id, s.ts.ts_id) in ban_busy for s in morn_slots)
-    has_busy = any((teacher_id, s.ts.ts_id) in ban_busy for s in candidate_slots)
-    all_busy = all((teacher_id, s.ts.ts_id) in ban_busy for s in candidate_slots)
-    return has_busy and all_busy
+        free_periods = {s.ts.period for s in morn_slots if (teacher_id, s.ts.ts_id) not in ban_busy}
+        return len(free_periods) < 2
+    free_periods = {s.ts.period for s in candidate_slots if (teacher_id, s.ts.ts_id) not in ban_busy}
+    return len(free_periods) < 2
 
 
 def _count_teacher_missing_mandatory_mornings(slots: list[Slot], assigned: dict, slot_teacher: dict,
