@@ -10,18 +10,22 @@ from ui_common import (
     get_conn, require_auth, require_school, sidebar_backup_export,
     sidebar_fixed_rules, sidebar_school_switcher,
 )
+from ui_theme import render_callout, render_page_header
 
 require_auth()
 school_slug = require_school()
 conn = get_conn(school_slug)
-st.title("⚙️ Cấu hình xếp Thời khóa biểu")
-st.caption(
-    "Tuỳ biến toàn diện các ràng buộc sư phạm, tiêu chuẩn Hội đồng Sư phạm (HĐSP), "
-    "hiện diện giáo viên và thuật toán tối ưu hóa toàn cục CP-SAT."
+
+render_page_header(
+    title="Cấu Hình Ràng Buộc & Tiêu Chuẩn Sư Phạm",
+    subtitle="Hiệu chỉnh 18 tiêu chí chuyên môn, phân bổ hiện diện giáo viên & tham số bộ giải CP-SAT",
+    badge="Bộ giải CP-SAT",
+    icon="⚙️",
 )
 
 config = repo.get_scheduling_config(conn)
 max_p = frame_mod.MAX_PERIODS_PER_SESSION
+
 all_subjects = repo.list_subjects(conn)
 subject_names = {s.subject_id: s.name for s in all_subjects}
 all_teachers = repo.list_teachers(conn)

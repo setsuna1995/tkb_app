@@ -3,25 +3,37 @@ import streamlit as st
 
 from core import frame as frame_mod
 from data import repository as repo
-from ui_common import get_conn, require_auth, require_school, sidebar_backup_export, sidebar_fixed_rules, \
-    sidebar_school_switcher
+from ui_common import (
+    get_conn, require_auth, require_school, sidebar_backup_export,
+    sidebar_fixed_rules, sidebar_school_switcher,
+)
+from ui_theme import render_callout, render_page_header
 
 require_auth()
 school_slug = require_school()
 conn = get_conn(school_slug)
 config = repo.get_scheduling_config(conn)
 
-st.title("Khung tiết (Cho phép xếp tiết)")
-st.caption(
-    "Đánh dấu các tiết học ĐƯỢC PHÉP xếp thời khóa biểu cho lớp. "
-    "Mặc định các tiết hợp lệ theo khung chuẩn đã được tích sẵn. "
-    "Bạn có thể bỏ tích để cấm thuật toán xếp tiết vào vị trí đó (ví dụ: ngày nghỉ, tiết lệch)."
+classes = repo.list_classes(conn)
+
+render_page_header(
+    title="Khung Tiết Học Theo Lớp",
+    subtitle="Cấu hình các ô tiết học được phép xếp lịch giảng dạy của từng lớp trong tuần",
+    badge=f"{len(classes)} lớp",
+    icon="🗓️",
 )
 
-classes = repo.list_classes(conn)
 if not classes:
-    st.info("Chưa có lớp. Vào trang **Khai báo** trước.")
+    render_callout(
+        "Chưa có danh sách lớp học. Hãy vào trang **Khai báo** để nhập danh sách lớp trước.",
+        level="warning",
+        title="Thiếu dữ liệu",
+    )
+    sidebar_backup_export(conn)
+    sidebar_fixed_rules(conn)
+    sidebar_school_switcher()
     st.stop()
+
 
 class_names = [c.name for c in classes]
 class_by_name = {c.name: c.class_id for c in classes}

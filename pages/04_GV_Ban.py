@@ -2,23 +2,36 @@ import pandas as pd
 import streamlit as st
 
 from data import repository as repo
-from ui_common import get_conn, require_auth, require_school, sidebar_backup_export, sidebar_fixed_rules, \
-    sidebar_school_switcher
+from ui_common import (
+    get_conn, require_auth, require_school, sidebar_backup_export,
+    sidebar_fixed_rules, sidebar_school_switcher,
+)
+from ui_theme import render_callout, render_page_header
 
 require_auth()
 school_slug = require_school()
 conn = get_conn(school_slug)
 
-st.title("Giáo viên bận / Không xếp tiết (GV_Bận)")
-st.caption(
-    "Đánh dấu các tiết học không được xếp thời khóa biểu cho giáo viên. "
-    "Bạn có thể tích chọn trực tiếp trên lưới tiết học, dùng công cụ chọn nhanh, hoặc chỉnh sửa bảng quy tắc."
+teachers = repo.list_teachers(conn)
+
+render_page_header(
+    title="Giáo Viên Bận / Không Xếp Tiết",
+    subtitle="Thiết lập các khung giờ bận việc riêng — Ràng buộc cứng thuật toán tuyệt đối tuân thủ",
+    badge=f"{len(teachers)} giáo viên",
+    icon="🚫",
 )
 
-teachers = repo.list_teachers(conn)
 if not teachers:
-    st.info("Chưa có giáo viên. Vào trang **Khai báo** trước.")
+    render_callout(
+        "Chưa có danh sách giáo viên. Hãy vào trang **Khai báo** để nhập danh sách giáo viên trước.",
+        level="warning",
+        title="Thiếu dữ liệu",
+    )
+    sidebar_backup_export(conn)
+    sidebar_fixed_rules(conn)
+    sidebar_school_switcher()
     st.stop()
+
 
 name_by_id = {t.teacher_id: t.name for t in teachers}
 id_by_name = {t.name: t.teacher_id for t in teachers}

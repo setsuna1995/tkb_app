@@ -9,18 +9,33 @@ from ui_common import (
     get_conn, require_auth, require_school, sidebar_backup_export,
     sidebar_fixed_rules, sidebar_school_switcher,
 )
+from ui_theme import render_callout, render_page_header
 
 require_auth()
 school_slug = require_school()
 conn = get_conn(school_slug)
-st.title("Định mức tiết/tuần & Định mức giáo viên")
 
 classes = repo.list_classes(conn)
 subjects = repo.list_subjects(conn)
 
+render_page_header(
+    title="Định Mức Tiết / Tuần & Tải Giáo Viên",
+    subtitle="Thiết lập số tiết giảng dạy 35 tuần năm học & kiểm soát định mức chuẩn theo chức vụ",
+    badge="35 tuần năm học",
+    icon="📊",
+)
+
 if not classes or not subjects:
-    st.info("Chưa có lớp/môn. Vào trang Khai báo hoặc Nhập/Xuất Excel trước.")
+    render_callout(
+        "Chưa có dữ liệu Lớp học hoặc Môn học. Hãy vào trang **Khai báo** hoặc **Nhập / Xuất Excel** trước.",
+        level="warning",
+        title="Thiếu dữ liệu nền tảng",
+    )
+    sidebar_backup_export(conn)
+    sidebar_fixed_rules(conn)
+    sidebar_school_switcher()
     st.stop()
+
 
 # ── Khối Nạp nhanh dữ liệu Định lượng cả năm ──
 with st.expander("📥 Nạp định lượng số tiết 35 tuần từ file Excel", expanded=False):
