@@ -14,6 +14,7 @@ from core.scheduler.constants import (
     TEACHER_GAP_EXCESS_PENALTY,
     TEACHER_GAP_SECOND_PENALTY,
     TEACHER_LONE_SESSION_SPREAD_PENALTY,
+    TEACHER_SPLIT_DAY_PENALTY,
     TEACHER_STRICT_MORNING_MISS_PENALTY,
     MORNING_ACADEMIC_UNDERLOAD_SOFT_PENALTY,
 )
@@ -420,7 +421,7 @@ def _add_objective(built: CpSatModel) -> None:
         diff_weight = max(0, TEACHER_STRICT_MORNING_MISS_PENALTY - 800)
         obj_terms.append(diff_weight * sum(strict_morning_terms))
     if penalty_terms.get("II.8"):
-        obj_terms.append(700 * sum(penalty_terms["II.8"]))
+        obj_terms.append(TEACHER_SPLIT_DAY_PENALTY * sum(penalty_terms["II.8"]))
     if lone_spread_terms:
         obj_terms.append(TEACHER_LONE_SESSION_SPREAD_PENALTY * sum(lone_spread_terms))
     if lone_sess_terms:

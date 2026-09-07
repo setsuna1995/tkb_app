@@ -514,15 +514,15 @@ def test_teacher_pinned_full_day_and_extra_afternoon_off():
 
 
 def test_pinned_off_conflicts_with_forbidden_are_dropped():
-    # Thứ 6 nằm trọn trong FORBIDDEN_OFF_CELLS mặc định (sáng VÀ chiều) -> pin bị bỏ qua,
-    # GV vẫn nhận đủ off_slot_count buổi nghỉ ngẫu nhiên như GV thường (không crash, không kẹt).
+    # Khi BGH đã duyệt ghim nghỉ trọn ngày (pinned_full_day_off=6), lệnh này được ưu tiên
+    # ghi đè FORBIDDEN_OFF_CELLS (Hướng A theo phê duyệt BGH).
     rng = random.Random(1)
     teachers_by_id = {1: Teacher(1, "GV", pinned_full_day_off=6)}
     for _ in range(50):
         offs, _shortfall = sched._assign_off_slots({1}, teachers_by_id, rng, off_slot_count=1)
-        assert (6, "S") not in offs[1]
-        assert (6, "C") not in offs[1]
-        assert len(offs[1]) == 1
+        assert (6, "S") in offs[1]
+        assert (6, "C") in offs[1]
+        assert len(offs[1]) >= 2
 
 
 def test_off_slots_unchanged_when_no_override_or_pins():

@@ -554,9 +554,10 @@ def _repair_teacher_missing_mandatory_mornings(inp, state: _State, role_index,
         missing_pairs = [
             (tid, wd)
             for tid, total in teacher_totals.items()
-            if tid > 0 and pinned_day_offs.get(tid) != wd
+            if tid > 0
             for wd in set(mandatory_mornings) | set(strict_weekdays)
-            if len(state.teacher_session_periods.get((tid, wd, "S"), [])) == 0
+            if pinned_day_offs.get(tid) != wd
+            and len(state.teacher_session_periods.get((tid, wd, "S"), [])) == 0
             and ((wd in strict_weekdays and tid not in exempt_teacher_ids)
                  or (wd in mandatory_mornings and total >= min_weekly_periods))
         ]

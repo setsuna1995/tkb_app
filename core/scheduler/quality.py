@@ -9,6 +9,7 @@ from core.scheduler.constants import (
     TEACHER_GAP_EXCESS_PENALTY,
     TEACHER_GAP_SECOND_PENALTY,
     TEACHER_LONE_SESSION_SPREAD_PENALTY,
+    TEACHER_SPLIT_DAY_PENALTY,
 )
 
 
@@ -308,7 +309,7 @@ def _teacher_quality_penalty(slots: list[Slot], assigned: dict, slot_teacher: di
         # in one day for two periods. The school wants the opposite, so a split day
         # must cost more than the 2x250 lone-day charge it avoids.
         penalty += _count_teacher_split_sessions(slots, assigned, slot_teacher, min_weekly_periods=min_lone_load,
-                                                  exempt_teacher_ids=lone_exempt) * 700
+                                                  exempt_teacher_ids=lone_exempt) * TEACHER_SPLIT_DAY_PENALTY
         penalty += _count_teacher_lone_days(slots, assigned, slot_teacher, min_weekly_periods=min_lone_load,
                                              exempt_teacher_ids=lone_exempt) * 250
         penalty += _count_teacher_concentrated_lone_sessions(

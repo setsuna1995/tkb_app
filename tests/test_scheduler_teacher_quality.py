@@ -54,10 +54,14 @@ def test_mandatory_morning_weekdays_strictly_enforced():
         forbidden_off_cells=config.forbidden_off_cells,
         mandatory_morning_weekdays=config.mandatory_morning_weekdays,
     )
-    for tid, cells in offs.items():
-        assert (2, "S") not in cells, f"Teacher {tid} was assigned off on Monday morning!"
-        assert (5, "S") not in cells, f"Teacher {tid} was assigned off on Thursday morning!"
-        assert (6, "S") not in cells, f"Teacher {tid} was assigned off on Friday morning!"
+    # GV 1 và GV 2 được BGH duyệt ghim nghỉ trọn ngày (pinned_full_day_off) nên được ghi đè
+    assert (2, "S") in offs[1] and (2, "C") in offs[1]
+    assert (5, "S") in offs[2] and (5, "C") in offs[2]
+    # GV 3 và GV 4 không ghim nghỉ sáng bắt buộc thì tuyệt đối tuân thủ không có lịch nghỉ vào sáng bắt buộc
+    for tid in (3, 4):
+        assert (2, "S") not in offs[tid], f"Teacher {tid} was assigned off on Monday morning!"
+        assert (5, "S") not in offs[tid], f"Teacher {tid} was assigned off on Thursday morning!"
+        assert (6, "S") not in offs[tid], f"Teacher {tid} was assigned off on Friday morning!"
 
 
 def test_avoid_teacher_gaps_penalty():

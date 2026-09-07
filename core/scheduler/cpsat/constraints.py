@@ -212,10 +212,9 @@ def _add_subject_constraints(built: CpSatModel) -> None:
 
         def _get_eff_max_heavy(cid, sess):
             base_max = max(getattr(config, "max_heavy_per_session", 3), config.max_heavy_consecutive)
-            if sess == "S":
-                must_all_in_morning = (cid not in class_has_afternoon) or is_heavy_morning_only
+            if sess == "S" and is_heavy_morning_only:
                 n_morns = len(class_distinct_mornings.get(cid, ()))
-                if must_all_in_morning and n_morns > 0:
+                if n_morns > 0:
                     min_needed = (class_heavy_need[cid] + n_morns - 1) // n_morns
                     return max(base_max, min_needed)
             return base_max
@@ -225,7 +224,8 @@ def _add_subject_constraints(built: CpSatModel) -> None:
             m.Add(sum(vs) <= eff_max)
 
         for (cid, _wd, sess), period_vars in vars_by_session_period.items():
-            consec_limit = _get_eff_max_heavy(cid, sess)
+            eff_max = _get_eff_max_heavy(cid, sess)
+            consec_limit = max(config.max_heavy_consecutive, eff_max) if is_heavy_morning_only else config.max_heavy_consecutive
             window = consec_limit + 1
             last_start = MAX_PERIODS_PER_SESSION - consec_limit
             for w in range(1, last_start + 1):
