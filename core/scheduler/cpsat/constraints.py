@@ -4,7 +4,7 @@ from __future__ import annotations
 from collections import defaultdict
 from core.frame import MAX_PERIODS_PER_SESSION
 from core.models import SchedulingInput, is_bgh
-from core.roles import resolve_roles
+from core.roles import is_academic_subject, resolve_roles
 from core.scheduler.constants import CAP_TIET_NGAY
 from core.scheduler.placement import _build_effective_assigned_teacher
 from core.scheduler.cpsat.types import CpSatModel
@@ -329,7 +329,7 @@ def _add_class_constraints(built: CpSatModel) -> None:
     if getattr(config, "balance_morning_academic_load", True):
         academic_ids = {
             s.subject_id for s in inp.subjects
-            if any(s.name.startswith(h) for h in ('Toán', 'Ngữ văn', 'Ngoại ngữ', 'Khoa học tự nhiên'))
+            if is_academic_subject(s.name)
         }
         if academic_ids:
             morning_slots_by_class_day = defaultdict(list)

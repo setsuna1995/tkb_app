@@ -10,6 +10,7 @@ from typing import Optional
 from core.models import (
     ROLE_GDTC, ROLE_HDTN, ROLE_NANG, ROLE_NANG_KEP, WEEKDAY_NAMES, SchedulingInput, is_bgh,
 )
+from core.roles import is_academic_subject
 from core.scheduler.placement import _build_effective_assigned_teacher
 from core.scheduler.quality import (
     _count_subject_consecutive_days,
@@ -573,7 +574,7 @@ def compute_tkb_health_score(inp: SchedulingInput, assignment: dict) -> dict:
     # 1.5 Cân bằng tải môn học thuật buổi sáng (Toán, Văn, Ngoại ngữ, KHTN)
     academic_ids = {
         s.subject_id for s in inp.subjects
-        if any(s.name.startswith(h) for h in ('Toán', 'Ngữ văn', 'Ngoại ngữ', 'Khoa học tự nhiên'))
+        if is_academic_subject(s.name)
     }
     acad_overload_violations = []
     acad_underload_violations = []

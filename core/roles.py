@@ -6,6 +6,30 @@ from __future__ import annotations
 from core.models import ROLE_GDTC, ROLE_HDTN, ROLE_KEP, ROLE_NANG, ROLE_NANG_KEP, RoleIndex
 
 
+ACADEMIC_SUBJECT_PREFIXES = (
+    "toán",
+    "ngữ văn",
+    "văn",
+    "ngoại ngữ",
+    "tiếng anh",
+    "anh văn",
+    "khoa học tự nhiên",
+    "khtn",
+)
+
+
+def is_academic_subject(subject_name: str) -> bool:
+    """Xác định môn học có thuộc nhóm học thuật cốt lõi (Toán, Văn, Ngoại ngữ/Tiếng Anh, KHTN) hay không."""
+    if not subject_name:
+        return False
+    name_clean = subject_name.strip().lower()
+    if any(name_clean.startswith(prefix) for prefix in ACADEMIC_SUBJECT_PREFIXES):
+        return True
+    if name_clean == "anh" or name_clean.startswith("anh "):
+        return True
+    return False
+
+
 class MissingHDTNError(Exception):
     """Raised when no subject has role_code 5 (HDTN) -- mirrors the VBA hard-stop."""
 

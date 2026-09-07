@@ -3,6 +3,7 @@ from __future__ import annotations
 
 from collections import defaultdict
 from core.models import SchedulingInput, is_bgh
+from core.roles import is_academic_subject
 from core.scheduler.constants import (
     SUBJECT_CONSECUTIVE_DAY_SOFT_PENALTY,
     TEACHER_BACK_TO_BACK_SHIFT_PENALTY,
@@ -378,7 +379,7 @@ def _add_objective(built: CpSatModel) -> None:
     if getattr(config, "balance_morning_academic_load", True):
         academic_ids = {
             s.subject_id for s in inp.subjects
-            if any(s.name.startswith(h) for h in ('Toán', 'Ngữ văn', 'Ngoại ngữ', 'Khoa học tự nhiên'))
+            if is_academic_subject(s.name)
         }
         min_academic = getattr(config, "min_academic_per_morning", 2)
         if academic_ids and min_academic > 0:
