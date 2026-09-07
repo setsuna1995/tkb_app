@@ -9,6 +9,7 @@ from pathlib import Path
 import streamlit as st
 
 from data import db
+from ui_theme import inject_theme
 
 LEGACY_DB_PATH = str(Path(__file__).parent / "tkb_app_data.db")
 SCHOOLS_DIR = Path(__file__).parent / "schools"
@@ -24,6 +25,24 @@ CORE_INVARIANT_RULES = [
     "Tiết kép xếp liền nhau, cùng buổi",
     "Không buổi nào bị xếp đúng 1 tiết lẻ",
 ]
+
+
+def sidebar_branding() -> None:
+    """Renders modern sidebar header with school scheduler logo."""
+    with st.sidebar:
+        st.markdown(
+            """
+            <div class="tkb-sidebar-header">
+                <div class="tkb-sidebar-logo">🏫</div>
+                <div>
+                    <div class="tkb-sidebar-title">Xếp TKB Tự Động</div>
+                    <div class="tkb-sidebar-subtitle">THCS & THPT Pro Max</div>
+                </div>
+            </div>
+            """,
+            unsafe_allow_html=True,
+        )
+
 
 
 def sidebar_fixed_rules(conn) -> None:
@@ -184,20 +203,14 @@ def get_conn(school_slug: str):
 
 
 def require_auth() -> None:
-    if st.session_state.get("authenticated"):
-        return
-    st.title("Đăng nhập")
-    pwd = st.text_input("Mật khẩu", type="password")
-    if st.button("Đăng nhập"):
-        if pwd == st.secrets.get("app_password"):
-            st.session_state["authenticated"] = True
-            st.rerun()
-        else:
-            st.error("Sai mật khẩu.")
-    st.stop()
+    """Pass-through authentication gate (password login removed)."""
+    inject_theme()
+    st.session_state["authenticated"] = True
 
 
 def require_school() -> str:
+    inject_theme()
+    sidebar_branding()
     slug = st.session_state.get("school_slug")
     if slug and (SCHOOLS_DIR / f"{slug}.db").exists():
         return slug
@@ -213,13 +226,13 @@ def require_school() -> str:
     st.title("Chọn trường")
     if schools:
         pick = st.selectbox("Trường", schools, format_func=lambda s: s["name"], key="school_pick")
-        if st.button("Vào trường này"):
+        if st.button("Vào trường này", type="primary"):
             st.session_state["school_slug"] = pick["slug"]
             st.session_state.pop("explicit_school_switch", None)
             st.rerun()
     with st.expander("➕ Tạo trường mới", expanded=not schools):
         new_name = st.text_input("Tên trường mới", key="new_school_name")
-        if st.button("Tạo trường") and new_name.strip():
+        if st.button("Tạo trường", type="primary") and new_name.strip():
             new_slug = create_school(new_name.strip())
             st.session_state["school_slug"] = new_slug
             st.session_state.pop("explicit_school_switch", None)
@@ -233,10 +246,11 @@ def sidebar_school_switcher() -> None:
         return
     names = {s["slug"]: s["name"] for s in list_schools()}
     with st.sidebar:
-        if st.button(f"🏫 Đổi trường ({names.get(slug, slug)})"):
+        if st.button(f"🏫 Đổi trường ({names.get(slug, slug)})", use_container_width=True):
             st.session_state.pop("school_slug", None)
             st.session_state["explicit_school_switch"] = True
             st.rerun()
+
 
 
 def format_substitution_line(sub: dict, name_by_id: dict, class_names: dict) -> str:
@@ -268,6 +282,7 @@ def sidebar_backup_export(conn) -> None:
                 "📥 Xuất Excel (sao lưu)", data=data, file_name="TKB_sao_luu.xlsx",
                 mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
                 key="sidebar_backup_export",
+                use_container_width=True,
             )
             if clicked:
                 repo.set_meta(conn, "last_exported_at", datetime.now().strftime("%d/%m/%Y %H:%M"))
