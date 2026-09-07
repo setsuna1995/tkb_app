@@ -49,10 +49,51 @@ THEME_CSS = """
     --tkb-shadow-hover: 0 10px 15px -3px rgb(0 0 0 / 0.08), 0 4px 6px -4px rgb(0 0 0 / 0.04);
 }
 
-/* Global Font Override */
-html, body, [class*="css"], [class*="st-"] {
-    font-family: 'Plus Jakarta Sans', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif !important;
+/* Global Typography */
+html, body, .stApp {
+    font-family: 'Plus Jakarta Sans', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
 }
+
+h1, h2, h3, h4, h5, h6, p, label, button, input, select, textarea,
+.stMarkdown, .stText, .stCaption, [data-testid="stMarkdownContainer"] {
+    font-family: 'Plus Jakarta Sans', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+}
+
+/* Bảo toàn tuyệt đối font biểu tượng Material Symbols & Icons của Streamlit */
+[data-testid="stIconMaterial"],
+[data-testid="stExpanderToggleIcon"],
+[data-testid*="Icon"],
+[data-testid*="icon"],
+.material-symbols-rounded,
+.material-symbols-outlined,
+.material-icons,
+[class*="material-symbols"],
+[class*="material-icons"] {
+    font-family: 'Material Symbols Rounded', 'Material Icons' !important;
+    font-weight: normal !important;
+    font-style: normal !important;
+    line-height: 1 !important;
+    letter-spacing: normal !important;
+    text-transform: none !important;
+    display: inline-block !important;
+    white-space: nowrap !important;
+    word-wrap: normal !important;
+    direction: ltr !important;
+    -webkit-font-smoothing: antialiased !important;
+}
+
+/* Đảm bảo căn chỉnh và khoảng cách của expander không bị đè chữ */
+[data-testid="stExpander"] details summary {
+    display: flex !important;
+    align-items: center !important;
+    gap: 0.5rem !important;
+}
+
+[data-testid="stExpander"] details summary [data-testid="stExpanderToggleIcon"] {
+    flex-shrink: 0 !important;
+    margin-right: 0.25rem !important;
+}
+
 
 /* Page Background & Padding */
 .stApp {
