@@ -200,19 +200,41 @@ def _add_subject_constraints(built: CpSatModel) -> None:
             vars_by_session[key].append(var)
             vars_by_session_period[key].setdefault(s.ts.period, []).append(var)
 
-        max_heavy_sess = max(getattr(config, "max_heavy_per_session", 3), config.max_heavy_consecutive)
-        for vs in vars_by_session.values():
-            m.Add(sum(vs) <= max_heavy_sess)
+        class_has_afternoon = {s.class_id for s in inp.slots if s.ts.session == "C"}
+        is_heavy_morning_only = getattr(config, "heavy_subjects_morning_only", False)
+        class_distinct_mornings = defaultdict(set)
+        for s in inp.slots:
+            if s.ts.session == "S":
+                class_distinct_mornings[s.class_id].add(s.ts.weekday)
+        class_heavy_need = defaultdict(int)
+        for (sid, cid), n in inp.need.items():
+            if sid in role_index.heavy_ids:
+                class_heavy_need[cid] += n
 
-        window = config.max_heavy_consecutive + 1
-        last_start = MAX_PERIODS_PER_SESSION - config.max_heavy_consecutive
-        for period_vars in vars_by_session_period.values():
+        def _get_eff_max_heavy(cid, sess):
+            base_max = max(getattr(config, "max_heavy_per_session", 3), config.max_heavy_consecutive)
+            if sess == "S":
+                must_all_in_morning = (cid not in class_has_afternoon) or is_heavy_morning_only
+                n_morns = len(class_distinct_mornings.get(cid, ()))
+                if must_all_in_morning and n_morns > 0:
+                    min_needed = (class_heavy_need[cid] + n_morns - 1) // n_morns
+                    return max(base_max, min_needed)
+            return base_max
+
+        for (cid, _wd, sess), vs in vars_by_session.items():
+            eff_max = _get_eff_max_heavy(cid, sess)
+            m.Add(sum(vs) <= eff_max)
+
+        for (cid, _wd, sess), period_vars in vars_by_session_period.items():
+            consec_limit = _get_eff_max_heavy(cid, sess)
+            window = consec_limit + 1
+            last_start = MAX_PERIODS_PER_SESSION - consec_limit
             for w in range(1, last_start + 1):
                 window_vars = []
                 for offset in range(window):
                     window_vars.extend(period_vars.get(w + offset, []))
                 if window_vars:
-                    m.Add(sum(window_vars) <= config.max_heavy_consecutive)
+                    m.Add(sum(window_vars) <= consec_limit)
 
     # 7. Môn nặng tránh tiết 3 buổi chiều.
     if getattr(config, "avoid_heavy_afternoon_period3", True):
@@ -345,7 +367,9 @@ def _add_class_constraints(built: CpSatModel) -> None:
             for (class_id, weekday), group_slots in morning_slots_by_class_day.items():
                 c_mornings = class_mornings_count[class_id]
                 c_academic_need = sum(inp.need.get((sid, class_id), 0) for sid in academic_ids)
-                if class_id not in class_has_afternoon and c_mornings > 0:
+                is_heavy_morning_only = getattr(config, "heavy_subjects_morning_only", False)
+                must_all_in_morning = (class_id not in class_has_afternoon) or is_heavy_morning_only
+                if must_all_in_morning and c_mornings > 0:
                     effective_max = max(config.max_academic_per_morning, (c_academic_need + c_mornings - 1) // c_mornings)
                 else:
                     effective_max = config.max_academic_per_morning

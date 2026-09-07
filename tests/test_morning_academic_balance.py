@@ -265,3 +265,74 @@ def test_cpsat_morning_academic_hard_floor_prevents_zero_academic():
     }
     for wd, cnt in counts.items():
         assert cnt >= 1, f"Sáng thứ {wd} có {cnt} tiết học thuật (< 1), vi phạm sàn cứng!"
+
+
+def test_cpsat_morning_academic_ceiling_when_heavy_morning_only():
+    """Kiểm tra: Khi lớp có buổi chiều nhưng bật heavy_subjects_morning_only=True,
+    và tổng số tiết học thuật (16 tiết / 5 sáng) vượt quá 5x3=15, trần sáng phải tự động
+    nâng lên ceil(16/5) = 4 thay vì gây Infeasible model."""
+    import core.scheduler.cpsat_model as cpsat
+    from core.models import Subject, ClassRoom, TimeSlot, Slot, SchedulingConfig, SchedulingInput, Teacher, ROLE_NANG, ROLE_THUONG, ROLE_HDTN
+
+    # 1 lớp học 5 sáng (mỗi sáng 4 tiết) + 1 chiều (3 tiết) = 23 slots
+    ts_list = []
+    slots = []
+    slot_id = 1
+    # 5 sáng (T2..T6)
+    for wd in range(2, 7):
+        for p in range(1, 5):
+            t = TimeSlot(f"{wd}_S_{p}", wd, "S", p)
+            ts_list.append(t)
+            slots.append(Slot(slot_id, 101, t))
+            slot_id += 1
+    # 1 chiều (T3)
+    for p in range(1, 4):
+        t = TimeSlot(f"3_C_{p}", 3, "C", p)
+        ts_list.append(t)
+        slots.append(Slot(slot_id, 101, t))
+        slot_id += 1
+
+    # 16 tiết học thuật (Toán 4, Văn 4, Anh 4, KHTN 4) + 3 tiết nhẹ (Tin 3)
+    subjects = [
+        Subject(1, "Toán", ROLE_NANG),
+        Subject(2, "Ngữ văn", ROLE_NANG),
+        Subject(3, "Tiếng Anh", ROLE_NANG),
+        Subject(4, "Khoa học tự nhiên", ROLE_NANG),
+        Subject(5, "Tin học", ROLE_THUONG),
+        Subject(99, "HĐTN", ROLE_HDTN),
+    ]
+    teachers = [
+        Teacher(10, "GV_Toan"),
+        Teacher(20, "GV_Van"),
+        Teacher(30, "GV_Anh"),
+        Teacher(40, "GV_KHTN"),
+        Teacher(50, "GV_Tin"),
+        Teacher(990, "GV_HDTN"),
+    ]
+    need = {(1, 101): 4, (2, 101): 4, (3, 101): 4, (4, 101): 4, (5, 101): 3, (99, 101): 0}
+    assigned_teacher = {
+        (1, 101): 10, (2, 101): 20, (3, 101): 30, (4, 101): 40, (5, 101): 50, (99, 101): 990
+    }
+
+    config = SchedulingConfig(
+        heavy_subjects_morning_only=True,  # Cấm môn nặng ở chiều!
+        balance_morning_academic_load=True,
+        max_academic_per_morning=3,
+        avoid_teacher_lone_periods=False,
+    )
+    inp = SchedulingInput(
+        classes=[ClassRoom(101, "9A1")],
+        subjects=subjects,
+        teachers=teachers,
+        slots=slots,
+        timeslots=ts_list,
+        need=need,
+        assigned_teacher=assigned_teacher,
+        ban_busy=set(),
+        config=config,
+    )
+
+    built = cpsat.build_model(inp)
+    assignment = cpsat.solve(built, time_limit_s=5.0)
+    assert assignment is not None, "CP-SAT phải giải thành công nhờ dynamic ceiling!"
+
