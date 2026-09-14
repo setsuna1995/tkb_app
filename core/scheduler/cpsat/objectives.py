@@ -17,6 +17,7 @@ from core.scheduler.constants import (
     TEACHER_SPLIT_DAY_PENALTY,
     TEACHER_STRICT_MORNING_MISS_PENALTY,
     MORNING_ACADEMIC_UNDERLOAD_SOFT_PENALTY,
+    GVCN_MONDAY_PERIOD2_MISS_PENALTY,
 )
 from core.models import ROLE_HDTN
 from core.scheduler.placement import _build_effective_assigned_teacher
@@ -408,6 +409,39 @@ def _add_objective(built: CpSatModel) -> None:
                     m.Add(sum(academic_vars) >= min_academic).OnlyEnforceIf(underload.Not())
                     penalty_terms["_morning_academic_underload"].append(underload)
 
+    # 6e. GVCN dạy tiết 2 Thứ 2 của lớp chủ nhiệm (ưu tiên mềm, cấu hình được theo lớp)
+    if getattr(config, "gvcn_monday_period2_enabled", True) and built.role_index.hdtn_id is not None:
+        hdtn_id = built.role_index.hdtn_id
+        exempt_class_ids = getattr(config, "gvcn_monday_period2_exempt_class_ids", frozenset()) or frozenset()
+        gvcn_period2_terms = []
+        for c in inp.classes:
+            if c.class_id in exempt_class_ids:
+                continue
+            gvcn_tid = effective_assigned.get((hdtn_id, c.class_id))
+            if gvcn_tid is None or gvcn_tid <= 0:
+                continue  # GVCN chưa xác định được (chưa phân công HĐTN) -- bỏ qua lớp này
+            target = next(
+                (s for s in built.slots_by_class.get(c.class_id, [])
+                 if s.ts.weekday == 2 and s.ts.session == "S" and s.ts.period == 2),
+                None,
+            )
+            if target is None:
+                continue
+            gvcn_vars = [
+                x[target.slot_id, subj.subject_id]
+                for subj in inp.subjects
+                if (target.slot_id, subj.subject_id) in x
+                and teacher_of.get((target.slot_id, subj.subject_id)) == gvcn_tid
+            ]
+            if not gvcn_vars:
+                continue  # GVCN không thể có mặt ở ô này (vd bận/trùng lịch) -- không có gì để phạt
+            miss = m.NewBoolVar(f"gvcn_p2_miss_c{c.class_id}")
+            m.Add(sum(gvcn_vars) >= 1).OnlyEnforceIf(miss.Not())
+            m.Add(sum(gvcn_vars) == 0).OnlyEnforceIf(miss)
+            gvcn_period2_terms.append(miss)
+        if gvcn_period2_terms:
+            penalty_terms["_gvcn_monday_period2"] = gvcn_period2_terms
+
     built.penalty_terms = dict(penalty_terms)
 
     # 7. Theo dõi và tối thiểu hóa thay đổi ô cũ
@@ -442,6 +476,8 @@ def _add_objective(built: CpSatModel) -> None:
         obj_terms.append(SUBJECT_CONSECUTIVE_DAY_SOFT_PENALTY * sum(penalty_terms["_subject_dispersion"]))
     if penalty_terms.get("_morning_academic_underload"):
         obj_terms.append(MORNING_ACADEMIC_UNDERLOAD_SOFT_PENALTY * sum(penalty_terms["_morning_academic_underload"]))
+    if penalty_terms.get("_gvcn_monday_period2"):
+        obj_terms.append(GVCN_MONDAY_PERIOD2_MISS_PENALTY * sum(penalty_terms["_gvcn_monday_period2"]))
     if penalty_terms.get("II.14"):
         obj_terms.append(300 * sum(penalty_terms["II.14"]))
     if lone_day_terms:

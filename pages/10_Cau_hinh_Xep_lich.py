@@ -31,6 +31,8 @@ subject_names = {s.subject_id: s.name for s in all_subjects}
 all_teachers = repo.list_teachers(conn)
 teacher_names = {t.teacher_id: t.name for t in all_teachers}
 teacher_ids = [t.teacher_id for t in all_teachers]
+all_classes = repo.list_classes(conn)
+class_names = {c.class_id: c.name for c in all_classes}
 
 tab1, tab2, tab3, tab4, tab5 = st.tabs([
     "🏛️ Khung thời gian & Tiết ghim",
@@ -57,6 +59,24 @@ with tab1:
     )
     chao_co_period = 1
     gdtc_avoid_period = config.gdtc_avoid_period
+
+    st.markdown("---")
+    st.markdown("**Tiết 2 Thứ 2 — ưu tiên Giáo viên chủ nhiệm (GVCN):**")
+    col_gvcn1, col_gvcn2 = st.columns([1, 2])
+    gvcn_monday_period2_enabled = col_gvcn1.checkbox(
+        "Bật ưu tiên GVCN dạy tiết 2 Thứ 2",
+        value=getattr(config, "gvcn_monday_period2_enabled", True),
+        help="Ưu tiên MỀM (không phải luật cứng): thuật toán cố gắng xếp đúng GVCN của lớp vào tiết 2 "
+             "Thứ 2, nhưng vẫn ra lời giải nếu GVCN thực sự không thể có mặt (vd trùng lịch dạy lớp khác cùng giờ).",
+    )
+    gvcn_monday_period2_exempt_selection = col_gvcn2.multiselect(
+        "Lớp được MIỄN TRỪ ưu tiên trên",
+        options=[c.class_id for c in all_classes],
+        default=[cid for cid in getattr(config, "gvcn_monday_period2_exempt_class_ids", frozenset()) if cid in class_names],
+        format_func=lambda cid: class_names.get(cid, str(cid)),
+        disabled=not gvcn_monday_period2_enabled,
+        help="Mặc định: áp dụng cho TẤT CẢ các lớp. Chọn lớp ở đây để tắt riêng ưu tiên này cho lớp đó.",
+    )
 
     st.markdown("---")
     st.markdown("**Khung giờ môn Giáo dục thể chất (Thể dục):**")
@@ -368,6 +388,8 @@ if st.button("💾 Lưu toàn bộ cấu hình xếp lịch", type="primary"):
         avoid_heavy_afternoon_period3=bool(avoid_heavy_afternoon_period3),
         avoid_teacher_4_consecutive_morning=bool(avoid_teacher_4_consecutive_morning),
         min_weekly_periods_for_lone_penalty=int(min_weekly_periods_for_lone_penalty),
+        gvcn_monday_period2_enabled=bool(gvcn_monday_period2_enabled),
+        gvcn_monday_period2_exempt_class_ids=frozenset(gvcn_monday_period2_exempt_selection),
         use_cpsat=True,
         cpsat_time_limit_seconds=int(cpsat_time_limit_seconds),
         cpsat_minimize_changes=bool(cpsat_minimize_changes),

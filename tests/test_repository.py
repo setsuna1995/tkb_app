@@ -118,6 +118,17 @@ def test_set_then_get_scheduling_config_round_trips_explicit_zero_heavy_subject_
     assert loaded.heavy_subject_priority_periods == 0
 
 
+def test_set_then_get_scheduling_config_round_trips_gvcn_monday_period2_fields(conn):
+    custom = SchedulingConfig(
+        gvcn_monday_period2_enabled=False,
+        gvcn_monday_period2_exempt_class_ids=frozenset({3, 5}),
+    )
+    repo.set_scheduling_config(conn, custom)
+    loaded = repo.get_scheduling_config(conn)
+    assert loaded.gvcn_monday_period2_enabled is False
+    assert loaded.gvcn_monday_period2_exempt_class_ids == frozenset({3, 5})
+
+
 def test_get_scheduling_config_reads_raw_zero_string_saved_via_set_meta(conn):
     """Same bug, exercised one level lower via set_meta directly (not through
     set_scheduling_config) -- covers the exact DB-metadata write path the review

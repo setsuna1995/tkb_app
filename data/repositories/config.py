@@ -122,6 +122,7 @@ def get_scheduling_config(conn: sqlite3.Connection) -> SchedulingConfig:
     avoid_gdtc_consecutive_raw = get_meta(conn, "sched_avoid_gdtc_consecutive_days")
     gdtc_morning_raw = get_meta(conn, "sched_gdtc_morning_allowed_periods")
     gdtc_afternoon_raw = get_meta(conn, "sched_gdtc_afternoon_allowed_periods")
+    gvcn_p2_exempt_raw = get_meta(conn, "sched_gvcn_monday_period2_exempt_class_ids")
     return SchedulingConfig(
         gdtc_avoid_period=int(get_meta(conn, "sched_gdtc_avoid_period") or default.gdtc_avoid_period),
         gdtc_morning_allowed_periods=(
@@ -248,6 +249,15 @@ def get_scheduling_config(conn: sqlite3.Connection) -> SchedulingConfig:
             if get_meta(conn, "sched_cpsat_workers") is not None
             else default.cpsat_workers
         ),
+        gvcn_monday_period2_enabled=(
+            bool(int(get_meta(conn, "sched_gvcn_monday_period2_enabled")))
+            if get_meta(conn, "sched_gvcn_monday_period2_enabled") is not None
+            else default.gvcn_monday_period2_enabled
+        ),
+        gvcn_monday_period2_exempt_class_ids=(
+            _parse_id_set(gvcn_p2_exempt_raw) if gvcn_p2_exempt_raw is not None
+            else default.gvcn_monday_period2_exempt_class_ids
+        ),
     )
 
 
@@ -287,3 +297,5 @@ def set_scheduling_config(conn: sqlite3.Connection, config: SchedulingConfig) ->
     set_meta(conn, "sched_cpsat_time_limit_seconds", str(config.cpsat_time_limit_seconds))
     set_meta(conn, "sched_cpsat_minimize_changes", str(int(config.cpsat_minimize_changes)))
     set_meta(conn, "sched_cpsat_workers", str(config.cpsat_workers))
+    set_meta(conn, "sched_gvcn_monday_period2_enabled", str(int(config.gvcn_monday_period2_enabled)))
+    set_meta(conn, "sched_gvcn_monday_period2_exempt_class_ids", _format_id_set(config.gvcn_monday_period2_exempt_class_ids))

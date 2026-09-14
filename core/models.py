@@ -160,6 +160,8 @@ class SchedulingConfig:
     balance_morning_academic_load: bool = True  # Cân bằng và xen kẽ môn học thuật (Toán, Văn, Anh, KHTN) buổi sáng
     max_academic_per_morning: int = 3  # Trần cứng: Tối đa 3 tiết học thuật/buổi sáng (luôn có >=1 tiết nhẹ)
     min_academic_per_morning: int = 2  # Sàn mềm: Khuyến khích >= 2 tiết học thuật/buổi sáng (tránh buổi sáng quá nhàn)
+    gvcn_monday_period2_enabled: bool = True  # Ưu tiên mềm: tiết 2 Thứ 2 nên do GVCN dạy lớp chủ nhiệm
+    gvcn_monday_period2_exempt_class_ids: frozenset = field(default_factory=frozenset)  # lớp được miễn trừ luật trên
 
 
 
