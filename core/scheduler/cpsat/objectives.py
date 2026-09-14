@@ -427,18 +427,34 @@ def _add_objective(built: CpSatModel) -> None:
             )
             if target is None:
                 continue
+            # Môn học của GVCN tại lớp chủ nhiệm (loại trừ HĐTN vì tiết 1 đã là Chào cờ)
             gvcn_vars = [
                 x[target.slot_id, subj.subject_id]
                 for subj in inp.subjects
                 if (target.slot_id, subj.subject_id) in x
                 and teacher_of.get((target.slot_id, subj.subject_id)) == gvcn_tid
+                and subj.subject_id != hdtn_id
             ]
-            if not gvcn_vars:
-                continue  # GVCN không thể có mặt ở ô này (vd bận/trùng lịch) -- không có gì để phạt
-            miss = m.NewBoolVar(f"gvcn_p2_miss_c{c.class_id}")
-            m.Add(sum(gvcn_vars) >= 1).OnlyEnforceIf(miss.Not())
-            m.Add(sum(gvcn_vars) == 0).OnlyEnforceIf(miss)
-            gvcn_period2_terms.append(miss)
+            if gvcn_vars:
+                miss = m.NewBoolVar(f"gvcn_p2_miss_c{c.class_id}")
+                m.Add(sum(gvcn_vars) >= 1).OnlyEnforceIf(miss.Not())
+                m.Add(sum(gvcn_vars) == 0).OnlyEnforceIf(miss)
+                gvcn_period2_terms.append(miss)
+
+            # GVCN lớp c không được xếp dạy lớp khác vào tiết 2 Thứ 2
+            for other_c in inp.classes:
+                if other_c.class_id == c.class_id:
+                    continue
+                other_target = next(
+                    (s for s in built.slots_by_class.get(other_c.class_id, [])
+                     if s.ts.weekday == 2 and s.ts.session == "S" and s.ts.period == 2),
+                    None,
+                )
+                if other_target is not None:
+                    for subj in inp.subjects:
+                        if (other_target.slot_id, subj.subject_id) in x and teacher_of.get((other_target.slot_id, subj.subject_id)) == gvcn_tid:
+                            gvcn_period2_terms.append(x[other_target.slot_id, subj.subject_id])
+
         if gvcn_period2_terms:
             penalty_terms["_gvcn_monday_period2"] = gvcn_period2_terms
 

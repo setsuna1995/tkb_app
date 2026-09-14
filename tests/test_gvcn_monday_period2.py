@@ -141,3 +141,53 @@ def test_gvcn_penalty_is_soft_not_hard_when_teacher_double_booked_elsewhere():
     )
     assert assignment[2] == 2, "GVCN đang bận dạy lớp 102 nên Văn phải nhận ô Thứ 2 tiết 2 của lớp 101"
     assert assignment[3] == 1, "Toán (không xếp được ô ưu tiên) bị đẩy sang ô còn lại (Thứ 3)"
+
+
+def test_gvcn_does_not_teach_other_class_at_monday_period2():
+    """GV 10 là GVCN lớp 101 (dạy Toán cho cả 101 và 102).
+    GV 20 là GVCN lớp 102 (dạy Văn cho cả 101 và 102).
+    Vào Thứ 2 tiết 2, solver phải xếp GV 10 dạy đúng lớp 101 (chủ nhiệm),
+    và GV 20 dạy đúng lớp 102 (chủ nhiệm), không được tráo đổi lớp của nhau."""
+    ts1 = TimeSlot(1, 2, "S", 1)  # Mon P1 - Chào cờ
+    ts2 = TimeSlot(2, 2, "S", 2)  # Mon P2 - Tranh chấp
+    ts3 = TimeSlot(3, 3, "S", 1)  # Tue P1
+    ts4 = TimeSlot(4, 7, "S", 1)  # Sat P1 - SHL
+    slots = [
+        Slot(1, 101, ts1), Slot(2, 101, ts2), Slot(3, 101, ts3), Slot(4, 101, ts4),
+        Slot(5, 102, ts1), Slot(6, 102, ts2), Slot(7, 102, ts3), Slot(8, 102, ts4),
+    ]
+    subjects = [
+        Subject(1, "Toan", ROLE_THUONG),
+        Subject(2, "Van", ROLE_THUONG),
+        Subject(99, "HDTN", ROLE_HDTN),
+    ]
+    teachers = [Teacher(10, "GVCN 101"), Teacher(20, "GVCN 102")]
+    # 101: Toan(10), Van(20), HDTN(10)
+    # 102: Toan(10), Van(20), HDTN(20)
+    need = {
+        (1, 101): 1, (2, 101): 1, (99, 101): 2,
+        (1, 102): 1, (2, 102): 1, (99, 102): 2,
+    }
+    assigned_teacher = {
+        (1, 101): 10, (2, 101): 20, (99, 101): 10,
+        (1, 102): 10, (2, 102): 20, (99, 102): 20,
+    }
+    inp = SchedulingInput(
+        classes=[ClassRoom(101, "6A1"), ClassRoom(102, "6A2")],
+        subjects=subjects,
+        teachers=teachers,
+        need=need,
+        assigned_teacher=assigned_teacher,
+        ban_busy=set(),
+        slots=slots,
+        timeslots=[ts1, ts2, ts3, ts4],
+        config=SchedulingConfig(),
+    )
+    built = build_model(inp)
+    assignment = solve(built, time_limit_s=10.0)
+    assert assignment is not None
+    # Slot 2 là Mon P2 của lớp 101 -> Phải gán Toán (GV 10 là GVCN 101)
+    assert assignment[2] == 1, f"Lớp 101 Tiết 2 T2 phải là Toán (GVCN 10): {assignment}"
+    # Slot 6 là Mon P2 của lớp 102 -> Phải gán Văn (GV 20 là GVCN 102)
+    assert assignment[6] == 2, f"Lớp 102 Tiết 2 T2 phải là Văn (GVCN 20): {assignment}"
+
