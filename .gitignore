@@ -13,5 +13,6 @@ __pycache__/
 /TKB_*.xlsm
 .playwright-mcp/
 .worktrees/
+.claude/
 .agents
 scratch/
