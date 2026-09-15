@@ -69,11 +69,13 @@ TEACHER_GAP_EXCESS_PENALTY = 1500     # Phạt rất nặng cho tiết trống t
 TEACHER_BACK_TO_BACK_SHIFT_PENALTY = 25  # Phạt nhẹ khi GV dạy chiều muộn hôm trước và sáng sớm hôm sau (tiêu chí phụ)
 SUBJECT_CONSECUTIVE_DAY_SOFT_PENALTY = 10  # Phạt nhẹ khi môn 2-3 tiết xếp 2 ngày liên tiếp (tiêu chí phụ, tie-breaker nếu có thể)
 MORNING_ACADEMIC_UNDERLOAD_SOFT_PENALTY = 120  # Phạt mềm khi buổi sáng (>= 3 tiết) có < 2 tiết học thuật cốt lõi
-GVCN_MONDAY_PERIOD2_MISS_PENALTY = 10000  # Phạt nặng khi GVCN không dạy đúng tiết 2 Thứ 2 của lớp chủ nhiệm
-                                    # (hoặc bị xếp dạy lớp khác vào tiết này). Mức phạt cao nhất
-                                    # để đảm bảo tuyệt đối ưu tiên GVCN có mặt tại lớp mình chủ nhiệm
-                                    # ngay sau lễ chào cờ, nhưng vẫn giữ tính chất ràng buộc mềm
-                                    # để không gây vô nghiệm nếu bất khả kháng.
+GVCN_MONDAY_PERIOD2_MISS_PENALTY = 50000  # Phạt nặng khi GVCN không dạy đúng tiết 2 Thứ 2 của lớp chủ nhiệm
+                                    # (hoặc bị xếp dạy lớp khác vào tiết này). (2026-09-15) Nâng từ 10000 lên
+                                    # 50000 vì 10000 vẫn có thể bị lấn át khi CỘNG DỒN nhiều phạt nhỏ khác
+                                    # (II.7 gaps, II.4 buổi lẻ...) trên nhiều lớp/GV cùng lúc. Vẫn giữ tính
+                                    # chất ràng buộc MỀM (OnlyEnforceIf, không ép cứng x==1) để không gây vô
+                                    # nghiệm nếu bất khả kháng (GVCN trùng lịch, hoặc không có môn nào của
+                                    # GVCN khả dụng ở đúng ô này để thuật toán chọn).
 
 
 # Buổi không được chọn làm buổi nghỉ của GV: sáng Thứ 2/5/6 (hoạt động cố định
