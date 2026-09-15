@@ -47,17 +47,102 @@ with tab1:
     st.subheader("🏛️ Tiết ghim toàn trường & Khung Thể dục (GDTC)")
     st.caption("Các mốc thời gian cố định áp dụng cho toàn bộ học sinh và giáo viên trong trường.")
     
-    col_cc1, col_cc2 = st.columns(2)
-    chao_co_weekday = col_cc1.selectbox(
-        "Chào cờ - Thứ", WEEKDAYS, index=WEEKDAYS.index(config.chao_co_weekday),
+    st.markdown("#### 🎯 Cấu hình 3 tiết môn Hoạt động trải nghiệm (HĐTN)")
+    st.caption("Cấu hình thứ và tiết cho từng tiết trong 3 tiết HĐTN của tuần (Chào cờ, Hoạt động chủ đề, Sinh hoạt lớp).")
+
+    # ── Tiết 1: Sinh hoạt dưới cờ (Chào cờ) ──
+    st.markdown("##### 🚩 Tiết 1: Sinh hoạt dưới cờ (Chào cờ)")
+    c1, c2, c3 = st.columns(3)
+    p1_wd_default = getattr(config, "hdtn_p1_weekday", None) or getattr(config, "chao_co_weekday", 2)
+    hdtn_p1_weekday = c1.selectbox(
+        "Thứ (Chào cờ)", WEEKDAYS, index=WEEKDAYS.index(p1_wd_default) if p1_wd_default in WEEKDAYS else 0,
+        format_func=lambda w: WEEKDAY_NAMES[w], key="hdtn_p1_wd"
+    )
+    p1_sess_default = getattr(config, "hdtn_p1_session", "S")
+    hdtn_p1_session = c2.selectbox(
+        "Buổi (Chào cờ)", ["S", "C"], index=0 if p1_sess_default == "S" else 1,
+        format_func=lambda s: "Sáng" if s == "S" else "Chiều", key="hdtn_p1_sess"
+    )
+    p1_p_default = getattr(config, "hdtn_p1_period", None) or getattr(config, "chao_co_period", 1)
+    hdtn_p1_period = c3.selectbox(
+        "Tiết (Chào cờ)", list(range(1, max_p + 1)),
+        index=(p1_p_default - 1) if 1 <= p1_p_default <= max_p else 0, key="hdtn_p1_p"
+    )
+
+    # ── Tiết 2: Hoạt động giáo dục theo chủ đề ──
+    st.markdown("##### 📘 Tiết 2: Hoạt động trải nghiệm theo chủ đề")
+    c_p2_mode, c_p2_wd, c_p2_sess, c_p2_p = st.columns([2, 1, 1, 1])
+    p2_is_fixed = getattr(config, "hdtn_p2_weekday", None) is not None
+    hdtn_p2_mode = c_p2_mode.selectbox(
+        "Chế độ xếp Tiết 2",
+        ["auto", "fixed"],
+        index=1 if p2_is_fixed else 0,
+        format_func=lambda m: "Tự do (thuật toán tự xếp - Mặc định)" if m == "auto" else "Cố định theo Thứ & Tiết",
+        key="hdtn_p2_mode"
+    )
+    p2_wd_default = getattr(config, "hdtn_p2_weekday", None) or 4
+    hdtn_p2_weekday = c_p2_wd.selectbox(
+        "Thứ (Tiết 2)", WEEKDAYS,
+        index=WEEKDAYS.index(p2_wd_default) if p2_wd_default in WEEKDAYS else 2,
         format_func=lambda w: WEEKDAY_NAMES[w],
-        help="Mặc định: Thứ 2. Tiết chào cờ đầu tuần.",
+        disabled=(hdtn_p2_mode == "auto"),
+        key="hdtn_p2_wd"
     )
-    col_cc2.number_input(
-        "Chào cờ - Tiết (buổi sáng)", 1, 1, 1, disabled=True,
-        help="Cố định ở Tiết 1 sáng — toàn trường tập trung.",
+    p2_sess_default = getattr(config, "hdtn_p2_session", "S")
+    hdtn_p2_session = c_p2_sess.selectbox(
+        "Buổi (Tiết 2)", ["S", "C"],
+        index=0 if p2_sess_default == "S" else 1,
+        format_func=lambda s: "Sáng" if s == "S" else "Chiều",
+        disabled=(hdtn_p2_mode == "auto"),
+        key="hdtn_p2_sess"
     )
-    chao_co_period = 1
+    p2_p_default = getattr(config, "hdtn_p2_period", None) or 2
+    hdtn_p2_period = c_p2_p.selectbox(
+        "Tiết (Tiết 2)", list(range(1, max_p + 1)),
+        index=(p2_p_default - 1) if 1 <= p2_p_default <= max_p else 1,
+        disabled=(hdtn_p2_mode == "auto"),
+        key="hdtn_p2_p"
+    )
+
+    # ── Tiết 3: Sinh hoạt lớp (SHL) ──
+    st.markdown("##### 👥 Tiết 3: Sinh hoạt lớp (SHL)")
+    c_p3_mode, c_p3_wd, c_p3_sess, c_p3_p = st.columns([2, 1, 1, 1])
+    p3_is_fixed = getattr(config, "hdtn_p3_weekday", None) is not None
+    hdtn_p3_mode = c_p3_mode.selectbox(
+        "Chế độ xếp Tiết 3",
+        ["auto", "fixed"],
+        index=1 if p3_is_fixed else 0,
+        format_func=lambda m: "Tự động tiết cuối tuần (T6 nếu học chiều, T7 nếu chỉ học sáng - Mặc định)" if m == "auto" else "Cố định theo Thứ & Tiết",
+        key="hdtn_p3_mode"
+    )
+    p3_wd_default = getattr(config, "hdtn_p3_weekday", None) or 6
+    hdtn_p3_weekday = c_p3_wd.selectbox(
+        "Thứ (SHL)", WEEKDAYS,
+        index=WEEKDAYS.index(p3_wd_default) if p3_wd_default in WEEKDAYS else 4,
+        format_func=lambda w: WEEKDAY_NAMES[w],
+        disabled=(hdtn_p3_mode == "auto"),
+        key="hdtn_p3_wd"
+    )
+    p3_sess_default = getattr(config, "hdtn_p3_session", "S")
+    hdtn_p3_session = c_p3_sess.selectbox(
+        "Buổi (SHL)", ["S", "C"],
+        index=0 if p3_sess_default == "S" else 1,
+        format_func=lambda s: "Sáng" if s == "S" else "Chiều",
+        disabled=(hdtn_p3_mode == "auto"),
+        key="hdtn_p3_sess"
+    )
+    p3_periods_options = [0] + list(range(1, max_p + 1))
+    p3_p_default = getattr(config, "hdtn_p3_period", None) or 0
+    hdtn_p3_period = c_p3_p.selectbox(
+        "Tiết (SHL)", p3_periods_options,
+        index=p3_periods_options.index(p3_p_default) if p3_p_default in p3_periods_options else 0,
+        format_func=lambda p: "Tiết cuối buổi" if p == 0 else f"Tiết {p}",
+        disabled=(hdtn_p3_mode == "auto"),
+        key="hdtn_p3_p"
+    )
+
+    chao_co_weekday = hdtn_p1_weekday
+    chao_co_period = hdtn_p1_period
     gdtc_avoid_period = config.gdtc_avoid_period
 
     st.markdown("---")
@@ -362,6 +447,16 @@ if st.button("💾 Lưu toàn bộ cấu hình xếp lịch", type="primary"):
         gdtc_afternoon_allowed_periods=tuple(sorted(gdtc_afternoon_allowed)),
         chao_co_weekday=int(chao_co_weekday),
         chao_co_period=int(chao_co_period),
+        chao_co_session=str(hdtn_p1_session),
+        hdtn_p1_weekday=int(hdtn_p1_weekday),
+        hdtn_p1_session=str(hdtn_p1_session),
+        hdtn_p1_period=int(hdtn_p1_period),
+        hdtn_p2_weekday=int(hdtn_p2_weekday) if hdtn_p2_mode == "fixed" else None,
+        hdtn_p2_session=str(hdtn_p2_session) if hdtn_p2_mode == "fixed" else "S",
+        hdtn_p2_period=int(hdtn_p2_period) if hdtn_p2_mode == "fixed" else None,
+        hdtn_p3_weekday=int(hdtn_p3_weekday) if hdtn_p3_mode == "fixed" else None,
+        hdtn_p3_session=str(hdtn_p3_session) if hdtn_p3_mode == "fixed" else "S",
+        hdtn_p3_period=int(hdtn_p3_period) if (hdtn_p3_mode == "fixed" and int(hdtn_p3_period) > 0) else None,
         max_heavy_consecutive=int(max_heavy_consecutive),
         max_periods_per_session=int(max_periods_per_session),
         teacher_off_sessions_per_week=int(teacher_off_sessions_per_week),

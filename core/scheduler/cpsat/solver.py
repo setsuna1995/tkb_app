@@ -248,10 +248,12 @@ def _presolve_capacity_screening(built: CpSatModel) -> set[str]:
             if is_strict or is_mand:
                 mand_teacher_ids.add(t.teacher_id)
 
-        if wd == getattr(config, "chao_co_weekday", 2) and not built.inp.hdtn_thematic_week:
+        cc_wd = getattr(config, "hdtn_p1_weekday", None) or getattr(config, "chao_co_weekday", 2)
+        if wd == cc_wd and not built.inp.hdtn_thematic_week:
             hdtn_id = getattr(built.inp, "hdtn_id", None) or next((s.subject_id for s in built.inp.subjects if s.role_code == ROLE_HDTN), None)
-            cc_period = getattr(config, "chao_co_period", 1)
-            cc_slots = [s for s in morn_slots if s.ts.period == cc_period]
+            cc_period = getattr(config, "hdtn_p1_period", None) or getattr(config, "chao_co_period", 1)
+            cc_session = getattr(config, "hdtn_p1_session", "S")
+            cc_slots = [s for s in morn_slots if s.ts.period == cc_period and s.ts.session == cc_session]
             # Tiết chào cờ chỉ bị trừ khỏi dung lượng khả dụng nếu không được phân cho GV bắt buộc có mặt
             cc_taken_by_others = 0
             for s in cc_slots:
