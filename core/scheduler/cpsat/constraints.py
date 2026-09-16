@@ -8,6 +8,7 @@ from core.roles import is_academic_subject, resolve_roles
 from core.scheduler.constants import CAP_TIET_NGAY
 from core.scheduler.placement import _build_effective_assigned_teacher
 from core.scheduler.cpsat.types import CpSatModel
+from core.scheduler.hdtn import get_hdtn_pinned_slots_for_class
 
 
 def _add_teacher_constraints(built: CpSatModel) -> None:
@@ -269,37 +270,28 @@ def _add_class_constraints(built: CpSatModel) -> None:
     for (slot_id, subject_id), var in x.items():
         s = slot_by_id[slot_id]
         vars_by_class_subject_day[s.class_id, subject_id, s.ts.weekday].append(var)
+    pinned_hdtn_by_class = {}
+    if not inp.hdtn_thematic_week and hdtn_id is not None:
+        for class_id, class_slots in built.slots_by_class.items():
+            need_hdtn = inp.need.get((hdtn_id, class_id), 0)
+            pinned_hdtn_by_class[class_id] = get_hdtn_pinned_slots_for_class(
+                class_id, class_slots, config, need_hdtn, inp.hdtn_thematic_week
+            )
+
     for (class_id, subject_id, weekday), vs in vars_by_class_subject_day.items():
         cap_d = role_index.block_size.get(subject_id, 1)
-        if subject_id == hdtn_id and cap_d == 1:
-            cap_d = 2
+        if subject_id == hdtn_id:
+            day_pinned_cnt = sum(1 for ps in pinned_hdtn_by_class.get(class_id, []) if ps.ts.weekday == weekday)
+            cap_d = max(cap_d, 2, day_pinned_cnt)
         m.Add(sum(vs) <= cap_d)
 
     if not inp.hdtn_thematic_week and hdtn_id is not None:
-        # 2. Ghim chào cờ.
-        for s in inp.slots:
-            if (s.ts.weekday == config.chao_co_weekday and s.ts.session == "S"
-                    and s.ts.period == config.chao_co_period):
-                key = (s.slot_id, hdtn_id)
+        # Ghim các tiết HĐTN theo cấu hình
+        for class_id, pinned_slots in pinned_hdtn_by_class.items():
+            for ps in pinned_slots:
+                key = (ps.slot_id, hdtn_id)
                 if key in x:
                     m.Add(x[key] == 1)
-
-        # 3. Ghim SHL
-        class_has_chieu = defaultdict(bool)
-        for s in inp.slots:
-            if s.ts.session == "C":
-                class_has_chieu[s.class_id] = True
-        for class_id, class_slots in built.slots_by_class.items():
-            if inp.need.get((hdtn_id, class_id), 0) < 2:
-                continue
-            target_wd = 6 if class_has_chieu[class_id] else 7
-            day_slots = [s for s in class_slots if s.ts.session == "S" and s.ts.weekday == target_wd]
-            if not day_slots:
-                continue
-            target = max(day_slots, key=lambda s: s.ts.period)
-            key = (target.slot_id, hdtn_id)
-            if key in x:
-                m.Add(x[key] == 1)
 
     # 5. Không hở tiết giữa buổi của lớp.
     slot_by_coord = {(s.class_id, s.ts.weekday, s.ts.session, s.ts.period): s for s in inp.slots}

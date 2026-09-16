@@ -101,7 +101,7 @@ def import_xlsm(conn, path: str) -> ImportReport:
     col = 2
     while True:
         v = _norm(ws_pc.cell(2, col).value)
-        if not v or v.upper().startswith("MA"):
+        if not v or v.upper().startswith("MA") or v.upper().startswith("MÃ"):
             break
         class_names.append(v)
         col += 1
@@ -122,7 +122,8 @@ def import_xlsm(conn, path: str) -> ImportReport:
     # ---- role-code ("MA") column: dynamic scan, same as ResolveRoles ----
     code_col = None
     for c in range(2 + n_classes, 2 + n_classes + 6):
-        if _norm(ws_pc.cell(2, c).value).upper().startswith("MA"):
+        v = _norm(ws_pc.cell(2, c).value).upper()
+        if v.startswith("MA") or v.startswith("MÃ"):
             code_col = c
             break
     if code_col is None:
@@ -165,11 +166,25 @@ def import_xlsm(conn, path: str) -> ImportReport:
             repo.set_assignment(conn, subject_ids[subj_name], class_ids[cls_name], teacher_id)
 
     # ---- SoTiet: even (Chẵn) block from col B, odd (Lẻ) block from col (2+n_classes+1) ----
-    odd_start_col = 2 + n_classes + 1
+    odd_start_col = None
+    for c in range(2 + n_classes, ws_st.max_column + 1):
+        v = _norm(ws_st.cell(2, c).value).upper()
+        if "[L]" in v or (class_names and v == f"{class_names[0].upper()} L"):
+            odd_start_col = c
+            break
+    if odd_start_col is None:
+        odd_start_col = 2 + n_classes + 1
+
     for row_idx, subj_name in subject_rows:
         for i, cls_name in enumerate(class_names):
-            even_val = int(ws_st.cell(row_idx, 2 + i).value or 0)
-            odd_val = int(ws_st.cell(row_idx, odd_start_col + i).value or 0)
+            try:
+                even_val = int(float(ws_st.cell(row_idx, 2 + i).value or 0))
+            except (ValueError, TypeError):
+                even_val = 0
+            try:
+                odd_val = int(float(ws_st.cell(row_idx, odd_start_col + i).value or 0))
+            except (ValueError, TypeError):
+                odd_val = 0
             repo.set_periods_per_week(conn, subject_ids[subj_name], class_ids[cls_name], "C", even_val)
             repo.set_periods_per_week(conn, subject_ids[subj_name], class_ids[cls_name], "L", odd_val)
 
@@ -180,9 +195,18 @@ def import_xlsm(conn, path: str) -> ImportReport:
         row = 3
         while _norm(ws_dm.cell(row, 1).value):
             name = _norm(ws_dm.cell(row, 1).value)
+            if name.lower() in ("stt", "giáo viên", "giao vien", "họ và tên", "tên gv"):
+                row += 1
+                continue
             role = _norm(ws_dm.cell(row, 2).value)
-            must_monday = bool(int(ws_dm.cell(row, 8).value or 0))
-            is_gvcn = bool(int(ws_dm.cell(row, 9).value or 0))
+            try:
+                must_monday = bool(int(float(ws_dm.cell(row, 8).value or 0)))
+            except (ValueError, TypeError):
+                must_monday = True
+            try:
+                is_gvcn = bool(int(float(ws_dm.cell(row, 9).value or 0)))
+            except (ValueError, TypeError):
+                is_gvcn = False
             tid = get_or_create_teacher(name)
             repo.upsert_teacher(conn, name, role=role, must_monday=must_monday, is_gvcn=is_gvcn, teacher_id=tid)
             n_teachers_from_dm += 1

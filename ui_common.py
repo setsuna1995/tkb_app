@@ -241,14 +241,26 @@ def require_school() -> str:
 
 
 def sidebar_school_switcher() -> None:
-    slug = st.session_state.get("school_slug")
-    if not slug:
+    schools = list_schools()
+    if not schools:
         return
-    names = {s["slug"]: s["name"] for s in list_schools()}
+    current_slug = st.session_state.get("school_slug", schools[0]["slug"])
+    slug_list = [s["slug"] for s in schools]
+    names_map = {s["slug"]: s["name"] for s in schools}
+    current_idx = slug_list.index(current_slug) if current_slug in slug_list else 0
+
     with st.sidebar:
-        if st.button(f"🏫 Đổi trường ({names.get(slug, slug)})", use_container_width=True):
-            st.session_state.pop("school_slug", None)
-            st.session_state["explicit_school_switch"] = True
+        st.divider()
+        selected_slug = st.selectbox(
+            "🏫 Trường đang làm việc:",
+            slug_list,
+            index=current_idx,
+            format_func=lambda s: names_map.get(s, s),
+            key="sidebar_school_select_box",
+        )
+        if selected_slug != current_slug:
+            st.session_state["school_slug"] = selected_slug
+            st.session_state.pop("explicit_school_switch", None)
             st.rerun()
 
 

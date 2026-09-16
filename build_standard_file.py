@@ -134,6 +134,7 @@ def build_standard_tkb_ha(sheet_source="Sheet1", output_file="TKB_Ha_Chuan.xlsx"
         'Ngữ văn': 'Ngữ văn',
         'Toán': 'Toán học',
         'Toán học': 'Toán học',
+        'Tiếng Anh': 'Ngoại ngữ',
         'Ngoại ngữ': 'Ngoại ngữ',
         'GDTC': 'Giáo dục thể chất',
         'LSĐL (Sử)': 'Lịch sử và Địa Lý (Lịch sử)',

@@ -41,6 +41,7 @@ from core.scheduler.cpsat.solver import (
     solve_to_result,
     solve,
 )
+from core.scheduler.hdtn import get_hdtn_pinned_slots_for_class
 
 
 def build_model(inp: SchedulingInput) -> CpSatModel:
@@ -71,26 +72,12 @@ def build_model(inp: SchedulingInput) -> CpSatModel:
     ban_busy = set(inp.ban_busy) if inp.ban_busy else set()
     allowed_cells = inp.subject_class_allowed_cells or {}
 
-    chao_co_slots = set()
-    shl_slots = set()
+    hdtn_pinned_slots = set()
     if not inp.hdtn_thematic_week and role_index.hdtn_id is not None:
-        for s in inp.slots:
-            if (s.ts.weekday == config.chao_co_weekday and s.ts.session == "S"
-                    and s.ts.period == config.chao_co_period
-                    and inp.need.get((role_index.hdtn_id, s.class_id), 0) > 0):
-                chao_co_slots.add(s.slot_id)
-
-        class_has_chieu = defaultdict(bool)
-        for s in inp.slots:
-            if s.ts.session == "C":
-                class_has_chieu[s.class_id] = True
         for c_id, c_slots in slots_by_class.items():
-            if inp.need.get((role_index.hdtn_id, c_id), 0) >= 2:
-                target_wd = 6 if class_has_chieu[c_id] else 7
-                day_slots = [s for s in c_slots if s.ts.session == "S" and s.ts.weekday == target_wd]
-                if day_slots:
-                    shl_target = max(day_slots, key=lambda s: s.ts.period)
-                    shl_slots.add(shl_target.slot_id)
+            need_hdtn = inp.need.get((role_index.hdtn_id, c_id), 0)
+            pinned = get_hdtn_pinned_slots_for_class(c_id, c_slots, config, need_hdtn, inp.hdtn_thematic_week)
+            hdtn_pinned_slots.update(s.slot_id for s in pinned)
 
     x = {}
     for s in inp.slots:
@@ -100,9 +87,7 @@ def build_model(inp: SchedulingInput) -> CpSatModel:
                 continue
 
             # Domain Pruning
-            if s.slot_id in chao_co_slots and s_id != role_index.hdtn_id:
-                continue
-            if s.slot_id in shl_slots and s_id != role_index.hdtn_id:
+            if s.slot_id in hdtn_pinned_slots and s_id != role_index.hdtn_id:
                 continue
             if s_id in morning_only and s.ts.session == "C":
                 continue

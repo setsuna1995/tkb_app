@@ -108,6 +108,16 @@ class SchedulingConfig:
     gdtc_afternoon_allowed_periods: tuple = (2, 3)     # GDTC chỉ xếp tiết 2-3 buổi chiều
     chao_co_weekday: int = 2
     chao_co_period: int = 1
+    chao_co_session: str = "S"
+    hdtn_p1_weekday: int = 2
+    hdtn_p1_session: str = "S"
+    hdtn_p1_period: int = 1
+    hdtn_p2_weekday: Optional[int] = None   # None = Tự do (thuật toán tự xếp)
+    hdtn_p2_session: Optional[str] = "S"
+    hdtn_p2_period: Optional[int] = None
+    hdtn_p3_weekday: Optional[int] = None   # None = Tự động tiết cuối tuần (T6 nếu học chiều, T7 nếu chỉ học sáng)
+    hdtn_p3_session: Optional[str] = "S"
+    hdtn_p3_period: Optional[int] = None   # None hoặc 0 = Tiết cuối buổi; 1..5 = Tiết cụ thể
     max_heavy_consecutive: int = 3
     max_periods_per_session: int = 4
     teacher_off_sessions_per_week: int = 1
@@ -163,6 +173,16 @@ class SchedulingConfig:
     gvcn_monday_period2_enabled: bool = True  # Ưu tiên mềm: tiết 2 Thứ 2 nên do GVCN dạy lớp chủ nhiệm
     gvcn_monday_period2_exempt_class_ids: frozenset = field(default_factory=frozenset)  # lớp được miễn trừ luật trên
 
+    def __post_init__(self):
+        if self.chao_co_weekday != 2 and self.hdtn_p1_weekday == 2:
+            self.hdtn_p1_weekday = self.chao_co_weekday
+        elif self.hdtn_p1_weekday != 2 and self.chao_co_weekday == 2:
+            self.chao_co_weekday = self.hdtn_p1_weekday
+
+        if self.chao_co_period != 1 and self.hdtn_p1_period == 1:
+            self.hdtn_p1_period = self.chao_co_period
+        elif self.hdtn_p1_period != 1 and self.chao_co_period == 1:
+            self.chao_co_period = self.hdtn_p1_period
 
 
 @dataclass

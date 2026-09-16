@@ -84,8 +84,20 @@ def map_subject_name(mon: Optional[str], phan_mon: Optional[str] = None) -> Opti
     if any(x in m.lower() for x in ["văn", "van", "ngữ văn", "ngu van"]):
         return "Ngữ văn"
     if any(x in m.lower() for x in ["anh", "ngoại ngữ", "ngoai ngu", "tiếng anh"]):
-        return "Ngoại ngữ"
+        return "Tiếng Anh"
     return None
+
+
+SUBJECT_ALIASES: dict[str, list[str]] = {
+    "Tiếng Anh": ["Tiếng Anh", "Ngoại ngữ", "Anh"],
+    "Ngoại ngữ": ["Ngoại ngữ", "Tiếng Anh", "Anh"],
+    "Hoạt động trải nghiệm, hướng nghiệp": ["Hoạt động trải nghiệm, hướng nghiệp", "HĐTN", "Hoạt động trải nghiệm"],
+    "HĐTN": ["HĐTN", "Hoạt động trải nghiệm, hướng nghiệp", "Hoạt động trải nghiệm"],
+    "Toán học": ["Toán học", "Toán"],
+    "Toán": ["Toán", "Toán học"],
+    "Ngữ văn": ["Ngữ văn", "Văn"],
+    "Văn": ["Văn", "Ngữ văn"],
+}
 
 
 def _find_grade_from_sheet_name(sheet_name: str) -> Optional[int]:
@@ -215,16 +227,22 @@ def import_weekly_curriculum_from_excel(
             if not canonical_name:
                 continue
 
-            if canonical_name not in subj_name_to_id:
-                # Dynamically create subject if missing -- ROLE_THUONG (môn thường, không
-                # heavy/kép/GDTC/HDTN) là mặc định an toàn cho môn mới phát hiện qua import,
-                # trường có thể sửa lại role_code thủ công sau ở trang Khai báo nếu cần
-                # (2026-09-05: sửa NameError -- ROLE_NONE chưa từng tồn tại/import ở đây).
+            matched_name = None
+            if canonical_name in subj_name_to_id:
+                matched_name = canonical_name
+            else:
+                for alias in SUBJECT_ALIASES.get(canonical_name, []):
+                    if alias in subj_name_to_id:
+                        matched_name = alias
+                        break
+
+            if matched_name is None:
                 sid = repo.upsert_subject(conn, canonical_name, role_code=ROLE_THUONG, sort_order=len(subj_name_to_id))
                 subj_name_to_id[canonical_name] = sid
+                matched_name = canonical_name
 
-            subj_id = subj_name_to_id[canonical_name]
-            subjects_mapped.add(canonical_name)
+            subj_id = subj_name_to_id[matched_name]
+            subjects_mapped.add(matched_name)
 
             for col_idx, w_num in col_to_week.items():
                 raw_val = ws.cell(r, col_idx).value

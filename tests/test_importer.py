@@ -75,3 +75,15 @@ def test_import_infers_frame_template_from_real_khung_pattern(conn):
 
 def teachers_by_id(conn):
     return {t.teacher_id: t for t in repo.list_teachers(conn)}
+
+
+def test_import_do_can_phan_hieu_workbook(conn):
+    do_can_path = os.path.join(os.path.dirname(__file__), "..", "THCS_Do_Can_Phan_Hieu.xlsx")
+    if not os.path.exists(do_can_path):
+        pytest.skip("THCS_Do_Can_Phan_Hieu.xlsx not found")
+    report = import_xlsm(conn, do_can_path)
+    assert report.counts["classes"] == 20
+    assert report.counts["subjects"] == 16
+    assert report.counts["teachers"] == 41
+    assert len(report.warnings) == 0
+
