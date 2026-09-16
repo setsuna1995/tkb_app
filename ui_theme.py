@@ -476,18 +476,18 @@ def render_page_header(
     icon_html = f'<div class="tkb-page-header-icon">{html.escape(icon)}</div>' if icon else ""
     desc_html = f'<p class="tkb-page-header-desc">{html.escape(subtitle)}</p>' if subtitle else ""
 
-    header_html = f"""
-    <div class="tkb-page-header">
-        <div class="tkb-page-header-title-group">
-            {icon_html}
-            <div>
-                <h1 class="tkb-page-header-h1">{html.escape(title)}</h1>
-                {desc_html}
-            </div>
-        </div>
-        {badge_html}
-    </div>
-    """
+    header_html = (
+        f'<div class="tkb-page-header">'
+        f'<div class="tkb-page-header-title-group">'
+        f'{icon_html}'
+        f'<div>'
+        f'<h1 class="tkb-page-header-h1">{html.escape(title)}</h1>'
+        f'{desc_html}'
+        f'</div>'
+        f'</div>'
+        f'{badge_html}'
+        f'</div>'
+    )
     st.markdown(header_html, unsafe_allow_html=True)
 
 
@@ -501,17 +501,16 @@ def render_kpi_card(
     """Returns HTML for a modern KPI card."""
     icon_html = f'<div class="tkb-kpi-icon">{html.escape(icon)}</div>' if icon else ""
     sub_html = f'<div class="tkb-kpi-subtitle">{html.escape(subtitle)}</div>' if subtitle else ""
-    card_html = f"""
-    <div class="tkb-kpi-card variant-{html.escape(variant)}">
-        <div class="tkb-kpi-top">
-            <span class="tkb-kpi-title">{html.escape(title)}</span>
-            {icon_html}
-        </div>
-        <div class="tkb-kpi-value">{html.escape(str(value))}</div>
-        {sub_html}
-    </div>
-    """
-    return card_html
+    return (
+        f'<div class="tkb-kpi-card variant-{html.escape(variant)}">'
+        f'<div class="tkb-kpi-top">'
+        f'<span class="tkb-kpi-title">{html.escape(title)}</span>'
+        f'{icon_html}'
+        f'</div>'
+        f'<div class="tkb-kpi-value">{html.escape(str(value))}</div>'
+        f'{sub_html}'
+        f'</div>'
+    )
 
 
 def render_kpi_row(cards_data: list[dict[str, Any]]) -> None:
@@ -551,12 +550,12 @@ def render_callout_html(message: str, level: str = "info", title: str | None = N
         if title
         else f'<div class="tkb-callout-title">{icon} Thông báo</div>'
     )
-    return f"""
-    <div class="tkb-callout tkb-callout-{html.escape(level)}">
-        {title_html}
-        <div>{html.escape(message)}</div>
-    </div>
-    """
+    return (
+        f'<div class="tkb-callout tkb-callout-{html.escape(level)}">'
+        f'{title_html}'
+        f'<div>{html.escape(message)}</div>'
+        f'</div>'
+    )
 
 
 def render_callout(message: str, level: str = "info", title: str | None = None) -> None:
@@ -567,15 +566,13 @@ def render_callout(message: str, level: str = "info", title: str | None = None) 
 def render_card(title: str, content_html: str, badge: str | None = None) -> None:
     """Renders a bento card container."""
     badge_html = f'<span class="tkb-badge tkb-badge-info">{html.escape(badge)}</span>' if badge else ""
-    card_html = f"""
-    <div class="tkb-card">
-        <div class="tkb-card-header">
-            <h3 class="tkb-card-title">{html.escape(title)}</h3>
-            {badge_html}
-        </div>
-        <div>
-            {content_html}
-        </div>
-    </div>
-    """
+    card_html = (
+        f'<div class="tkb-card">'
+        f'<div class="tkb-card-header">'
+        f'<h3 class="tkb-card-title">{html.escape(title)}</h3>'
+        f'{badge_html}'
+        f'</div>'
+        f'<div>{content_html}</div>'
+        f'</div>'
+    )
     st.markdown(card_html, unsafe_allow_html=True)

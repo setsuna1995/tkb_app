@@ -16,3 +16,10 @@ def test_render_callout_html():
     callout = render_callout_html("Cảnh báo định mức", level="warning", title="Chú ý")
     assert "Cảnh báo định mức" in callout
     assert "tkb-callout-warning" in callout
+
+
+def test_render_kpi_card_no_markdown_code_block_indentation():
+    card = render_kpi_card("Số môn", 16, subtitle="Phân loại", icon="📚", variant="info")
+    for line in card.strip().splitlines():
+        assert not line.startswith("    "), f"Line should not have 4-space indent (breaks st.markdown): {line}"
+
