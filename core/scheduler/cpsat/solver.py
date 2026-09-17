@@ -46,7 +46,7 @@ def build_result(built: CpSatModel, solver: cp_model.CpSolver, diagnostics: Opti
 
     rule_counts = {
         rule_id: int(sum(solver.Value(term) for term in terms))
-        for rule_id, terms in built.penalty_terms.items() if terms
+        for rule_id, terms in built.penalty_terms.items() if terms and not rule_id.startswith("_")
     }
 
     successes_found = 1 if not relaxed_rules else 0

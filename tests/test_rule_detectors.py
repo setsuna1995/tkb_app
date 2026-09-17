@@ -232,3 +232,11 @@ def test_detect_rule_skips_rules_the_school_turned_off():
 def test_every_detected_rule_is_registered_with_a_resolvable_flag():
     assert set(DETECTORS) <= set(RULES)
     assert {rule.config_flag for rule in RULES.values()} - {None} <= set(RULE_FLAG_NAMES)
+
+
+def test_only_known_gap_is_unregistered_ii9():
+    """II.9 (teacher day-off rule) is penalised by the CP-SAT model but has no
+    detector yet -- Plan 3 territory. This test pins the gap so it doesn't
+    silently grow; if it starts failing, either a detector was added for II.9
+    (update this test) or a NEW rule quietly lost its detector (investigate)."""
+    assert set(RULES) - set(DETECTORS) == {"II.9"}

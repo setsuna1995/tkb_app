@@ -11,7 +11,7 @@ Hệ thống được tổ chức theo kiến trúc phân tầng rõ ràng (Laye
 ```mermaid
 graph TD
     UI["Lớp Giao Diện (Streamlit)<br/>app.py, ui_common.py, pages/*.py"] --> CoreSched["Bộ Điều Phối & Lập Lịch (core/scheduler)<br/>engine.py, cpsat_model.py, constants.py"]
-    UI --> CoreVal["Bộ Thẩm Định Luật (core/validation)<br/>rule_checker.py, rules_registry.py"]
+    UI --> CoreVal["Bộ Thẩm Định Luật (core/validation)<br/>rule_checker.py, core/rules/"]
     UI --> DataRepo["Lớp Truy Xuất Dữ Liệu (data/repositories)<br/>classes, teachers, subjects, config, assignments"]
     UI --> IOExcel["Lớp Nhập/Xuất Excel (data/io_excel)<br/>importer.py, exporter.py"]
 
@@ -31,7 +31,7 @@ Dựa trên thuật toán phân cụm Leiden từ Knowledge Graph của GitNexus
 | Cụm (Community) | Tệp chính | Vai trò & Trách nhiệm |
 |---|---|---|
 | **Scheduler** | `core/scheduler/engine.py`<br/>`core/scheduler/cpsat_model.py`<br/>`core/scheduler/constants.py`<br/>`core/scheduler/quality.py` | Lõi xếp TKB toàn trường. Độc quyền sử dụng bộ giải tối ưu toàn cục Google OR-Tools CP-SAT (Pass 1: chẩn đoán khả thi thuần túy; Pass 2: tối ưu đa mục tiêu với Early Stopping). Động cơ Heuristic cũ đã được loại bỏ hoàn toàn. |
-| **Validation** | `core/validation/*.py`<br/>`core/rules_registry.py` | Kiểm tra vi phạm 18 tiêu chí (I.1 - II.15) đối với kết quả xếp TKB hoặc dữ liệu nhập vào. |
+| **Validation** | `core/validation/*.py`<br/>`core/rules/` | Kiểm tra vi phạm 18 tiêu chí (I.1 - II.15) đối với kết quả xếp TKB hoặc dữ liệu nhập vào. |
 | **Repositories** | `data/repositories/*.py`<br/>`data/db.py` | Tương tác SQLite CRUD với các bảng phân công, giáo viên, lớp học, cấu hình tuần/tiết/phòng. |
 | **Io_excel** | `data/io_excel/importer.py`<br/>`data/io_excel/exporter.py` | Đọc/ghi biểu mẫu Excel chuẩn của Bộ GD&ĐT, giữ nguyên định dạng viền, màu sắc, phông chữ. |
 | **UI Pages** | `app.py`, `pages/*.py`<br/>`ui_common.py` | Giao diện tương tác Streamlit: Khai báo, Phân công, Xếp TKB (06_Xep_TKB.py), Xem & Chỉnh sửa, Xuất bản. |

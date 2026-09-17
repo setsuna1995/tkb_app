@@ -365,7 +365,7 @@ def detect_rule(rule_id: str, view: ScheduleView, params: EffectiveParams) -> li
     flag = RULES[rule_id].config_flag
     if flag is not None and not params.flags[flag]:
         return []
-    return [violation for detector in DETECTORS[rule_id] for violation in detector(view, params)]
+    return [violation for detector in DETECTORS.get(rule_id, ()) for violation in detector(view, params)]
 
 
 def run_detectors(view: ScheduleView, params: EffectiveParams) -> list:

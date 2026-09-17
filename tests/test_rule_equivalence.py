@@ -113,6 +113,8 @@ FIXTURES = {
 }
 EXPECTED_BREACH_FIXTURES = frozenset({"infeasible_ii4"})
 RULE_IDS = tuple(sorted(DETECTORS))
+# C.HEAVY_CONSEC và ACAD.MAX hiện pass cả 3 check một cách vacuous (0-vs-0) trên mọi fixture:
+# adaptive-cap logic của chúng (_get_eff_max_heavy trong constraints.py, và academic-floor block) tự nới cap cục bộ mà không ghi lại vào EffectiveParams -- rewiring đó là GĐ 5 (Plan 2), nên harness chưa phát hiện được drift thật ở 2 rule này.
 
 # (check, fixture, rule_id) -> "nguyên nhân -- plan sửa". Điền theo quy trình ở Task 11 Step 4.
 _RELAXATION_UNSCOPED = "Nới lỏng chưa có phạm vi (relaxed_rules cũ) — Plan 2 (A7 Relaxation)"
