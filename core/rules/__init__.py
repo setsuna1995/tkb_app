@@ -24,6 +24,7 @@ class RuleSpec:
     title_vi: str
     tier: RuleTier
     config_flag: Optional[str] = None  # SchedulingConfig attribute that enables/disables this rule, if any
+    blocks_save: bool = False  # a BREACH of this rule disables the save button until the user overrides
 
 
 RULES: dict[str, RuleSpec] = {
@@ -39,6 +40,7 @@ RULES: dict[str, RuleSpec] = {
         title_vi="GV tải >=10 tiết/tuần phải có mặt dạy vào sáng Thứ 2, Thứ 5, Thứ 6",
         tier=RuleTier.HARD_POST_GENERATION,
         config_flag=None,
+        blocks_save=True,
     ),
     "II.4": RuleSpec(
         id="II.4",
@@ -48,6 +50,7 @@ RULES: dict[str, RuleSpec] = {
         title_vi="Hạn chế GV dạy 1 tiết/buổi hoặc 1 tiết/ngày (trừ GV dưới ngưỡng cấu hình, mặc định 8 tiết/tuần)",
         tier=RuleTier.HARD_POST_GENERATION,
         config_flag="avoid_teacher_lone_periods",
+        blocks_save=True,
     ),
     "II.7": RuleSpec(
         id="II.7",
@@ -60,6 +63,7 @@ RULES: dict[str, RuleSpec] = {
         title_vi="Không xếp GV dạy sáng 1 tiết + chiều 1 tiết trong cùng ngày",
         tier=RuleTier.HARD_POST_GENERATION,
         config_flag="avoid_teacher_lone_periods",
+        blocks_save=True,
     ),
     "II.9": RuleSpec(
         id="II.9",
