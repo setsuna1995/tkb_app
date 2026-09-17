@@ -13,6 +13,7 @@ from __future__ import annotations
 from collections import Counter, defaultdict
 
 from core.models import WEEKDAY_NAMES
+from core.rules import RULES
 from core.rules.params import EffectiveParams
 from core.rules.view import ScheduleView
 from core.rules.violations import Violation
@@ -21,6 +22,9 @@ SESSION_NAMES = {"S": "Sáng", "C": "Chiều"}
 MIN_FREE_MORNING_PERIODS = 2      # fewer free periods than this = cannot avoid a lone session (II.4)
 LONG_MORNING_RUN = 4              # II.14
 MIN_PERIODS_FOR_GAP = 2
+PAIR_SIZE = 2
+AFTERNOON_HEAVY_FORBIDDEN_PERIOD = 3   # II.15
+MIN_MORNING_PERIODS_FOR_ACADEMIC_FLOOR = 3
 
 
 def _day(weekday: int) -> str:
@@ -182,3 +186,187 @@ def _required_mornings(teacher_id: int, total: int, params: EffectiveParams) -> 
         return tuple(strict)
     mandatory = tuple(wd for wd in params.mandatory_morning_weekdays if wd not in params.strict_morning_weekdays)
     return (*strict, *mandatory)
+
+
+# C.GDTC_PERIOD -- mirrors constraints.py:_add_subject_constraints rule 3
+def detect_gdtc_periods(view: ScheduleView, params: EffectiveParams) -> list:
+    allowed = {"S": params.gdtc_morning_allowed_periods, "C": params.gdtc_afternoon_allowed_periods}
+    return [
+        Violation("C.GDTC_PERIOD", class_id=slot.class_id, subject_id=subject_id, weekday=slot.ts.weekday,
+                  session=slot.ts.session, period=slot.ts.period,
+                  detail=f"{view.class_name(slot.class_id)}: tiết GDTC ở tiết {slot.ts.period} "
+                         f"{_session(slot.ts.session)} ({_day(slot.ts.weekday)}) ngoài khung giờ cho phép")
+        for slot, subject_id, _teacher in view.placed()
+        if subject_id == view.roles.gdtc_id and allowed.get(slot.ts.session)
+        and slot.ts.period not in allowed[slot.ts.session]
+    ]
+
+
+# C.NON_CONSEC_DAYS -- mirrors constraints.py:_add_subject_constraints rule 4
+def detect_non_consecutive_days(view: ScheduleView, params: EffectiveParams) -> list:
+    days = defaultdict(set)
+    for slot, subject_id, _teacher in view.placed():
+        if subject_id in params.non_consecutive_subject_ids:
+            days[slot.class_id, subject_id].add(slot.ts.weekday)
+    return [
+        Violation("C.NON_CONSEC_DAYS", class_id=cid, subject_id=sid, weekday=wd,
+                  detail=f"{view.class_name(cid)}: môn {view.subject_name(sid)} học 2 ngày liền "
+                         f"({_day(wd)} - {_day(wd + 1)})")
+        for (cid, sid), weekdays in days.items() for wd in sorted(weekdays) if wd + 1 in weekdays
+    ]
+
+
+# C.MORNING_ONLY -- mirrors constraints.py:_add_subject_constraints rules 1-2
+def detect_morning_only(view: ScheduleView, params: EffectiveParams) -> list:
+    return [
+        Violation("C.MORNING_ONLY", class_id=slot.class_id, subject_id=subject_id, weekday=slot.ts.weekday,
+                  session=slot.ts.session, period=slot.ts.period,
+                  detail=f"{view.class_name(slot.class_id)}: môn {view.subject_name(subject_id)} chỉ học sáng "
+                         f"nhưng xếp chiều {_day(slot.ts.weekday)} tiết {slot.ts.period}")
+        for slot, subject_id, _teacher in view.placed()
+        if subject_id in params.morning_only_subject_ids and slot.ts.session == "C"
+    ]
+
+
+def _runs(sorted_periods: list) -> list:
+    """(start, length) of each maximal run of consecutive periods."""
+    runs = []
+    for period in sorted_periods:
+        if runs and period == runs[-1][0] + runs[-1][1]:
+            runs[-1] = (runs[-1][0], runs[-1][1] + 1)
+        else:
+            runs.append((period, 1))
+    return runs
+
+
+# C.HEAVY_CONSEC -- mirrors constraints.py:_add_subject_constraints rule 6 (sliding window)
+def detect_heavy_consecutive(view: ScheduleView, params: EffectiveParams) -> list:
+    heavy_periods = defaultdict(set)
+    for slot, subject_id, _teacher in view.placed():
+        if subject_id in view.roles.heavy_ids:
+            heavy_periods[slot.class_id, slot.ts.weekday, slot.ts.session].add(slot.ts.period)
+    violations = []
+    for (cid, wd, sess), periods in heavy_periods.items():
+        cap = params.max_heavy_consecutive[cid, sess].declared
+        violations += [
+            Violation("C.HEAVY_CONSEC", class_id=cid, weekday=wd, session=sess, period=start, count=length,
+                      detail=f"{view.class_name(cid)}: {length} tiết môn Nặng liên tiếp {_day(wd)} {_session(sess)} "
+                             f"từ tiết {start} (trần cấu hình {cap})")
+            for start, length in _runs(sorted(periods)) if length > cap
+        ]
+    return violations
+
+
+# C.HEAVY_P3 (Tiêu chí II.15) -- mirrors constraints.py:_add_subject_constraints rule 7
+def detect_heavy_afternoon_period3(view: ScheduleView, params: EffectiveParams) -> list:
+    return [
+        Violation("C.HEAVY_P3", class_id=slot.class_id, subject_id=subject_id, weekday=slot.ts.weekday,
+                  session="C", period=slot.ts.period,
+                  detail=f"{view.class_name(slot.class_id)}: môn {view.subject_name(subject_id)} xếp tiết 3 chiều "
+                         f"{_day(slot.ts.weekday)} — học sinh dễ mệt cuối ngày")
+        for slot, subject_id, _teacher in view.placed()
+        if subject_id in view.roles.heavy_ids and slot.ts.session == "C"
+        and slot.ts.period == AFTERNOON_HEAVY_FORBIDDEN_PERIOD
+    ]
+
+
+# C.SUBJECT_CELLS -- mirrors constraints.py:_add_subject_constraints rule 8. Reads the same
+# inp.subject_class_allowed_cells the solver used, not a second DB query (spec V7).
+def detect_subject_cells(view: ScheduleView, params: EffectiveParams) -> list:
+    violations = []
+    for slot, subject_id, _teacher in view.placed():
+        allowed = view.allowed_cells.get((subject_id, slot.class_id))
+        if allowed is not None and (slot.ts.weekday, slot.ts.session) not in allowed:
+            violations.append(Violation(
+                "C.SUBJECT_CELLS", class_id=slot.class_id, subject_id=subject_id, weekday=slot.ts.weekday,
+                session=slot.ts.session, period=slot.ts.period,
+                detail=f"{view.class_name(slot.class_id)}: môn {view.subject_name(subject_id)} xếp "
+                       f"{_day(slot.ts.weekday)} {_session(slot.ts.session)} ngoài các buổi được phép",
+            ))
+    return violations
+
+
+# C.SINGLE_PAIR -- mirrors constraints.py:_add_block_constraints (single-pair branch).
+# Adjacency and the zero-pair case are NOT checked yet -- that is spec V2, Plan 3.
+def detect_single_pair(view: ScheduleView, params: EffectiveParams) -> list:
+    per_day = defaultdict(Counter)
+    for slot, subject_id, _teacher in view.placed():
+        if subject_id in view.roles.single_pair_ids:
+            per_day[slot.class_id, subject_id][slot.ts.weekday] += 1
+    violations = []
+    for (cid, sid), counts in per_day.items():
+        pair_days = sorted(wd for wd, n in counts.items() if n >= PAIR_SIZE)
+        excess_days = sorted(wd for wd, n in counts.items() if n > PAIR_SIZE)
+        if len(pair_days) > 1 or excess_days:
+            violations.append(Violation(
+                "C.SINGLE_PAIR", class_id=cid, subject_id=sid, count=len(pair_days),
+                detail=f"{view.class_name(cid)}: môn {view.subject_name(sid)} có {len(pair_days)} ngày xếp cặp "
+                       f"({', '.join(_day(wd) for wd in pair_days)})"
+                       + (f", quá 2 tiết vào {', '.join(_day(wd) for wd in excess_days)}" if excess_days else ""),
+            ))
+    return violations
+
+
+def _morning_academic_counts(view: ScheduleView) -> Counter:
+    return Counter((slot.class_id, slot.ts.weekday) for slot, subject_id, _teacher in view.placed()
+                   if slot.ts.session == "S" and subject_id in view.academic_ids)
+
+
+# ACAD.MAX -- mirrors constraints.py:_add_class_constraints rule 8 (upper bound)
+def detect_academic_overload(view: ScheduleView, params: EffectiveParams) -> list:
+    violations = []
+    for (cid, wd), n in sorted(_morning_academic_counts(view).items()):
+        cap = params.max_academic_per_morning[cid].declared
+        if n > cap:
+            violations.append(Violation(
+                "ACAD.MAX", class_id=cid, weekday=wd, session="S", count=n,
+                detail=f"{view.class_name(cid)}: sáng {_day(wd)} có {n} tiết học thuật (trần {cap}) — học sinh bị quá tải",
+            ))
+    return violations
+
+
+# ACAD.MIN -- mirrors objectives.py section 6d (soft floor)
+def detect_academic_underload(view: ScheduleView, params: EffectiveParams) -> list:
+    counts = _morning_academic_counts(view)
+    morning_sizes = Counter((s.class_id, s.ts.weekday) for s in view.slots if s.ts.session == "S")
+    minimum = params.min_academic_per_morning
+    return [
+        Violation("ACAD.MIN", class_id=cid, weekday=wd, session="S", count=counts[cid, wd],
+                  detail=f"{view.class_name(cid)}: sáng {_day(wd)} chỉ có {counts[cid, wd]} tiết học thuật "
+                         f"(khuyến nghị ≥ {minimum}) — phân bố tải chưa đều")
+        for (cid, wd), size in sorted(morning_sizes.items())
+        if size >= MIN_MORNING_PERIODS_FOR_ACADEMIC_FLOOR and counts[cid, wd] < minimum
+    ]
+
+
+DETECTORS: dict = {
+    "II.3": (detect_teacher_missing_mandatory_mornings,),
+    "II.4": (detect_teacher_lone_sessions, detect_teacher_lone_days),
+    "II.7": (detect_teacher_gaps,),
+    "II.8": (detect_teacher_split_days,),
+    "II.14": (detect_teacher_4_consecutive_mornings,),
+    "T.CONFLICT": (detect_teacher_conflicts,),
+    "T.BUSY": (detect_teacher_busy,),
+    "T.DAY_CAP": (detect_teacher_day_cap,),
+    "C.GDTC_PERIOD": (detect_gdtc_periods,),
+    "C.NON_CONSEC_DAYS": (detect_non_consecutive_days,),
+    "C.MORNING_ONLY": (detect_morning_only,),
+    "C.HEAVY_CONSEC": (detect_heavy_consecutive,),
+    "C.HEAVY_P3": (detect_heavy_afternoon_period3,),
+    "C.SUBJECT_CELLS": (detect_subject_cells,),
+    "C.SINGLE_PAIR": (detect_single_pair,),
+    "ACAD.MAX": (detect_academic_overload,),
+    "ACAD.MIN": (detect_academic_underload,),
+}
+
+
+def detect_rule(rule_id: str, view: ScheduleView, params: EffectiveParams) -> list:
+    """Violations of one rule, or none when the school turned the rule off."""
+    flag = RULES[rule_id].config_flag
+    if flag is not None and not params.flags[flag]:
+        return []
+    return [violation for detector in DETECTORS[rule_id] for violation in detector(view, params)]
+
+
+def run_detectors(view: ScheduleView, params: EffectiveParams) -> list:
+    return [violation for rule_id in DETECTORS for violation in detect_rule(rule_id, view, params)]

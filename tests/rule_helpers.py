@@ -1,5 +1,6 @@
 """Builders for rule unit tests: a minimal SchedulingInput around hand-placed slots."""
 from core.models import ROLE_HDTN, ClassRoom, SchedulingConfig, SchedulingInput, Subject, Teacher
+from core.rules.detectors import detect_rule
 from core.rules.params import resolve_effective_params
 from core.rules.view import build_schedule_view
 
@@ -39,3 +40,7 @@ def view_and_params(slots, assignment, **input_kwargs):
 
 def pick(violations, *field_names):
     return [tuple(getattr(v, name) for name in field_names) for v in violations]
+
+
+def violations_of(rule_id, inp, assignment):
+    return detect_rule(rule_id, build_schedule_view(inp, assignment), resolve_effective_params(inp))

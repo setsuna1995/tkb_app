@@ -88,6 +88,54 @@ RULES: dict[str, RuleSpec] = {
         title_vi="GV không dạy quá số tiết/ngày theo cấu hình (Tiêu chí II.2)",
         tier=RuleTier.HARD_MODEL,
     ),
+    "C.GDTC_PERIOD": RuleSpec(
+        id="C.GDTC_PERIOD",
+        title_vi="GDTC chỉ xếp trong khung tiết cho phép",
+        tier=RuleTier.HARD_MODEL,
+    ),
+    "C.NON_CONSEC_DAYS": RuleSpec(
+        id="C.NON_CONSEC_DAYS",
+        title_vi="Môn cấm học liền ngày (gồm GDTC) không xếp 2 ngày liên tiếp",
+        tier=RuleTier.HARD_MODEL,
+    ),
+    "C.MORNING_ONLY": RuleSpec(
+        id="C.MORNING_ONLY",
+        title_vi="Môn chỉ học buổi sáng không xếp vào buổi chiều",
+        tier=RuleTier.HARD_MODEL,
+    ),
+    "C.HEAVY_CONSEC": RuleSpec(
+        id="C.HEAVY_CONSEC",
+        title_vi="Môn Nặng không quá số tiết liên tiếp theo cấu hình",
+        tier=RuleTier.HARD_MODEL,
+    ),
+    "C.HEAVY_P3": RuleSpec(
+        id="C.HEAVY_P3",
+        title_vi="Môn Nặng không xếp tiết 3 buổi chiều (Tiêu chí II.15)",
+        tier=RuleTier.HARD_MODEL,
+        config_flag="avoid_heavy_afternoon_period3",
+    ),
+    "C.SUBJECT_CELLS": RuleSpec(
+        id="C.SUBJECT_CELLS",
+        title_vi="Môn chỉ xếp vào các buổi được phép theo luật môn/lớp",
+        tier=RuleTier.HARD_MODEL,
+    ),
+    "C.SINGLE_PAIR": RuleSpec(
+        id="C.SINGLE_PAIR",
+        title_vi="Môn 1 cặp có đúng một cặp 2 tiết, không quá 2 tiết/ngày",
+        tier=RuleTier.HARD_MODEL,
+    ),
+    "ACAD.MAX": RuleSpec(
+        id="ACAD.MAX",
+        title_vi="Buổi sáng không quá số tiết học thuật theo cấu hình",
+        tier=RuleTier.HARD_MODEL,
+        config_flag="balance_morning_academic_load",
+    ),
+    "ACAD.MIN": RuleSpec(
+        id="ACAD.MIN",
+        title_vi="Buổi sáng nên có tối thiểu số tiết học thuật theo cấu hình",
+        tier=RuleTier.SOFT,
+        config_flag="balance_morning_academic_load",
+    ),
 }
 
 HARD_POST_GENERATION_IDS: tuple = tuple(
