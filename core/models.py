@@ -199,6 +199,10 @@ class SchedulingInput:
     extra_kep_ids: frozenset = field(default_factory=frozenset)  # subject_id cần xếp kép CHỈ tuần này
     hdtn_thematic_week: bool = False   # True = tuần chuyên đề CHỈ tuần này (R2, spec 2026-08-30):
                                         # HDTN dồn 3 tiết liền kề, bỏ ghim chào cờ + SHL
+    hdtn_thematic_mode: str = "auto"   # "auto" (thuật toán tự xếp đồng bộ) hoặc "fixed" (cố định thời gian)
+    hdtn_thematic_weekday: Optional[int] = None   # 2..7 (Thứ) khi mode="fixed"
+    hdtn_thematic_session: Optional[str] = "S"    # "S" (Sáng) hoặc "C" (Chiều) khi mode="fixed"
+    hdtn_thematic_start_period: Optional[int] = None  # 1..3 (tiết bắt đầu) khi mode="fixed"
     config: SchedulingConfig = field(default_factory=SchedulingConfig)
     subject_class_allowed_cells: dict = field(default_factory=dict)  # (subject_id, class_id) -> frozenset[(weekday, session)]
 

@@ -209,6 +209,36 @@ with tab_schedule:
         "Tuần này tổ chức chuyên đề (HDTN dồn 3 tiết liền kề toàn trường, bỏ ghim chào cờ + SHL)",
         help="Áp dụng cho toàn trường, chỉ lần chạy xếp TKB này -- không đổi vĩnh viễn.",
     )
+    hdtn_thematic_mode = "auto"
+    hdtn_thematic_weekday = None
+    hdtn_thematic_session = "S"
+    hdtn_thematic_start_period = None
+
+    if hdtn_thematic_week:
+        c_th_mode, c_th_opt = st.columns([1, 2])
+        hdtn_thematic_mode = c_th_mode.radio(
+            "Chế độ xếp 3 tiết HĐTN toàn trường:",
+            ["auto", "fixed"],
+            format_func=lambda m: "Tự động (Thuật toán tự tìm thời điểm đồng bộ tối ưu)" if m == "auto" else "Cố định theo thời gian",
+            key="single_hdtn_thematic_mode",
+        )
+        if hdtn_thematic_mode == "fixed":
+            c_wd, c_sess, c_p = c_th_opt.columns(3)
+            hdtn_thematic_weekday = c_wd.selectbox(
+                "Thứ", [2, 3, 4, 5, 6, 7],
+                format_func=lambda w: f"Thứ {w}" if w < 7 else "Thứ 7",
+                key="single_hdtn_thematic_wd",
+            )
+            hdtn_thematic_session = c_sess.selectbox(
+                "Buổi", ["S", "C"],
+                format_func=lambda s: "Sáng" if s == "S" else "Chiều",
+                key="single_hdtn_thematic_sess",
+            )
+            hdtn_thematic_start_period = c_p.selectbox(
+                "Tiết bắt đầu (3 tiết liền kề)", [1, 2, 3],
+                format_func=lambda p: f"Tiết {p} (đến tiết {p+2})",
+                key="single_hdtn_thematic_p",
+            )
 
     sched_config = repo.get_scheduling_config(conn)
     st.caption("✨ Động cơ lập lịch: **Google OR-Tools CP-SAT** (Tối ưu hóa toàn cục, triệt tiêu vi phạm II.3, II.4, II.8)")
@@ -216,7 +246,12 @@ with tab_schedule:
     if st.button("🚀 Chạy xếp TKB", type="primary"):
         inp = repo.build_scheduling_input(
             conn, parity=parity, seed=seed, extra_kep_ids=extra_kep_ids,
-            hdtn_thematic_week=hdtn_thematic_week, week_no=chosen_week,
+            hdtn_thematic_week=hdtn_thematic_week,
+            hdtn_thematic_mode=hdtn_thematic_mode,
+            hdtn_thematic_weekday=hdtn_thematic_weekday,
+            hdtn_thematic_session=hdtn_thematic_session,
+            hdtn_thematic_start_period=hdtn_thematic_start_period,
+            week_no=chosen_week,
         )
 
         # Thanh tiến trình theo TỪNG ĐỢT giải CP-SAT
@@ -789,6 +824,42 @@ with tab_schedule:
                 key="batch_extra_kep_select",
             )
             batch_extra_kep_ids = frozenset(s.subject_id for s in subjects if s.name in batch_extra_kep_names)
+
+            batch_hdtn_thematic_week = st.checkbox(
+                "Các tuần này tổ chức chuyên đề (HDTN dồn 3 tiết liền kề toàn trường, bỏ ghim chào cờ + SHL)",
+                key="batch_hdtn_thematic_week",
+            )
+            batch_hdtn_thematic_mode = "auto"
+            batch_hdtn_thematic_weekday = None
+            batch_hdtn_thematic_session = "S"
+            batch_hdtn_thematic_start_period = None
+
+            if batch_hdtn_thematic_week:
+                c_b_mode, c_b_opt = st.columns([1, 2])
+                batch_hdtn_thematic_mode = c_b_mode.radio(
+                    "Chế độ xếp 3 tiết HĐTN toàn trường:",
+                    ["auto", "fixed"],
+                    format_func=lambda m: "Tự động (Thuật toán tự tìm thời điểm đồng bộ tối ưu)" if m == "auto" else "Cố định theo thời gian",
+                    key="batch_hdtn_thematic_mode",
+                )
+                if batch_hdtn_thematic_mode == "fixed":
+                    c_wd, c_sess, c_p = c_b_opt.columns(3)
+                    batch_hdtn_thematic_weekday = c_wd.selectbox(
+                        "Thứ", [2, 3, 4, 5, 6, 7],
+                        format_func=lambda w: f"Thứ {w}" if w < 7 else "Thứ 7",
+                        key="batch_hdtn_thematic_wd",
+                    )
+                    batch_hdtn_thematic_session = c_sess.selectbox(
+                        "Buổi", ["S", "C"],
+                        format_func=lambda s: "Sáng" if s == "S" else "Chiều",
+                        key="batch_hdtn_thematic_sess",
+                    )
+                    batch_hdtn_thematic_start_period = c_p.selectbox(
+                        "Tiết bắt đầu (3 tiết liền kề)", [1, 2, 3],
+                        format_func=lambda p: f"Tiết {p} (đến tiết {p+2})",
+                        key="batch_hdtn_thematic_p",
+                    )
+
             batch_quota_warnings = []
             for wn in batch_week_nos:
                 b_qv = repo.get_teacher_quota_view(conn, week_no=wn)
@@ -820,6 +891,10 @@ with tab_schedule:
                         conn, parity=b_parity, seed=b_seed,
                         extra_kep_ids=batch_extra_kep_ids,
                         hdtn_thematic_week=batch_hdtn_thematic_week,
+                        hdtn_thematic_mode=batch_hdtn_thematic_mode,
+                        hdtn_thematic_weekday=batch_hdtn_thematic_weekday,
+                        hdtn_thematic_session=batch_hdtn_thematic_session,
+                        hdtn_thematic_start_period=batch_hdtn_thematic_start_period,
                         week_no=wn,
                     )
                     with st.spinner(f"Đang xếp Tuần {wn} (áp dụng định lượng Tuần {wn})..."):

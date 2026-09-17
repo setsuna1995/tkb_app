@@ -36,6 +36,10 @@ def _weekday_matches(row_weekday: str, ts_weekday: int) -> bool:
 def build_scheduling_input(conn: sqlite3.Connection, parity: str = "C", seed: int = 0,
                             extra_kep_ids: frozenset = frozenset(),
                             hdtn_thematic_week: bool = False,
+                            hdtn_thematic_mode: str = "auto",
+                            hdtn_thematic_weekday: Optional[int] = None,
+                            hdtn_thematic_session: Optional[str] = "S",
+                            hdtn_thematic_start_period: Optional[int] = None,
                             week_no: Optional[int] = None) -> SchedulingInput:
     classes = list_classes(conn)
     subjects = list_subjects(conn)
@@ -102,6 +106,11 @@ def build_scheduling_input(conn: sqlite3.Connection, parity: str = "C", seed: in
         classes=classes, subjects=subjects, teachers=teachers, need=need,
         assigned_teacher=assigned_teacher, ban_busy=ban_busy,
         slots=slots, timeslots=timeslots, seed=seed,
-        extra_kep_ids=extra_kep_ids, hdtn_thematic_week=hdtn_thematic_week, config=config,
+        extra_kep_ids=extra_kep_ids, hdtn_thematic_week=hdtn_thematic_week,
+        hdtn_thematic_mode=hdtn_thematic_mode,
+        hdtn_thematic_weekday=hdtn_thematic_weekday,
+        hdtn_thematic_session=hdtn_thematic_session,
+        hdtn_thematic_start_period=hdtn_thematic_start_period,
+        config=config,
         subject_class_allowed_cells=subject_class_allowed_cells,
     )

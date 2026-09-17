@@ -80,14 +80,19 @@ def _add_objective(built: CpSatModel) -> None:
     used = {}
     lone = {}
 
+    act_by_teacher_ts = getattr(built, "act_by_teacher_ts", None)
     for t in teachers:
         for (wd, sess) in sessions:
             sess_slots = [s for s in inp.slots if s.ts.weekday == wd and s.ts.session == sess]
-            sess_vars = []
-            for s in sess_slots:
-                for subj in inp.subjects:
-                    if (s.slot_id, subj.subject_id) in x and teacher_of.get((s.slot_id, subj.subject_id)) == t:
-                        sess_vars.append(x[s.slot_id, subj.subject_id])
+            if act_by_teacher_ts is not None:
+                sess_ts_ids = sorted({s.ts.ts_id for s in sess_slots})
+                sess_vars = [act_by_teacher_ts[t, ts_id] for ts_id in sess_ts_ids if (t, ts_id) in act_by_teacher_ts]
+            else:
+                sess_vars = []
+                for s in sess_slots:
+                    for subj in inp.subjects:
+                        if (s.slot_id, subj.subject_id) in x and teacher_of.get((s.slot_id, subj.subject_id)) == t:
+                            sess_vars.append(x[s.slot_id, subj.subject_id])
 
             c = m.NewIntVar(0, config.max_periods_per_session, f"cnt_t{t}_wd{wd}_{sess}")
             m.Add(c == sum(sess_vars) if sess_vars else c == 0)
@@ -223,7 +228,9 @@ def _add_objective(built: CpSatModel) -> None:
                 u_p = {}
                 for p in active_p:
                     v_p = m.NewBoolVar(f"ugap_t{t}_wd{wd}_{sess}_p{p}")
-                    m.Add(v_p == sum(periods_map[p]))
+                    for v in periods_map[p]:
+                        m.Add(v_p >= v)
+                    m.Add(v_p <= sum(periods_map[p]))
                     u_p[p] = v_p
 
                 sess_gaps = []

@@ -73,11 +73,25 @@ def build_model(inp: SchedulingInput) -> CpSatModel:
     allowed_cells = inp.subject_class_allowed_cells or {}
 
     hdtn_pinned_slots = set()
+    hdtn_fixed_all_slots = set()
+    thematic_mode = getattr(inp, "hdtn_thematic_mode", "auto")
     if not inp.hdtn_thematic_week and role_index.hdtn_id is not None:
         for c_id, c_slots in slots_by_class.items():
             need_hdtn = inp.need.get((role_index.hdtn_id, c_id), 0)
             pinned = get_hdtn_pinned_slots_for_class(c_id, c_slots, config, need_hdtn, inp.hdtn_thematic_week)
             hdtn_pinned_slots.update(s.slot_id for s in pinned)
+    elif inp.hdtn_thematic_week and thematic_mode == "fixed" and role_index.hdtn_id is not None:
+        target_wd = getattr(inp, "hdtn_thematic_weekday", None)
+        target_sess = getattr(inp, "hdtn_thematic_session", "S") or "S"
+        target_start_p = getattr(inp, "hdtn_thematic_start_period", None)
+        if target_wd is not None and target_start_p is not None:
+            target_periods = {target_start_p, target_start_p + 1, target_start_p + 2}
+            for c_id, c_slots in slots_by_class.items():
+                if inp.need.get((role_index.hdtn_id, c_id), 0) >= 3:
+                    for s in c_slots:
+                        if s.ts.weekday == target_wd and s.ts.session == target_sess and s.ts.period in target_periods:
+                            hdtn_pinned_slots.add(s.slot_id)
+            hdtn_fixed_all_slots = set(hdtn_pinned_slots)
 
     x = {}
     for s in inp.slots:
@@ -88,6 +102,8 @@ def build_model(inp: SchedulingInput) -> CpSatModel:
 
             # Domain Pruning
             if s.slot_id in hdtn_pinned_slots and s_id != role_index.hdtn_id:
+                continue
+            if hdtn_fixed_all_slots and s_id == role_index.hdtn_id and s.slot_id not in hdtn_fixed_all_slots:
                 continue
             if s_id in morning_only and s.ts.session == "C":
                 continue

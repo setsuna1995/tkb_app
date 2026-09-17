@@ -31,20 +31,83 @@ def _add_teacher_constraints(built: CpSatModel) -> None:
         teacher_of[slot_id, subject_id] = effective_assigned[subject_id, class_id]
     built.teacher_of = teacher_of
 
-    vars_by_teacher_ts = defaultdict(list)
-    vars_by_teacher_session = defaultdict(list)
-    vars_by_teacher_day = defaultdict(list)
-    for (slot_id, subject_id), var in built.x.items():
-        t = teacher_of[slot_id, subject_id]
-        ts = slot_by_id[slot_id].ts
-        vars_by_teacher_ts[t, ts.ts_id].append(var)
-        vars_by_teacher_session[t, ts.weekday, ts.session].append(var)
-        vars_by_teacher_day[t, ts.weekday].append(var)
+    role_index = built.role_index
+    hdtn_id = role_index.hdtn_id
+    if inp.hdtn_thematic_week and hdtn_id is not None:
+        vars_by_teacher_ts_hdtn = defaultdict(list)
+        vars_by_teacher_ts_other = defaultdict(list)
+        all_t_ts = set()
+        for (slot_id, subject_id), var in built.x.items():
+            t = teacher_of[slot_id, subject_id]
+            ts = slot_by_id[slot_id].ts
+            all_t_ts.add((t, ts.ts_id))
+            if subject_id == hdtn_id:
+                vars_by_teacher_ts_hdtn[t, ts.ts_id].append(var)
+            else:
+                vars_by_teacher_ts_other[t, ts.ts_id].append(var)
 
-    # 1. GV không dạy 2 lớp cùng tiết.
-    for vs in vars_by_teacher_ts.values():
-        if len(vs) > 1:
-            m.AddAtMostOne(vs)
+        # 1. GV không dạy 2 lớp cùng tiết (ngoại lệ: HĐTN tuần chuyên đề toàn trường cho phép 1 GV phụ trách nhiều lớp)
+        act_by_teacher_ts = {}
+        for (t, ts_id) in all_t_ts:
+            vs_h = vars_by_teacher_ts_hdtn.get((t, ts_id), [])
+            vs_o = vars_by_teacher_ts_other.get((t, ts_id), [])
+            if vs_h:
+                is_h = m.NewBoolVar(f"teach_hdtn_t{t}_ts{ts_id}")
+                for v in vs_h:
+                    m.Add(v <= is_h)
+                m.Add(is_h <= sum(vs_h))
+                if vs_o:
+                    m.Add(is_h + sum(vs_o) <= 1)
+                    if len(vs_o) > 1:
+                        m.AddAtMostOne(vs_o)
+                    act_var = m.NewBoolVar(f"act_t{t}_ts{ts_id}")
+                    m.Add(act_var == is_h + sum(vs_o))
+                    act_by_teacher_ts[t, ts_id] = act_var
+                else:
+                    act_by_teacher_ts[t, ts_id] = is_h
+            else:
+                if len(vs_o) > 1:
+                    m.AddAtMostOne(vs_o)
+                if len(vs_o) == 1:
+                    act_by_teacher_ts[t, ts_id] = vs_o[0]
+                elif vs_o:
+                    act_var = m.NewBoolVar(f"act_t{t}_ts{ts_id}")
+                    m.Add(act_var == sum(vs_o))
+                    act_by_teacher_ts[t, ts_id] = act_var
+
+        vars_by_teacher_session = defaultdict(list)
+        vars_by_teacher_day = defaultdict(list)
+        ts_by_id = {ts.ts_id: ts for ts in inp.timeslots}
+        for (t, ts_id), act in act_by_teacher_ts.items():
+            ts = ts_by_id[ts_id]
+            vars_by_teacher_session[t, ts.weekday, ts.session].append(act)
+            vars_by_teacher_day[t, ts.weekday].append(act)
+        built.act_by_teacher_ts = act_by_teacher_ts
+    else:
+        vars_by_teacher_ts = defaultdict(list)
+        vars_by_teacher_session = defaultdict(list)
+        vars_by_teacher_day = defaultdict(list)
+        for (slot_id, subject_id), var in built.x.items():
+            t = teacher_of[slot_id, subject_id]
+            ts = slot_by_id[slot_id].ts
+            vars_by_teacher_ts[t, ts.ts_id].append(var)
+            vars_by_teacher_session[t, ts.weekday, ts.session].append(var)
+            vars_by_teacher_day[t, ts.weekday].append(var)
+
+        # 1. GV không dạy 2 lớp cùng tiết.
+        for vs in vars_by_teacher_ts.values():
+            if len(vs) > 1:
+                m.AddAtMostOne(vs)
+
+        act_by_teacher_ts = {}
+        for (t, ts_id), vs in vars_by_teacher_ts.items():
+            if len(vs) == 1:
+                act_by_teacher_ts[t, ts_id] = vs[0]
+            elif vs:
+                act_var = m.NewBoolVar(f"act_t{t}_ts{ts_id}")
+                m.Add(act_var == sum(vs))
+                act_by_teacher_ts[t, ts_id] = act_var
+        built.act_by_teacher_ts = act_by_teacher_ts
 
     # 2. GV bận: mọi biến của GV đó tại ts_id bị cấm = 0.
     for (teacher_id, ts_id) in inp.ban_busy:
@@ -292,6 +355,19 @@ def _add_class_constraints(built: CpSatModel) -> None:
                 key = (ps.slot_id, hdtn_id)
                 if key in x:
                     m.Add(x[key] == 1)
+    elif inp.hdtn_thematic_week and getattr(inp, "hdtn_thematic_mode", "auto") == "fixed" and hdtn_id is not None:
+        target_wd = getattr(inp, "hdtn_thematic_weekday", None)
+        target_sess = getattr(inp, "hdtn_thematic_session", "S") or "S"
+        target_start_p = getattr(inp, "hdtn_thematic_start_period", None)
+        if target_wd is not None and target_start_p is not None:
+            target_periods = {target_start_p, target_start_p + 1, target_start_p + 2}
+            for class_id, class_slots in built.slots_by_class.items():
+                if inp.need.get((hdtn_id, class_id), 0) >= 3:
+                    for s in class_slots:
+                        if s.ts.weekday == target_wd and s.ts.session == target_sess and s.ts.period in target_periods:
+                            key = (s.slot_id, hdtn_id)
+                            if key in x:
+                                m.Add(x[key] == 1)
 
     # 5. Không hở tiết giữa buổi của lớp.
     slot_by_coord = {(s.class_id, s.ts.weekday, s.ts.session, s.ts.period): s for s in inp.slots}
@@ -389,6 +465,8 @@ def _add_block_constraints(built: CpSatModel) -> None:
         return
 
     single_pair_ids = getattr(role_index, "single_pair_ids", set()) or set()
+    hdtn_id = role_index.hdtn_id
+    class_hdtn_blocks = defaultdict(dict)
 
     for cls in inp.classes:
         class_id = cls.class_id
@@ -434,6 +512,8 @@ def _add_block_constraints(built: CpSatModel) -> None:
                         session_block_starts_at_p[p] = b
                         block_starts_by_day[wd].append(b)
                         all_block_starts.append(b)
+                        if subject_id == hdtn_id:
+                            class_hdtn_blocks[class_id][wd, sess, p] = b
                         for cs in consec_slots:
                             m.Add(b <= x[cs.slot_id, subject_id])
 
@@ -487,6 +567,45 @@ def _add_block_constraints(built: CpSatModel) -> None:
 
                 if rem > 0:
                     m.Add(sum(partial_days) == 1)
+
+    # Đồng bộ khối HĐTN toàn trường khi ở chế độ tự động (auto)
+    thematic_mode = getattr(inp, "hdtn_thematic_mode", "auto")
+    if inp.hdtn_thematic_week and thematic_mode == "auto" and hdtn_id is not None:
+        p_classes = [cls.class_id for cls in inp.classes if inp.need.get((hdtn_id, cls.class_id), 0) >= 3]
+        if len(p_classes) >= 2 and all(cls_id in class_hdtn_blocks for cls_id in p_classes):
+            common_coords = set.intersection(*[set(class_hdtn_blocks[c].keys()) for c in p_classes])
+            if common_coords:
+                school_blk = {
+                    coord: m.NewBoolVar(f"school_hdtn_wd{coord[0]}_{coord[1]}_p{coord[2]}")
+                    for coord in sorted(common_coords)
+                }
+                m.Add(sum(school_blk.values()) == 1)
+                for c_id in p_classes:
+                    for coord in common_coords:
+                        m.Add(class_hdtn_blocks[c_id][coord] == school_blk[coord])
+                    for coord, b in class_hdtn_blocks[c_id].items():
+                        if coord not in common_coords:
+                            m.Add(b == 0)
+            else:
+                by_session_set = defaultdict(list)
+                for c_id in p_classes:
+                    sess_set = frozenset(coord[1] for coord in class_hdtn_blocks[c_id].keys())
+                    by_session_set[sess_set].append(c_id)
+                for grp_classes in by_session_set.values():
+                    if len(grp_classes) >= 2:
+                        grp_common = set.intersection(*[set(class_hdtn_blocks[c].keys()) for c in grp_classes])
+                        if grp_common:
+                            grp_blk = {
+                                coord: m.NewBoolVar(f"grp_hdtn_wd{coord[0]}_{coord[1]}_p{coord[2]}")
+                                for coord in sorted(grp_common)
+                            }
+                            m.Add(sum(grp_blk.values()) == 1)
+                            for c_id in grp_classes:
+                                for coord in grp_common:
+                                    m.Add(class_hdtn_blocks[c_id][coord] == grp_blk[coord])
+                                for coord, b in class_hdtn_blocks[c_id].items():
+                                    if coord not in grp_common:
+                                        m.Add(b == 0)
 
 
 def _is_teacher_busy_morning(inp: SchedulingInput, teacher_id: int, weekday: int) -> bool:
