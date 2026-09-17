@@ -2,7 +2,7 @@
 from __future__ import annotations
 
 from collections import defaultdict
-from core.models import SchedulingInput, is_bgh
+from core.models import SchedulingInput
 from core.roles import is_academic_subject
 from core.scheduler.constants import (
     SUBJECT_CONSECUTIVE_DAY_SOFT_PENALTY,
@@ -61,16 +61,11 @@ def _add_objective(built: CpSatModel) -> None:
     m = built.model
     inp = built.inp
     config = inp.config
+    params = built.params
     x = built.x
     teacher_of = built.teacher_of
     effective_assigned = _build_effective_assigned_teacher(inp)
-
-    load = defaultdict(int)
-    for (subj_id, cls_id), n in inp.need.items():
-        if n > 0:
-            tid = effective_assigned.get((subj_id, cls_id))
-            if tid is not None and tid > 0:
-                load[tid] += n
+    load = params.teacher_load
 
     teachers = sorted(load.keys())
     sessions = sorted({(s.ts.weekday, s.ts.session) for s in inp.slots})
@@ -94,7 +89,7 @@ def _add_objective(built: CpSatModel) -> None:
                         if (s.slot_id, subj.subject_id) in x and teacher_of.get((s.slot_id, subj.subject_id)) == t:
                             sess_vars.append(x[s.slot_id, subj.subject_id])
 
-            c = m.NewIntVar(0, config.max_periods_per_session, f"cnt_t{t}_wd{wd}_{sess}")
+            c = m.NewIntVar(0, params.max_periods_per_session, f"cnt_t{t}_wd{wd}_{sess}")
             m.Add(c == sum(sess_vars) if sess_vars else c == 0)
             cnt[t, wd, sess] = c
 
@@ -108,13 +103,13 @@ def _add_objective(built: CpSatModel) -> None:
             m.Add(c != 1).OnlyEnforceIf(l.Not())
             lone[t, wd, sess] = l
 
-    avoid_lone = getattr(config, "avoid_teacher_lone_periods", True)
-    min_lone_load = getattr(config, "min_weekly_periods_for_lone_penalty", 8)
-    lone_exempt = getattr(config, "lone_session_exempt_teacher_ids", frozenset()) or frozenset()
-    mand_morns = getattr(config, "mandatory_morning_weekdays", (2, 5, 6))
-    strict_morns = getattr(config, "strict_morning_weekdays", ()) or ()
-    min_mand_load = getattr(config, "min_weekly_periods_for_mandatory_morning", 10)
-    bgh_ids = frozenset(t.teacher_id for t in inp.teachers if is_bgh(t))
+    avoid_lone = params.flags["avoid_teacher_lone_periods"]
+    min_lone_load = params.min_weekly_periods_for_lone_penalty
+    lone_exempt = params.lone_exempt_ids
+    mand_morns = params.mandatory_morning_weekdays
+    strict_morns = params.strict_morning_weekdays
+    min_mand_load = params.min_weekly_periods_for_mandatory_morning
+    bgh_ids = params.bgh_ids
     compact_ids = getattr(config, "compact_schedule_teacher_ids", frozenset()) or frozenset()
 
     penalty_terms = defaultdict(list)
@@ -211,7 +206,7 @@ def _add_objective(built: CpSatModel) -> None:
     # 3. II.7 Tiết trống giữa buổi (gaps) & Phạt lũy tiến khoảng trống cả tuần
     excess_gap_terms_2nd = []
     excess_gap_terms_3rd = []
-    if getattr(config, "avoid_teacher_gaps", True):
+    if params.flags["avoid_teacher_gaps"]:
         all_teacher_gaps = defaultdict(list)
         for t in teachers:
             for (wd, sess) in sessions:
@@ -272,9 +267,9 @@ def _add_objective(built: CpSatModel) -> None:
                 excess_gap_terms_3rd.append(eg2)
 
     # 4. II.14 >= 4 tiết sáng liên tiếp
-    if getattr(config, "avoid_teacher_4_consecutive_morning", True):
+    if params.flags["avoid_teacher_4_consecutive_morning"]:
         for t in teachers:
-            if load[t] <= 20:
+            if load[t] <= params.max_load_for_4consec_penalty:
                 for wd in weekdays:
                     if (t, wd, "S") in cnt:
                         hm = m.NewBoolVar(f"hm_t{t}_wd{wd}")
@@ -283,7 +278,7 @@ def _add_objective(built: CpSatModel) -> None:
                         penalty_terms["II.14"].append(hm)
 
     # 5. II.9 Nghỉ trọn chiều
-    if getattr(config, "balance_afternoon_teachers", True):
+    if params.flags["balance_afternoon_teachers"]:
         classes_with_afternoon = {s.class_id for s in inp.slots if s.ts.session == "C"}
         teacher_classes = defaultdict(set)
         effective_assigned = _build_effective_assigned_teacher(inp)
@@ -389,12 +384,12 @@ def _add_objective(built: CpSatModel) -> None:
                     penalty_terms["_subject_dispersion"].append(consec)
 
     # 6d. Cân bằng tải học thuật buổi sáng (phạt mềm khi buổi sáng >= 3 tiết có < min_academic tiết học thuật)
-    if getattr(config, "balance_morning_academic_load", True):
+    if params.flags["balance_morning_academic_load"]:
         academic_ids = {
             s.subject_id for s in inp.subjects
             if is_academic_subject(s.name)
         }
-        min_academic = getattr(config, "min_academic_per_morning", 2)
+        min_academic = params.min_academic_per_morning
         if academic_ids and min_academic > 0:
             morning_slots_by_class_day = defaultdict(list)
             for s in inp.slots:

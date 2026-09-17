@@ -11,6 +11,7 @@ from typing import Callable, Optional, Sequence
 
 from core.models import SchedulingInput, ScheduleResult
 from core.roles import resolve_roles
+from core.rules.params import resolve_effective_params
 from core.scheduler.placement import _build_effective_assigned_teacher
 from core.scheduler.cpsat.types import (
     CpSatModel,
@@ -58,6 +59,7 @@ def build_model(inp: SchedulingInput) -> CpSatModel:
         slots_by_ts[s.ts.ts_id].append(s)
 
     config = inp.config
+    params = resolve_effective_params(inp)
     role_index = resolve_roles(inp.subjects, inp.extra_kep_ids, inp.hdtn_thematic_week,
                                config.single_pair_subject_ids)
     effective_assigned = _build_effective_assigned_teacher(inp)
@@ -151,7 +153,8 @@ def build_model(inp: SchedulingInput) -> CpSatModel:
 
     built = CpSatModel(model=m, x=x, inp=inp,
                        slots_by_class=dict(slots_by_class),
-                       slots_by_ts=dict(slots_by_ts))
+                       slots_by_ts=dict(slots_by_ts),
+                       params=params)
     built.role_index = role_index
     _add_teacher_constraints(built)
     _add_subject_constraints(built)

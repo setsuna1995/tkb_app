@@ -21,7 +21,7 @@ def _add_teacher_constraints(built: CpSatModel) -> None:
     """
     m = built.model
     inp = built.inp
-    config = inp.config
+    params = built.params
     slot_by_id = {s.slot_id: s for s in inp.slots}
     effective_assigned = _build_effective_assigned_teacher(inp)
 
@@ -119,12 +119,11 @@ def _add_teacher_constraints(built: CpSatModel) -> None:
 
     # 3. Trần tiết/buổi.
     for vs in vars_by_teacher_session.values():
-        m.Add(sum(vs) <= config.max_periods_per_session)
+        m.Add(sum(vs) <= params.max_periods_per_session)
 
-    # 4. Trần tiết/ngày.
-    max_teacher_day = getattr(config, "max_teacher_periods_per_day", 5)
+    # 4. Trần tiết/ngày. Hậu kiểm đối chứng: core/rules/detectors.py:detect_teacher_day_cap
     for vs in vars_by_teacher_day.values():
-        m.Add(sum(vs) <= max_teacher_day)
+        m.Add(sum(vs) <= params.max_teacher_periods_per_day)
 
     # 5. Buổi nghỉ của GV.
     _add_off_day_constraints(built, vars_by_teacher_session)
@@ -137,7 +136,7 @@ def _add_off_day_constraints(built: CpSatModel, vars_by_teacher_session: dict) -
     config = inp.config
     teachers_by_id = {t.teacher_id: t for t in inp.teachers}
     all_wd_sess = sorted({(ts.weekday, ts.session) for ts in inp.timeslots})
-    mandatory_mornings = set(getattr(config, "mandatory_morning_weekdays", (2, 5, 6)))
+    mandatory_mornings = set(built.params.mandatory_morning_weekdays)
     forbidden_base = set(config.forbidden_off_cells) | {(wd, "S") for wd in mandatory_mornings}
 
     all_teacher_ids = {t for (t, _wd, _sess) in vars_by_teacher_session}

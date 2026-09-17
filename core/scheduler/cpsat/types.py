@@ -27,3 +27,4 @@ class CpSatModel:
     role_index: object = None                          # kết quả resolve_roles()
     penalty_terms: dict = field(default_factory=dict)  # mã tiêu chí -> list biến phạt
     changed_terms: list = field(default_factory=list)  # biến đổi ô so với tiết cũ
+    params: object = None                              # EffectiveParams, attached by build_model()

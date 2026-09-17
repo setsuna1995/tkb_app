@@ -221,4 +221,5 @@ class ScheduleResult:
                                                           # (see core/scheduler/engine.py's post-generation gate)
     solver_name: str = "heuristic"
     diagnostics: dict = field(default_factory=dict)  # cpsat_model diagnostic trace; {} for heuristic engine
+    effective_params: object = None  # core.rules.params.EffectiveParams the model was built with; None for non-CP-SAT results
 

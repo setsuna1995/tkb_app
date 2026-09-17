@@ -73,3 +73,17 @@ def test_as_effective_counts_against_what_the_model_enforced():
     })
     assert widened.as_effective().max_heavy_consecutive[(101, "S")] == Threshold.unrelaxed(4)
     assert widened.max_heavy_consecutive[(101, "S")].declared == 3
+
+
+def test_solver_result_carries_the_params_the_model_was_built_with():
+    cpsat = pytest.importorskip("core.scheduler.cpsat_model")
+    slots = [Slot(1, 101, TimeSlot(1, 3, "S", 1)), Slot(2, 101, TimeSlot(2, 4, "S", 1))]
+    inp = make_input(
+        slots, assigned_teacher={(1, 101): 10}, need={(1, 101): 2},
+        config=SchedulingConfig(teacher_off_sessions_per_week=0, mandatory_morning_weekdays=(),
+                                min_weekly_periods_for_lone_penalty=5),
+    )
+    built = cpsat.build_model(inp)
+    result = cpsat.solve_to_result(built, time_limit_s=10.0)
+    assert result.effective_params is built.params
+    assert built.params == resolve_effective_params(inp)

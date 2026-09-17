@@ -1,13 +1,12 @@
 """Execution, diagnosis, and result extraction for CP-SAT model."""
 from __future__ import annotations
 
-from collections import defaultdict
 import os
 import threading
 import time
 from typing import Callable, Optional, Sequence
 
-from core.models import ScheduleResult, is_bgh, ROLE_HDTN
+from core.models import ScheduleResult, ROLE_HDTN
 from core.rules import HARD_POST_GENERATION_IDS
 from core.scheduler.cpsat.types import CpSatModel, CpSatUnavailable, _HAS_ORTOOLS, cp_model
 from core.scheduler.cpsat.constraints import _is_teacher_busy_morning
@@ -57,6 +56,7 @@ def build_result(built: CpSatModel, solver: cp_model.CpSolver, diagnostics: Opti
         relaxed_rules=relaxed_rules,
         solver_name="cpsat",
         diagnostics=diagnostics or {},
+        effective_params=built.params,
     )
 
 
@@ -220,16 +220,12 @@ class EarlyStoppingCallback(cp_model.CpSolverSolutionCallback if cp_model is not
 def _presolve_capacity_screening(built: CpSatModel) -> set[str]:
     """Phân tích giải tích tiền giải (0.001s) để phát hiện mâu thuẫn dung lượng toán học (Pigeonhole)."""
     config = built.inp.config
-    mand_morns = getattr(config, "mandatory_morning_weekdays", (2, 5, 6))
-    strict_morns = getattr(config, "strict_morning_weekdays", ())
-    min_mand_load = getattr(config, "min_weekly_periods_for_mandatory_morning", 10)
-    bgh_ids = {t.teacher_id for t in built.inp.teachers if is_bgh(t)}
-
-    load = defaultdict(int)
-    for (s_id, c_id), n in built.inp.need.items():
-        t_id = built.inp.assigned_teacher.get((s_id, c_id))
-        if t_id is not None and t_id > 0:
-            load[t_id] += n
+    params = built.params
+    mand_morns = params.mandatory_morning_weekdays
+    strict_morns = params.strict_morning_weekdays
+    min_mand_load = params.min_weekly_periods_for_mandatory_morning
+    bgh_ids = params.bgh_ids
+    load = params.teacher_load  # same effective teacher map the objective uses (spec A5)
 
     all_mand = set(mand_morns) | set(strict_morns)
     for wd in all_mand:
@@ -244,7 +240,7 @@ def _presolve_capacity_screening(built: CpSatModel) -> set[str]:
             if _is_teacher_busy_morning(built.inp, t.teacher_id, wd):
                 continue
             is_strict = (wd in strict_morns)
-            is_mand = (wd in mand_morns and wd not in strict_morns and load[t.teacher_id] >= min_mand_load)
+            is_mand = (wd in mand_morns and wd not in strict_morns and load.get(t.teacher_id, 0) >= min_mand_load)
             if is_strict or is_mand:
                 mand_teacher_ids.add(t.teacher_id)
 
