@@ -663,12 +663,13 @@ def test_small_synthetic_schedule_succeeds_and_meets_quotas():
 
     assert result.success is True
 
-    from core.validation import compute_quota_diff, find_teacher_conflicts
+    from core.validation import compute_quota_diff
+    from tests.rule_helpers import violations_of
     diff = compute_quota_diff(inp.slots, result.assignment,
                                {(s, c, "C"): n for (s, c), n in need.items()}, "C")
     assert all(v == 0 for v in diff.values()), diff
 
-    conflicts = find_teacher_conflicts(inp.slots, result.assignment, assigned_teacher)
+    conflicts = violations_of("T.CONFLICT", inp, result.assignment)
     assert conflicts == []
 
     # HDTN must occupy every class's Monday-session-S-period-1 (chào cờ)

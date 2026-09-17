@@ -154,50 +154,6 @@ def test_teacher_lone_period_and_split_day_scoring():
     assert pick_c[0] == 3  # Subject 3 (Teacher 20) preferred over Subject 1 (Teacher 10)
 
 
-def test_validation_helpers():
-    from core import validation as val
-    slot1 = Slot(1, 101, TimeSlot(1, 2, "S", 1))
-    slot2 = Slot(2, 101, TimeSlot(2, 2, "S", 4))  # creates gap 2-3 for Teacher 10
-    slot3 = Slot(3, 101, TimeSlot(3, 3, "S", 1))  # Subject 100 on Tuesday (day 3)
-    slot4 = Slot(4, 101, TimeSlot(4, 4, "S", 1))  # Subject 100 on Wednesday (day 4) -> consecutive!
-
-    slots = [slot1, slot2, slot3, slot4]
-    assignment = {1: 100, 2: 100, 3: 100, 4: 100}
-    assigned_teacher = {(100, 101): 10}
-
-    # Find teacher gaps
-    gaps = val.find_teacher_gaps(slots, assignment, assigned_teacher)
-    assert len(gaps) == 1
-    assert gaps[0][0] == 10  # Teacher 10
-    assert gaps[0][3] == [1, 4]
-
-    # Find consecutive subject days (days 2, 3, 4 -> pairs (2,3) and (3,4))
-    consec = val.find_consecutive_subject_days(slots, assignment, {100})
-    assert len(consec) == 2
-    assert consec[0] == (101, 100, 2, 3)
-    assert consec[1] == (101, 100, 3, 4)
-
-    # Teacher unavailability violations
-    ban_busy = {(10, 1)}  # Teacher 10 is busy at ts_id 1
-    unav_violations = val.find_teacher_unavailability_violations(slots, assignment, assigned_teacher, ban_busy)
-    assert len(unav_violations) == 1
-    assert unav_violations[0] == (10, 101, 2, "S", 1)
-
-    # GDTC invalid periods
-    gdtc_slots = [
-        Slot(1, 101, TimeSlot(1, 2, "S", 2)),  # S2 -> Valid
-        Slot(2, 101, TimeSlot(2, 2, "S", 4)),  # S4 -> Valid (in 1..4)
-        Slot(3, 101, TimeSlot(3, 2, "S", 5)),  # S5 -> Invalid (outside 1..4)
-        Slot(4, 101, TimeSlot(4, 3, "C", 1)),  # C1 -> Invalid (outside 2..3)
-        Slot(5, 101, TimeSlot(5, 3, "C", 2)),  # C2 -> Valid
-    ]
-    gdtc_assign = {1: 100, 2: 100, 3: 100, 4: 100, 5: 100}
-    invalid_gdtc = val.find_invalid_gdtc_periods(gdtc_slots, gdtc_assign, 100, (1, 2, 3, 4), (2, 3))
-    assert len(invalid_gdtc) == 2
-    assert (101, 2, "S", 5) in invalid_gdtc
-    assert (101, 3, "C", 1) in invalid_gdtc
-
-
 def test_gdtc_allowed_periods_feasibility():
     """Verify that _feasible rejects GDTC outside morning 1-4 and afternoon 2-3."""
     subjects = [Subject(1, "GDTC", ROLE_GDTC), Subject(2, "HDTN", ROLE_HDTN)]
@@ -281,46 +237,6 @@ def test_balance_afternoon_teachers_penalty():
     pen_off = sched._teacher_quality_penalty(slots, assigned, slot_teacher, config_off)
 
     assert pen_on > pen_off, f"Expected pen_on ({pen_on}) > pen_off ({pen_off})"
-
-
-def test_validation_new_helpers():
-    from core import validation as val
-
-    # 1. Test find_morning_only_violations
-    slot_s = Slot(1, 101, TimeSlot(1, 2, "S", 1))
-    slot_c = Slot(2, 101, TimeSlot(2, 2, "C", 1))
-    assign = {1: 10, 2: 10} # Subject 10 placed in morning and afternoon
-    morning_violations = val.find_morning_only_violations([slot_s, slot_c], assign, {10})
-    assert len(morning_violations) == 1
-    assert morning_violations[0] == (101, 10, 2, "C", 1)
-
-    # 2. Test find_max_heavy_violations
-    # 4 consecutive heavy periods in Morning
-    heavy_slots = [
-        Slot(1, 101, TimeSlot(1, 2, "S", 1)),
-        Slot(2, 101, TimeSlot(2, 2, "S", 2)),
-        Slot(3, 101, TimeSlot(3, 2, "S", 3)),
-        Slot(4, 101, TimeSlot(4, 2, "S", 4)),
-    ]
-    heavy_assign = {1: 10, 2: 10, 3: 11, 4: 11} # Subjects 10 & 11 are heavy
-    heavy_violations = val.find_max_heavy_violations(heavy_slots, heavy_assign, {10, 11}, max_consecutive=3)
-    assert len(heavy_violations) == 1
-    assert heavy_violations[0] == (101, 2, "S", 1, 4)
-
-    # 3. Test find_subject_class_rule_violations
-    # Subject 10 in class 101 allowed ONLY on (2, "S")
-    rules = [
-        {"subject_id": 10, "class_ids": [101], "cells": {(2, "S")}}
-    ]
-    # Placed on (2, "S") -> Valid, Placed on (3, "S") -> Violation
-    rule_slots = [
-        Slot(1, 101, TimeSlot(1, 2, "S", 1)),
-        Slot(2, 101, TimeSlot(2, 3, "S", 1)),
-    ]
-    rule_assign = {1: 10, 2: 10}
-    rule_violations = val.find_subject_class_rule_violations(rule_slots, rule_assign, rules)
-    assert len(rule_violations) == 1
-    assert rule_violations[0] == (101, 10, 3, "S", 1)
 
 
 def test_greedy_prefers_pairing_over_lone_session():

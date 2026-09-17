@@ -6,6 +6,7 @@ from core.models import (
     SchedulingConfig, SchedulingInput, Slot, Subject, Teacher, TimeSlot,
 )
 from core.validation import compute_quota_diff
+from tests.rule_helpers import violations_of
 
 cpsat = pytest.importorskip("core.scheduler.cpsat_model")
 
@@ -95,8 +96,7 @@ def test_teacher_never_double_booked():
     built = cpsat.build_model(inp)
     assignment = cpsat.solve(built, time_limit_s=10.0)
     assert assignment is not None
-    from core.validation import find_teacher_conflicts
-    assert find_teacher_conflicts(inp.slots, assignment, inp.assigned_teacher) == []
+    assert violations_of("T.CONFLICT", inp, assignment) == []
 
 
 def test_teacher_respects_busy_slots():
@@ -119,9 +119,7 @@ def test_teacher_respects_busy_slots():
     built = cpsat.build_model(inp)
     assignment = cpsat.solve(built, time_limit_s=10.0)
     assert assignment is not None
-    from core.validation import find_teacher_unavailability_violations
-    assert find_teacher_unavailability_violations(
-        inp.slots, assignment, inp.assigned_teacher, inp.ban_busy) == []
+    assert violations_of("T.BUSY", inp, assignment) == []
 
 
 def test_teacher_respects_daily_cap():
@@ -176,9 +174,7 @@ def test_teacher_respects_daily_cap():
     built = cpsat.build_model(inp_ok)
     assignment = cpsat.solve(built, time_limit_s=10.0)
     assert assignment is not None
-    from core.validation import find_teacher_day_cap_violations
-    assert find_teacher_day_cap_violations(
-        inp_ok.slots, assignment, inp_ok.assigned_teacher, max_per_day=3) == []
+    assert violations_of("T.DAY_CAP", inp_ok, assignment) == []
 
 
 # ---------------------------------------------------------------------------
@@ -211,8 +207,7 @@ def test_morning_only_subject_never_scheduled_afternoon():
     built = cpsat.build_model(inp)
     assignment = cpsat.solve(built, time_limit_s=10.0)
     assert assignment is not None
-    from core.validation import find_morning_only_violations
-    assert find_morning_only_violations(inp.slots, assignment, {1}) == []
+    assert violations_of("C.MORNING_ONLY", inp, assignment) == []
 
 
 def test_heavy_subject_morning_only_when_enabled():
@@ -282,10 +277,7 @@ def test_gdtc_respects_allowed_periods():
         "GDTC bị ép chỉ được tiết 1 (gdtc_morning_allowed_periods=(1,)) nhưng "
         f"lại rơi vào tiết {slot_by_id[gdtc_slot].ts.period}"
     )
-    from core.validation import find_invalid_gdtc_periods
-    assert find_invalid_gdtc_periods(inp.slots, assignment, 1,
-                                      inp.config.gdtc_morning_allowed_periods,
-                                      inp.config.gdtc_afternoon_allowed_periods) == []
+    assert violations_of("C.GDTC_PERIOD", inp, assignment) == []
 
 
 def test_subject_not_scheduled_on_consecutive_days():
@@ -309,8 +301,7 @@ def test_subject_not_scheduled_on_consecutive_days():
     built = cpsat.build_model(inp)
     assignment = cpsat.solve(built, time_limit_s=10.0)
     assert assignment is not None
-    from core.validation import find_consecutive_subject_days
-    assert find_consecutive_subject_days(inp.slots, assignment, {1}) == []
+    assert violations_of("C.NON_CONSEC_DAYS", inp, assignment) == []
 
 
 def test_max_heavy_per_session():
@@ -343,7 +334,6 @@ def test_max_heavy_per_session():
     Nặng) làm bài toán giải được và không vi phạm gì."""
     ts = [TimeSlot(i + 1, 2, "S", i + 1) for i in range(4)]
     slots = [Slot(i + 1, 101, t) for i, t in enumerate(ts)]
-    heavy_ids = {1, 2, 3}
     subjects = [Subject(1, "H1", ROLE_NANG), Subject(2, "H2", ROLE_NANG),
                 Subject(3, "H3", ROLE_NANG), Subject(4, "F1", ROLE_THUONG),
                 Subject(5, "HDTN", ROLE_HDTN)]
@@ -370,8 +360,7 @@ def test_max_heavy_per_session():
     built = cpsat.build_model(inp_ok)
     assignment = cpsat.solve(built, time_limit_s=10.0)
     assert assignment is not None
-    from core.validation import find_max_heavy_violations
-    assert find_max_heavy_violations(inp_ok.slots, assignment, heavy_ids, max_consecutive=2) == []
+    assert violations_of("C.HEAVY_CONSEC", inp_ok, assignment) == []
 
 
 def test_max_heavy_consecutive_sliding_window():
@@ -445,8 +434,7 @@ def test_heavy_subject_avoids_afternoon_period3():
     built = cpsat.build_model(inp)
     assignment = cpsat.solve(built, time_limit_s=10.0)
     assert assignment is not None
-    from core.validation import find_heavy_afternoon_period3_violations
-    assert find_heavy_afternoon_period3_violations(inp.slots, assignment, {1}) == []
+    assert violations_of("C.HEAVY_P3", inp, assignment) == []
 
 
 # ---------------------------------------------------------------------------
@@ -685,9 +673,7 @@ def test_subject_class_allowed_cells_rule():
     built = cpsat.build_model(inp)
     assignment = cpsat.solve(built, time_limit_s=10.0)
     assert assignment is not None
-    from core.validation import find_subject_class_rule_violations
-    rules = [{"subject_id": 1, "class_ids": [101], "cells": [(3, "S")]}]
-    assert find_subject_class_rule_violations(inp.slots, assignment, rules) == []
+    assert violations_of("C.SUBJECT_CELLS", inp, assignment) == []
 
 
 # ==============================================================================
@@ -838,8 +824,7 @@ def test_single_pair_subject_has_exactly_one_pair_and_single_periods():
     built = cpsat.build_model(inp)
     assignment = cpsat.solve(built, time_limit_s=10.0)
     assert assignment is not None
-    from core.validation import find_single_pair_violations
-    assert find_single_pair_violations(inp.slots, assignment, {1}) == []
+    assert violations_of("C.SINGLE_PAIR", inp, assignment) == []
     slot_by_id = {s.slot_id: s for s in inp.slots}
     van_by_day = defaultdict(list)
     for sid, subj in assignment.items():

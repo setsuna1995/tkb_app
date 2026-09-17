@@ -2,41 +2,66 @@ import pandas as pd
 import streamlit as st
 
 from core import scheduler as sched
-from core.models import ROLE_GDTC, ROLE_HDTN, ROLE_KEP, ROLE_NANG, ROLE_NANG_KEP, WEEKDAY_NAMES, WEEKDAYS, is_bgh
-from core.validation import (
-    compute_quota_diff, compute_tkb_health_score, find_consecutive_subject_days, find_heavy_afternoon_period3_violations,
-    find_invalid_gdtc_periods, find_max_heavy_violations, find_morning_only_violations,
-    find_single_pair_violations, find_subject_class_rule_violations, find_teacher_conflicts,
-    find_teacher_day_cap_violations, find_teacher_gaps, find_teacher_unavailability_violations,
-    find_teacher_4_consecutive_morning_violations, find_teacher_lone_day_violations,
-    find_teacher_lone_session_violations, find_teacher_missing_mandatory_morning_violations,
-    find_teacher_split_day_violations,
-)
+from core.models import ROLE_HDTN, ROLE_KEP, WEEKDAY_NAMES, WEEKDAYS
 from core.rules import RULES
+from core.rules.detectors import run_detectors
+from core.rules.params import resolve_effective_params
+from core.rules.view import build_schedule_view
+from core.rules.violations import BREACH, FORCED, SHORTFALL, classify, group_by_rule
+from core.validation import compute_quota_diff, compute_tkb_health_score
 from data import repository as repo
 from io_excel.exporter import export_xlsx
 from ui_common import get_conn, require_auth, require_school, sidebar_backup_export, sidebar_school_switcher
 from ui_theme import render_callout, render_kpi_row, render_page_header, render_status_badge
 
 
-def _format_rule_item(rule_id: str, item: tuple) -> str:
-    wd = item[1] if len(item) > 1 and isinstance(item[1], int) else None
-    wd_str = WEEKDAY_NAMES.get(wd, f"Thứ {wd}") if wd else ""
-    if rule_id == "II.3":
-        return f"{wd_str} Sáng (thiếu tiết dạy sáng bắt buộc)"
-    elif rule_id == "II.4":
-        sess = item[2] if len(item) > 2 else ""
-        if sess == "cả ngày":
-            return f"{wd_str} (cả ngày chỉ có đúng 1 tiết)"
-        sess_str = "Sáng" if sess == "S" else ("Chiều" if sess == "C" else str(sess))
-        return f"{wd_str} {sess_str} (buổi lẻ chỉ có 1 tiết)"
-    elif rule_id == "II.8":
-        return f"{wd_str} (Sáng 1 tiết + Chiều 1 tiết trong ngày)"
-    elif rule_id == "II.14":
-        return f"{wd_str} Sáng (dạy 4 tiết liên tục)"
-    else:
-        return ", ".join(str(x) for x in item[1:])
+def _schedule_violations(inp, result) -> list:
+    # getattr: a ScheduleResult kept in st.session_state across a code reload predates this field
+    params = getattr(result, "effective_params", None) or resolve_effective_params(inp)
+    return classify(run_detectors(build_schedule_view(inp, result.assignment), params), params)
 
+
+def _write_details(violations: list) -> None:
+    for violation in violations:
+        st.write(f"- {violation.detail}")
+
+
+def _render_rule_violations(violations: list, save_override_key: str, week_label: str = "") -> bool:
+    """Show violations grouped by level. Returns True when saving is allowed."""
+    blocking = group_by_rule(v for v in violations if v.level == BREACH and RULES[v.rule_id].blocks_save)
+    other_breaches = group_by_rule(v for v in violations if v.level == BREACH and not RULES[v.rule_id].blocks_save)
+    forced = group_by_rule(v for v in violations if v.level == FORCED)
+    shortfalls = group_by_rule(v for v in violations if v.level == SHORTFALL)
+
+    for rule_id, items in other_breaches.items():
+        st.error(f"❌ {RULES[rule_id].title_vi}: {len(items)} trường hợp{week_label}.")
+        with st.expander("Chi tiết", expanded=False):
+            _write_details(items)
+
+    if blocking:
+        st.error(f"❌ Còn {len(blocking)} tiêu chí HĐSP bắt buộc chưa được thỏa mãn (chặn lưu){week_label}:")
+        for rule_id, items in blocking.items():
+            with st.expander(f"{rule_id}: {RULES[rule_id].title_vi} ({len(items)} trường hợp)", expanded=False):
+                _write_details(items)
+
+    for rule_id, items in forced.items():
+        with st.expander(f"⚠️ {RULES[rule_id].title_vi}: {len(items)} trường hợp buộc phải chấp nhận "
+                         f"(không chặn lưu){week_label}", expanded=False):
+            for violation in items:
+                st.write(f"- {violation.detail} — Lý do: {violation.evidence}")
+
+    if shortfalls:
+        total = sum(len(items) for items in shortfalls.values())
+        with st.expander(f"⚠️ {total} trường hợp thuộc {len(shortfalls)} tiêu chí HĐSP mềm "
+                         f"(không chặn lưu){week_label}", expanded=False):
+            for rule_id, items in shortfalls.items():
+                st.write(f"**{RULES[rule_id].title_vi}** ({len(items)} trường hợp)")
+                _write_details(items)
+
+    if not blocking:
+        return True
+    return st.checkbox("Vẫn lưu dù còn vi phạm tiêu chí HĐSP bắt buộc ở trên (không khuyến khích)",
+                       key=save_override_key)
 
 
 def _render_saved_tkb(conn, cells: dict, classes: list, subjects: list, teachers: list, key_prefix: str = ""):
@@ -538,162 +563,9 @@ with tab_schedule:
                         hide_index=True, width="stretch",
                     )
 
-            conflicts = find_teacher_conflicts(inp.slots, result.assignment, inp.assigned_teacher)
-            if conflicts:
-                st.error(f"❌ Phát hiện {len(conflicts)} trường hợp GV trùng lịch.")
-
-            busy_violations = find_teacher_unavailability_violations(
-                inp.slots, result.assignment, inp.assigned_teacher, inp.ban_busy
+            proceed_with_hard_violations = _render_rule_violations(
+                _schedule_violations(inp, result), "proceed_with_hard_violations",
             )
-            if busy_violations:
-                st.error(f"❌ Phát hiện {len(busy_violations)} tiết xếp vào giờ GV đã khai báo bận (GV_Bận).")
-
-            gdtc_id = next((s.subject_id for s in inp.subjects if s.role_code == ROLE_GDTC), None)
-            if gdtc_id:
-                gdtc_period_violations = find_invalid_gdtc_periods(
-                    inp.slots, result.assignment, gdtc_id,
-                    getattr(inp.config, "gdtc_morning_allowed_periods", (1, 2, 3, 4)),
-                    getattr(inp.config, "gdtc_afternoon_allowed_periods", (2, 3)),
-                )
-                if gdtc_period_violations:
-                    st.error(f"❌ Phát hiện {len(gdtc_period_violations)} tiết GDTC xếp ngoài khung giờ cho phép.")
-
-            # Kiểm tra môn không xếp liền ngày (GDTC + các môn trong non_consecutive_subject_ids)
-            non_consec_ids = set(getattr(inp.config, "non_consecutive_subject_ids", frozenset()))
-            if getattr(inp.config, "avoid_gdtc_consecutive_days", True) and gdtc_id:
-                non_consec_ids.add(gdtc_id)
-            if non_consec_ids:
-                consec_violations = find_consecutive_subject_days(inp.slots, result.assignment, non_consec_ids)
-                if consec_violations:
-                    st.error(f"❌ Phát hiện {len(consec_violations)} trường hợp môn không xếp liền ngày bị xếp 2 ngày liền kề.")
-
-            # Kiểm tra môn bắt buộc sáng (cấm chiều)
-            morning_only_ids = set(getattr(inp.config, "morning_only_subject_ids", frozenset()))
-            if getattr(inp.config, "heavy_subjects_morning_only", False):
-                heavy_ids = {s.subject_id for s in inp.subjects if s.role_code in (ROLE_NANG, ROLE_NANG_KEP)}
-                morning_only_ids |= heavy_ids
-            if morning_only_ids:
-                morn_violations = find_morning_only_violations(inp.slots, result.assignment, morning_only_ids)
-                if morn_violations:
-                    st.error(f"❌ Phát hiện {len(morn_violations)} tiết môn cấm chiều bị xếp vào buổi chiều.")
-
-            # Kiểm tra vượt trần môn Nặng liên tiếp
-            heavy_subject_ids = {s.subject_id for s in inp.subjects if s.role_code in (ROLE_NANG, ROLE_NANG_KEP)}
-            if heavy_subject_ids:
-                max_heavy = getattr(inp.config, "max_heavy_consecutive", 3)
-                heavy_run_violations = find_max_heavy_violations(inp.slots, result.assignment, heavy_subject_ids, max_heavy)
-                if heavy_run_violations:
-                    st.error(f"❌ Phát hiện {len(heavy_run_violations)} trường hợp môn Nặng bị xếp vượt quá {max_heavy} tiết liên tiếp.")
-
-            # Kiểm tra luật môn/lớp theo buổi cụ thể
-            subject_class_rules = repo.list_subject_class_rules(conn)
-            if subject_class_rules:
-                rule_violations = find_subject_class_rule_violations(inp.slots, result.assignment, subject_class_rules)
-                if rule_violations:
-                    st.error(f"❌ Phát hiện {len(rule_violations)} tiết vi phạm ràng buộc môn/lớp theo buổi.")
-
-            # Kiểm tra môn 1 cặp liền tiết (single pair)
-            single_pair_ids = set(getattr(inp.config, "single_pair_subject_ids", frozenset()))
-            if single_pair_ids:
-                pair_violations = find_single_pair_violations(inp.slots, result.assignment, single_pair_ids)
-                if pair_violations:
-                    st.error(f"❌ Phát hiện {len(pair_violations)} trường hợp môn 1 cặp liền tiết bị phân bổ sai quy tắc.")
-
-# Kiểm tra trần tiết dạy/ngày của Giáo viên (Tiêu chí II.2)
-            max_teacher_day = getattr(inp.config, "max_teacher_periods_per_day", 5)
-            day_cap_violations = find_teacher_day_cap_violations(inp.slots, result.assignment, inp.assigned_teacher, max_teacher_day)
-            if day_cap_violations:
-                teacher_map = {t.teacher_id: t.name for t in inp.teachers}
-                st.error(f"❌ Phát hiện {len(day_cap_violations)} trường hợp GV dạy vượt quá {max_teacher_day} tiết/ngày:")
-                for tid, wd, count in day_cap_violations:
-                    tname = teacher_map.get(tid, f"GV #{tid}")
-                    st.write(f"- {tname}: {WEEKDAY_NAMES[wd]} dạy {count} tiết (vượt trần {max_teacher_day})")
-
-            # Kiểm tra môn Nặng vào tiết 3 chiều (Tiêu chí II.15)
-            if getattr(inp.config, "avoid_heavy_afternoon_period3", True) and heavy_subject_ids:
-                heavy_p3_violations = find_heavy_afternoon_period3_violations(inp.slots, result.assignment, heavy_subject_ids)
-                if heavy_p3_violations:
-                    st.error(f"❌ Phát hiện {len(heavy_p3_violations)} tiết môn Nặng bị xếp vào tiết 3 buổi chiều.")
-
-            # Kiểm tra tiêu chí HĐSP hard-gate (II.3 + II.4 + II.8 -- chặn nút lưu, per
-            # quyết định 2026-09-03 [bản sửa thứ 3 trong ngày]). II.14 là cảnh báo mềm
-            # (không chặn lưu) -- engine vẫn cố tránh khi có thể qua điểm trừ mềm sẵn có
-            # trong quality.py, chỉ là không còn reject/relax vì nó nữa.
-            teacher_map = {t.teacher_id: t.name for t in inp.teachers}
-            hard_rule_violations = {}
-            soft_rule_warnings = {}
-
-            missing_morning = find_teacher_missing_mandatory_morning_violations(
-                inp.slots, result.assignment, inp.assigned_teacher,
-                getattr(inp.config, "mandatory_morning_weekdays", (2, 5, 6)),
-                getattr(inp.config, "min_weekly_periods_for_mandatory_morning", 10),
-                getattr(inp.config, "strict_morning_weekdays", ()) or (),
-                frozenset(t.teacher_id for t in inp.teachers if is_bgh(t)),
-                ban_busy=getattr(inp, "ban_busy", None),
-            )
-            if missing_morning:
-                hard_rule_violations["II.3"] = missing_morning
-
-            min_lone_load = getattr(inp.config, "min_weekly_periods_for_lone_penalty", 8)
-            lone_exempt_ids = getattr(inp.config, "lone_session_exempt_teacher_ids", frozenset()) or frozenset()
-            if getattr(inp.config, "avoid_teacher_lone_periods", True):
-                # Gated the same way engine.py:_check_hard_post_generation_rules gates II.4/II.8.
-                lone_sessions = find_teacher_lone_session_violations(inp.slots, result.assignment, inp.assigned_teacher, min_lone_load, lone_exempt_ids)
-                lone_days = find_teacher_lone_day_violations(inp.slots, result.assignment, inp.assigned_teacher, min_lone_load, lone_exempt_ids)
-                if lone_sessions or lone_days:
-                    hard_rule_violations["II.4"] = lone_sessions + [(tid, wd, "cả ngày") for tid, wd in lone_days]
-
-                split_days = find_teacher_split_day_violations(inp.slots, result.assignment, inp.assigned_teacher, min_lone_load, lone_exempt_ids)
-                if split_days:
-                    hard_rule_violations["II.8"] = split_days
-
-            if getattr(inp.config, "avoid_teacher_4_consecutive_morning", True):
-                consecutive_morning = find_teacher_4_consecutive_morning_violations(inp.slots, result.assignment, inp.assigned_teacher)
-                if consecutive_morning:
-                    soft_rule_warnings["II.14"] = consecutive_morning
-
-            if hard_rule_violations:
-                st.error(f"❌ Còn {len(hard_rule_violations)} tiêu chí HĐSP bắt buộc chưa được thỏa mãn (chặn lưu):")
-                for rule_id, items in hard_rule_violations.items():
-                    with st.expander(f"{rule_id}: {RULES[rule_id].title_vi} ({len(items)} trường hợp)", expanded=False):
-                        for item in items:
-                            tid = item[0]
-                            tname = teacher_map.get(tid, f"GV #{tid}")
-                            detail = _format_rule_item(rule_id, item)
-                            st.write(f"- **{tname}**: {detail}")
-
-            if soft_rule_warnings:
-                with st.expander(
-                    f"⚠️ {sum(len(v) for v in soft_rule_warnings.values())} trường hợp thuộc "
-                    f"{len(soft_rule_warnings)} tiêu chí HĐSP mềm (không chặn lưu)", expanded=False,
-                ):
-                    for rule_id, items in soft_rule_warnings.items():
-                        st.write(f"**{rule_id}: {RULES[rule_id].title_vi}** ({len(items)} trường hợp)")
-                        for item in items:
-                            tid = item[0]
-                            tname = teacher_map.get(tid, f"GV #{tid}")
-                            detail = _format_rule_item(rule_id, item)
-                            st.write(f"- **{tname}**: {detail}")
-
-            proceed_with_hard_violations = True
-            if hard_rule_violations:
-                proceed_with_hard_violations = st.checkbox(
-                    "Vẫn lưu dù còn vi phạm tiêu chí HĐSP bắt buộc ở trên (không khuyến khích)",
-                    key="proceed_with_hard_violations",
-                )
-
-            # Đánh giá chất lượng lịch dạy của Giáo viên
-            teacher_gaps = find_teacher_gaps(inp.slots, result.assignment, inp.assigned_teacher)
-            if teacher_gaps and getattr(inp.config, "avoid_teacher_gaps", True):
-                teacher_map = {t.teacher_id: t.name for t in inp.teachers}
-                gap_summaries = []
-                for tid, wd, sess, p_list in teacher_gaps:
-                    tname = teacher_map.get(tid, f"GV #{tid}")
-                    sess_name = "Sáng" if sess == "S" else "Chiều"
-                    gap_summaries.append(f"{tname} (Thứ {wd} {sess_name}: tiết {', '.join(str(p) for p in p_list)})")
-                with st.expander(f"⚠️ Cảnh báo chất lượng lịch: có {len(teacher_gaps)} buổi GV bị tiết trống / lủng", expanded=False):
-                    for g_info in gap_summaries:
-                        st.write(f"- {g_info}")
 
             st.subheader("Kiểm tra định mức (thực tế − định mức, kỳ vọng 0)")
             if scheduled_week is not None:
@@ -720,7 +592,7 @@ with tab_schedule:
             with col_acc1:
                 if st.button(
                     f"✅ Chấp nhận & Lưu Tuần {scheduled_week}", type="primary",
-                    disabled=bool(hard_rule_violations) and not proceed_with_hard_violations,
+                    disabled=not proceed_with_hard_violations,
                     key="btn_accept_save_fresh_result",
                 ):
                     cells = {
@@ -944,8 +816,6 @@ with tab_schedule:
                         st.error(b_result.failure_reason)
                         continue
 
-                    b_teacher_map = {t.teacher_id: t.name for t in b_inp.teachers}
-
                     if b_result.successes_found > 0:
                         st.success(
                             f"Xếp thành công sau {b_result.attempts_tried} lần thử "
@@ -990,74 +860,10 @@ with tab_schedule:
                                 rows.append(row)
                             st.dataframe(pd.DataFrame(rows), hide_index=True, width="stretch")
 
-                    b_conflicts = find_teacher_conflicts(b_inp.slots, b_result.assignment, b_inp.assigned_teacher)
-                    if b_conflicts:
-                        st.error(f"Phát hiện {len(b_conflicts)} trường hợp GV trùng lịch (không nên xảy ra, báo lỗi này).")
-
-                    # Kiểm tra tiêu chí HĐSP hard-gate (II.4 + II.8) cho Tuần {wn} -- mirrors the
-                    # single-week flow's block above. II.3/II.14 là cảnh báo mềm, không chặn
-                    # lưu (per quyết định 2026-09-03, bản sửa thứ 2 trong ngày).
-                    b_hard_rule_violations = {}
-                    b_soft_rule_warnings = {}
-
-                    b_missing_morning = find_teacher_missing_mandatory_morning_violations(
-                        b_inp.slots, b_result.assignment, b_inp.assigned_teacher,
-                        getattr(b_inp.config, "mandatory_morning_weekdays", (2, 5, 6)),
-                        getattr(b_inp.config, "min_weekly_periods_for_mandatory_morning", 10),
-                        getattr(b_inp.config, "strict_morning_weekdays", ()) or (),
-                        frozenset(t.teacher_id for t in b_inp.teachers if is_bgh(t)),
-                        ban_busy=getattr(b_inp, "ban_busy", None),
+                    b_proceed_with_hard_violations = _render_rule_violations(
+                        _schedule_violations(b_inp, b_result), f"batch_proceed_with_hard_violations_{wn}",
+                        f" cho Tuần {wn}",
                     )
-                    if b_missing_morning:
-                        b_hard_rule_violations["II.3"] = b_missing_morning
-
-                    b_min_lone_load = getattr(b_inp.config, "min_weekly_periods_for_lone_penalty", 8)
-                    b_lone_exempt_ids = getattr(b_inp.config, "lone_session_exempt_teacher_ids", frozenset()) or frozenset()
-                    if getattr(b_inp.config, "avoid_teacher_lone_periods", True):
-                        # Gated the same way engine.py:_check_hard_post_generation_rules gates II.4/II.8.
-                        b_lone_sessions = find_teacher_lone_session_violations(b_inp.slots, b_result.assignment, b_inp.assigned_teacher, b_min_lone_load, b_lone_exempt_ids)
-                        b_lone_days = find_teacher_lone_day_violations(b_inp.slots, b_result.assignment, b_inp.assigned_teacher, b_min_lone_load, b_lone_exempt_ids)
-                        if b_lone_sessions or b_lone_days:
-                            b_hard_rule_violations["II.4"] = b_lone_sessions + [(tid, wd, "cả ngày") for tid, wd in b_lone_days]
-
-                        b_split_days = find_teacher_split_day_violations(b_inp.slots, b_result.assignment, b_inp.assigned_teacher, b_min_lone_load, b_lone_exempt_ids)
-                        if b_split_days:
-                            b_hard_rule_violations["II.8"] = b_split_days
-
-                    if getattr(b_inp.config, "avoid_teacher_4_consecutive_morning", True):
-                        b_consecutive_morning = find_teacher_4_consecutive_morning_violations(b_inp.slots, b_result.assignment, b_inp.assigned_teacher)
-                        if b_consecutive_morning:
-                            b_soft_rule_warnings["II.14"] = b_consecutive_morning
-
-                    if b_hard_rule_violations:
-                        st.error(f"❌ Còn {len(b_hard_rule_violations)} tiêu chí HĐSP bắt buộc chưa được thỏa mãn (chặn lưu) cho Tuần {wn}:")
-                        for rule_id, items in b_hard_rule_violations.items():
-                            with st.expander(f"{rule_id}: {RULES[rule_id].title_vi} ({len(items)} trường hợp)", expanded=False):
-                                for item in items:
-                                    tid = item[0]
-                                    tname = b_teacher_map.get(tid, f"GV #{tid}")
-                                    detail = _format_rule_item(rule_id, item)
-                                    st.write(f"- **{tname}**: {detail}")
-
-                    if b_soft_rule_warnings:
-                        with st.expander(
-                            f"⚠️ {sum(len(v) for v in b_soft_rule_warnings.values())} trường hợp thuộc "
-                            f"{len(b_soft_rule_warnings)} tiêu chí HĐSP mềm (không chặn lưu) cho Tuần {wn}", expanded=False,
-                        ):
-                            for rule_id, items in b_soft_rule_warnings.items():
-                                st.write(f"**{rule_id}: {RULES[rule_id].title_vi}** ({len(items)} trường hợp)")
-                                for item in items:
-                                    tid = item[0]
-                                    tname = b_teacher_map.get(tid, f"GV #{tid}")
-                                    detail = _format_rule_item(rule_id, item)
-                                    st.write(f"- **{tname}**: {detail}")
-
-                    b_proceed_with_hard_violations = True
-                    if b_hard_rule_violations:
-                        b_proceed_with_hard_violations = st.checkbox(
-                            "Vẫn lưu dù còn vi phạm tiêu chí HĐSP bắt buộc ở trên (không khuyến khích)",
-                            key=f"batch_proceed_with_hard_violations_{wn}",
-                        )
 
                     st.caption(f"Kiểm tra định mức Tuần {wn} (thực tế − định mức tuần {wn}, kỳ vọng 0)")
                     b_expected_quota = repo.get_periods_for_week(conn, week_no=wn, parity=b_parity)
@@ -1075,7 +881,7 @@ with tab_schedule:
 
                     if st.button(
                         f"✅ Chấp nhận & Lưu Tuần {wn}", key=f"batch_accept_{wn}",
-                        disabled=bool(b_hard_rule_violations) and not b_proceed_with_hard_violations,
+                        disabled=not b_proceed_with_hard_violations,
                     ):
                         b_cells = {
                             (s.class_id, s.ts.weekday, s.ts.session, s.ts.period): b_result.assignment.get(s.slot_id)

@@ -198,14 +198,9 @@ def test_full_schedule_15_criteria_compliance(tmp_path):
     """End-to-end verification of 100% MOET standards and 15 HĐSP criteria on real-scale school data."""
     import os
     from core import scheduler as sched
-    from core.models import ROLE_GDTC, ROLE_HDTN, ROLE_NANG, ROLE_NANG_KEP, SchedulingConfig
-    from core.validation import (
-        compute_quota_diff, find_consecutive_subject_days, find_heavy_afternoon_period3_violations,
-        find_invalid_gdtc_periods, find_max_heavy_violations, find_teacher_conflicts,
-        find_teacher_day_cap_violations, find_teacher_gaps,
-        find_teacher_lone_day_violations, find_teacher_lone_session_violations,
-        find_teacher_missing_mandatory_morning_violations, find_teacher_split_day_violations,
-    )
+    from core.models import ROLE_HDTN, SchedulingConfig
+    from core.validation import compute_quota_diff
+    from tests.rule_helpers import violations_of
     from data import db, repository as repo
     from io_excel.importer import import_xlsm
 
@@ -233,7 +228,7 @@ def test_full_schedule_15_criteria_compliance(tmp_path):
     assert result.success is True, f"Schedule generation failed: {result.failure_reason}"
 
     # 1. Ràng buộc Hệ thống: Không trùng tiết GV (I.1.1, II.10)
-    conflicts = find_teacher_conflicts(inp.slots, result.assignment, inp.assigned_teacher)
+    conflicts = violations_of("T.CONFLICT", inp, result.assignment)
     assert conflicts == [], f"Found teacher double-booking: {conflicts}"
 
     # 2. Ràng buộc Hệ thống: Khớp định lượng 100% (I.1.3, II.1)
@@ -243,25 +238,23 @@ def test_full_schedule_15_criteria_compliance(tmp_path):
     assert bad_diff == {}, f"Quota diff mismatch: {bad_diff}"
 
     # 3. Tiêu chí II.2: Mỗi GV không vượt quá 5 tiết/ngày
-    day_cap_violations = find_teacher_day_cap_violations(inp.slots, result.assignment, inp.assigned_teacher, max_per_day=5)
+    day_cap_violations = violations_of("T.DAY_CAP", inp, result.assignment)
     assert day_cap_violations == [], f"Teacher day cap violations: {day_cap_violations}"
 
     # 4. Tiêu chí I.2.5: Thể dục (GDTC) tránh tiết 5
-    gdtc_id = next(s.subject_id for s in inp.subjects if s.role_code == ROLE_GDTC)
-    gdtc_violations = find_invalid_gdtc_periods(inp.slots, result.assignment, gdtc_id)
+    gdtc_violations = violations_of("C.GDTC_PERIOD", inp, result.assignment)
     assert gdtc_violations == [], f"GDTC placed in forbidden periods: {gdtc_violations}"
 
     # 5. Tiêu chí II.12: GDTC không học 2 ngày liên tiếp
-    gdtc_consec = find_consecutive_subject_days(inp.slots, result.assignment, {gdtc_id})
+    gdtc_consec = violations_of("C.NON_CONSEC_DAYS", inp, result.assignment)
     assert gdtc_consec == [], f"GDTC consecutive day violations: {gdtc_consec}"
 
     # 6. Tiêu chí I.2.2 & II.13: Môn Nặng không quá 3 tiết liên tiếp
-    heavy_ids = {s.subject_id for s in inp.subjects if s.role_code in (ROLE_NANG, ROLE_NANG_KEP)}
-    heavy_runs = find_max_heavy_violations(inp.slots, result.assignment, heavy_ids, max_consecutive=3)
+    heavy_runs = violations_of("C.HEAVY_CONSEC", inp, result.assignment)
     assert heavy_runs == [], f"Heavy subject consecutive run violations: {heavy_runs}"
 
     # 7. Tiêu chí II.15: Không xếp môn Nặng vào tiết 3 chiều
-    heavy_p3 = find_heavy_afternoon_period3_violations(inp.slots, result.assignment, heavy_ids)
+    heavy_p3 = violations_of("C.HEAVY_P3", inp, result.assignment)
     assert heavy_p3 == [], f"Heavy subjects on afternoon period 3: {heavy_p3}"
 
     # 8. Tiêu chí I.2.6 & II.6: Chào cờ tiết 1 Thứ Hai
@@ -277,15 +270,13 @@ def test_full_schedule_15_criteria_compliance(tmp_path):
     # ("vẫn có người được nghỉ sáng T2, vẫn nhiều buổi lẻ").
     relaxed_ids = {item.get("rule_id") for item in result.relaxed_rules}
 
-    missing_morning = find_teacher_missing_mandatory_morning_violations(inp.slots, result.assignment, inp.assigned_teacher)
+    missing_morning = violations_of("II.3", inp, result.assignment)
     assert not missing_morning or "II.3" in relaxed_ids, f"Unreported II.3 violations: {missing_morning}"
 
-    min_lone_load = config.min_weekly_periods_for_lone_penalty
-    lone_sessions = find_teacher_lone_session_violations(inp.slots, result.assignment, inp.assigned_teacher, min_lone_load)
-    lone_days = find_teacher_lone_day_violations(inp.slots, result.assignment, inp.assigned_teacher, min_lone_load)
-    assert not (lone_sessions or lone_days) or "II.4" in relaxed_ids, f"Unreported II.4 violations: {lone_sessions + lone_days}"
+    lone = violations_of("II.4", inp, result.assignment)
+    assert not lone or "II.4" in relaxed_ids, f"Unreported II.4 violations: {lone}"
 
-    split_days = find_teacher_split_day_violations(inp.slots, result.assignment, inp.assigned_teacher, min_lone_load)
+    split_days = violations_of("II.8", inp, result.assignment)
     assert not split_days or "II.8" in relaxed_ids, f"Unreported II.8 violations: {split_days}"
 
     # II.14 is soft -- not part of the relaxed_rules transparency invariant above.

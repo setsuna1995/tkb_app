@@ -1,18 +1,6 @@
 import pytest
 from core.models import SchedulingConfig, TimeSlot, ClassRoom, Subject, ROLE_NANG, ROLE_THUONG, ROLE_GDTC
-from core.validation import (
-    find_morning_academic_overload_violations,
-    find_morning_academic_underload_violations,
-)
-
-
-def _make_slot(slot_id, class_id, weekday, session, period):
-    class DummySlot:
-        def __init__(self, sid, cid, wd, sess, per):
-            self.slot_id = sid
-            self.class_id = cid
-            self.ts = TimeSlot(f"{wd}_{sess}_{per}", weekday, session, per)
-    return DummySlot(slot_id, class_id, weekday, session, period)
+from tests.rule_helpers import violations_of
 
 
 def test_scheduling_config_has_morning_academic_load_defaults():
@@ -23,59 +11,6 @@ def test_scheduling_config_has_morning_academic_load_defaults():
     assert config.max_academic_per_morning == 3
     assert hasattr(config, "min_academic_per_morning")
     assert config.min_academic_per_morning == 2
-
-
-def test_find_morning_academic_overload_violations():
-    # 4 periods in morning, all 4 are academic (Toan=1, Van=2, Anh=3, Ly=4)
-    academic_ids = {1, 2, 3, 4}
-    slots = [
-        _make_slot(1, 1, 2, "S", 1),
-        _make_slot(2, 1, 2, "S", 2),
-        _make_slot(3, 1, 2, "S", 3),
-        _make_slot(4, 1, 2, "S", 4),
-        # Tuesday morning: 3 academic + 1 light (gdtc=5) -> no violation
-        _make_slot(5, 1, 3, "S", 1),
-        _make_slot(6, 1, 3, "S", 2),
-        _make_slot(7, 1, 3, "S", 3),
-        _make_slot(8, 1, 3, "S", 4),
-    ]
-    assignment = {
-        1: 1, 2: 2, 3: 3, 4: 4,  # Mon: 4 academic
-        5: 1, 6: 2, 7: 3, 8: 5,  # Tue: 3 academic + 1 light
-    }
-
-    overloads = find_morning_academic_overload_violations(slots, assignment, academic_ids, max_academic=3)
-    assert len(overloads) == 1
-    assert overloads[0] == (1, 2, 4)  # class 1, Monday (wd 2), count 4
-
-
-def test_find_morning_academic_underload_violations():
-    academic_ids = {1, 2, 3, 4}
-    slots = [
-        # Monday morning: only 1 academic (Toan=1) + 3 light subjects (5, 6, 7) -> underload (<2)
-        _make_slot(1, 1, 2, "S", 1),
-        _make_slot(2, 1, 2, "S", 2),
-        _make_slot(3, 1, 2, "S", 3),
-        _make_slot(4, 1, 2, "S", 4),
-        # Tuesday morning: 2 academic + 2 light -> normal (>=2)
-        _make_slot(5, 1, 3, "S", 1),
-        _make_slot(6, 1, 3, "S", 2),
-        _make_slot(7, 1, 3, "S", 3),
-        _make_slot(8, 1, 3, "S", 4),
-        # Afternoon slots -> should be completely ignored
-        _make_slot(9, 1, 2, "C", 1),
-        _make_slot(10, 1, 2, "C", 2),
-        _make_slot(11, 1, 2, "C", 3),
-    ]
-    assignment = {
-        1: 1, 2: 5, 3: 6, 4: 7,  # Mon morning: 1 academic
-        5: 1, 6: 2, 7: 5, 8: 6,  # Tue morning: 2 academic
-        9: 5, 10: 6, 11: 7,      # Mon afternoon: 0 academic (ignored)
-    }
-
-    underloads = find_morning_academic_underload_violations(slots, assignment, academic_ids, min_academic=2)
-    assert len(underloads) == 1
-    assert underloads[0] == (1, 2, 1)  # class 1, Monday (wd 2), count 1
 
 
 def _make_scheduling_input_for_balance(academic_counts, light_counts, config=None):
@@ -158,7 +93,7 @@ def test_cpsat_morning_academic_hard_ceiling():
     assert assignment is not None, "Phải tìm được lời giải"
 
     academic_ids = {1, 2, 3, 4}
-    overloads = find_morning_academic_overload_violations(inp.slots, assignment, academic_ids, max_academic=3)
+    overloads = violations_of("ACAD.MAX", inp, assignment)
     assert overloads == [], f"Không được có buổi sáng nào vượt quá 3 tiết học thuật: {overloads}"
 
     # Counts per morning must all be <= 3 (e.g. 3, 3, 2 in some order)
@@ -199,7 +134,7 @@ def test_cpsat_morning_academic_soft_floor():
     assert assignment is not None, "Phải tìm được lời giải"
 
     academic_ids = {1, 2, 3, 4, 5, 6}
-    underloads = find_morning_academic_underload_violations(inp.slots, assignment, academic_ids, min_academic=2)
+    underloads = violations_of("ACAD.MIN", inp, assignment)
     assert underloads == [], f"Mọi buổi sáng (có >= 3 tiết) cần có ít nhất 2 tiết học thuật: {underloads}"
 
     counts = {

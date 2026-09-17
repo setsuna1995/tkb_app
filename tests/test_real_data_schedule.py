@@ -4,7 +4,8 @@ import pytest
 
 from core import scheduler as sched
 from core.models import SchedulingConfig
-from core.validation import compute_quota_diff, find_teacher_conflicts
+from core.validation import compute_quota_diff
+from tests.rule_helpers import violations_of
 from data import db, repository as repo
 from io_excel.importer import import_xlsm
 
@@ -34,7 +35,7 @@ def test_real_data_schedules_successfully(conn, parity):
     bad = {k: v for k, v in diff.items() if v != 0}
     assert bad == {}, f"quota mismatch (actual-quota != 0): {bad}"
 
-    conflicts = find_teacher_conflicts(inp.slots, result.assignment, inp.assigned_teacher)
+    conflicts = violations_of("T.CONFLICT", inp, result.assignment)
     assert conflicts == [], f"teacher double-booked: {conflicts}"
 
     for slot in inp.slots:
@@ -60,7 +61,7 @@ def test_real_data_schedules_successfully_with_hdtn_thematic_week(conn, parity):
 
     assert result.success is True, result.failure_reason
 
-    conflicts = find_teacher_conflicts(inp.slots, result.assignment, inp.assigned_teacher)
+    conflicts = violations_of("T.CONFLICT", inp, result.assignment)
     assert conflicts == [], f"teacher double-booked: {conflicts}"
 
 
@@ -81,5 +82,5 @@ def test_real_data_schedules_successfully_with_heavy_subjects_morning_only(conn,
 
     assert result.success is True, result.failure_reason
 
-    conflicts = find_teacher_conflicts(inp.slots, result.assignment, inp.assigned_teacher)
+    conflicts = violations_of("T.CONFLICT", inp, result.assignment)
     assert conflicts == [], f"teacher double-booked: {conflicts}"

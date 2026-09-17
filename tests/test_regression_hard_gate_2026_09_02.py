@@ -10,7 +10,7 @@ import random
 from core.models import SchedulingConfig, Teacher
 from core.scheduler import run
 from core.scheduler.teacher_off import _assign_off_slots
-from core.validation import find_teacher_lone_day_violations, find_teacher_lone_session_violations
+from tests.rule_helpers import violations_of
 from data import db, repository as repo
 from io_excel.importer import import_xlsm
 
@@ -44,15 +44,13 @@ def test_full_schedule_never_silently_drops_lone_session_violations(tmp_path):
 
     assert result.success is True, f"Schedule generation failed: {result.failure_reason}"
 
-    min_lone_load = config.min_weekly_periods_for_lone_penalty
-    lone_sessions = find_teacher_lone_session_violations(inp.slots, result.assignment, inp.assigned_teacher, min_lone_load)
-    lone_days = find_teacher_lone_day_violations(inp.slots, result.assignment, inp.assigned_teacher, min_lone_load)
+    lone = violations_of("II.4", inp, result.assignment)
 
-    if lone_sessions or lone_days:
+    if lone:
         relaxed_ids = {item.get("rule_id") for item in result.relaxed_rules}
         assert "II.4" in relaxed_ids, (
             f"Regression: found unreported lone-session/day violations "
-            f"{lone_sessions + lone_days} with empty/non-matching relaxed_rules {result.relaxed_rules}"
+            f"{lone} with empty/non-matching relaxed_rules {result.relaxed_rules}"
         )
 
     connection.close()
