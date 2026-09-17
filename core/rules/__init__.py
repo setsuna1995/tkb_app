@@ -1,15 +1,9 @@
-"""Single source of truth for which HĐSP rules are hard-gated (reject and
-retry the scheduling attempt, or explicitly report as relaxed when retrying
-structurally cannot help) versus soft (scored only, never blocks).
+"""Registry of every HĐSP rule a detector checks (core/rules/detectors.py) and
+how a violation of it is treated.
 
-Only covers the rules touched by the 2026-09-02 hard-gate feature (see
-.superpowers/sdd/2026-09-02-hard-gate-hdsp-rules/progress.md) -- the full
-32-rule catalogue lives in
-.superpowers/sdd/2026-09-01-rules-audit-v2/task-1-report.md and does not need
-a code registry today.
-
-This module is metadata only: it does not implement or replace any
-constraint-checking logic in feasibility.py/heuristics.py/quality.py.
+RuleTier says who enforces the rule; RuleSpec.config_flag names the
+SchedulingConfig switch that turns it off. Detectors, the solver's hard gate
+and the UI all read this one table.
 """
 from __future__ import annotations
 
@@ -19,7 +13,8 @@ from typing import Optional
 
 
 class RuleTier(Enum):
-    HARD_POST_GENERATION = "hard_post_generation"  # whole-schedule check; reject attempt + retry, or report as relaxed
+    HARD_POST_GENERATION = "hard_post_generation"  # HĐSP hard gate: forced to zero, relaxed only by diagnosis
+    HARD_MODEL = "hard_model"  # CP-SAT always enforces it; a violation found afterwards means the model and the check disagree
     SOFT = "soft"  # scored only; never blocks an attempt or the save button
 
 
@@ -77,6 +72,21 @@ RULES: dict[str, RuleSpec] = {
         title_vi="Hạn chế GV dạy 4 tiết liên tục buổi sáng (trừ GV >20 tiết/tuần)",
         tier=RuleTier.SOFT,
         config_flag="avoid_teacher_4_consecutive_morning",
+    ),
+    "T.CONFLICT": RuleSpec(
+        id="T.CONFLICT",
+        title_vi="GV không dạy 2 lớp trong cùng một tiết",
+        tier=RuleTier.HARD_MODEL,
+    ),
+    "T.BUSY": RuleSpec(
+        id="T.BUSY",
+        title_vi="Không xếp GV vào giờ đã báo bận",
+        tier=RuleTier.HARD_MODEL,
+    ),
+    "T.DAY_CAP": RuleSpec(
+        id="T.DAY_CAP",
+        title_vi="GV không dạy quá số tiết/ngày theo cấu hình (Tiêu chí II.2)",
+        tier=RuleTier.HARD_MODEL,
     ),
 }
 

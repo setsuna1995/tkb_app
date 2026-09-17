@@ -1,8 +1,8 @@
 from core.rules import RULES, HARD_POST_GENERATION_IDS, RuleTier
 
 
-def test_registry_contains_all_six_rules():
-    assert set(RULES.keys()) == {"II.3", "II.4", "II.7", "II.8", "II.9", "II.14"}
+def test_registry_keeps_the_six_hdsp_rules():
+    assert {"II.3", "II.4", "II.7", "II.8", "II.9", "II.14"} <= set(RULES.keys())
 
 
 def test_hard_post_generation_ids_matches_user_confirmed_classification():
