@@ -44,6 +44,11 @@ def build_result(built: CpSatModel, solver: cp_model.CpSolver, diagnostics: Opti
                 entry["proven_infeasible"] = True
             relaxed_rules.append(entry)
 
+    rule_counts = {
+        rule_id: int(sum(solver.Value(term) for term in terms))
+        for rule_id, terms in built.penalty_terms.items() if terms
+    }
+
     successes_found = 1 if not relaxed_rules else 0
 
     return ScheduleResult(
@@ -57,6 +62,7 @@ def build_result(built: CpSatModel, solver: cp_model.CpSolver, diagnostics: Opti
         solver_name="cpsat",
         diagnostics=diagnostics or {},
         effective_params=built.params,
+        rule_counts=rule_counts,
     )
 
 

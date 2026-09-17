@@ -222,4 +222,5 @@ class ScheduleResult:
     solver_name: str = "heuristic"
     diagnostics: dict = field(default_factory=dict)  # cpsat_model diagnostic trace; {} for heuristic engine
     effective_params: object = None  # core.rules.params.EffectiveParams the model was built with; None for non-CP-SAT results
+    rule_counts: dict = field(default_factory=dict)  # rule_id -> violations the MODEL counted; cross-check only, never shown
 

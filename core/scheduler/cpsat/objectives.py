@@ -409,7 +409,7 @@ def _add_objective(built: CpSatModel) -> None:
                     underload = m.NewBoolVar(f"acad_underload_c{class_id}_wd{weekday}")
                     m.Add(sum(academic_vars) <= min_academic - 1).OnlyEnforceIf(underload)
                     m.Add(sum(academic_vars) >= min_academic).OnlyEnforceIf(underload.Not())
-                    penalty_terms["_morning_academic_underload"].append(underload)
+                    penalty_terms["ACAD.MIN"].append(underload)
 
     # 6e. GVCN dạy tiết 2 Thứ 2 của lớp chủ nhiệm (ưu tiên mềm, cấu hình được theo lớp)
     if getattr(config, "gvcn_monday_period2_enabled", True) and built.role_index.hdtn_id is not None:
@@ -492,8 +492,8 @@ def _add_objective(built: CpSatModel) -> None:
         obj_terms.append(TEACHER_BACK_TO_BACK_SHIFT_PENALTY * sum(penalty_terms["_back_to_back_shift"]))
     if penalty_terms.get("_subject_dispersion"):
         obj_terms.append(SUBJECT_CONSECUTIVE_DAY_SOFT_PENALTY * sum(penalty_terms["_subject_dispersion"]))
-    if penalty_terms.get("_morning_academic_underload"):
-        obj_terms.append(MORNING_ACADEMIC_UNDERLOAD_SOFT_PENALTY * sum(penalty_terms["_morning_academic_underload"]))
+    if penalty_terms.get("ACAD.MIN"):
+        obj_terms.append(MORNING_ACADEMIC_UNDERLOAD_SOFT_PENALTY * sum(penalty_terms["ACAD.MIN"]))
     if penalty_terms.get("_gvcn_monday_period2"):
         obj_terms.append(GVCN_MONDAY_PERIOD2_MISS_PENALTY * sum(penalty_terms["_gvcn_monday_period2"]))
     if penalty_terms.get("II.14"):
