@@ -1,5 +1,7 @@
 """Builders for rule unit tests: a minimal SchedulingInput around hand-placed slots."""
 from core.models import ROLE_HDTN, ClassRoom, SchedulingConfig, SchedulingInput, Subject, Teacher
+from core.rules.params import resolve_effective_params
+from core.rules.view import build_schedule_view
 
 HDTN_SUBJECT_ID = 9999  # resolve_roles() refuses a subject list without HĐTN
 
@@ -27,3 +29,13 @@ def make_input(slots, *, assigned_teacher=None, subjects=None, used_subject_ids=
         config=config or SchedulingConfig(),
         subject_class_allowed_cells=dict(allowed_cells or {}),
     )
+
+
+def view_and_params(slots, assignment, **input_kwargs):
+    used = {sid for sid in assignment.values() if sid not in (None, -1)}
+    inp = make_input(slots, used_subject_ids=used, **input_kwargs)
+    return build_schedule_view(inp, assignment), resolve_effective_params(inp)
+
+
+def pick(violations, *field_names):
+    return [tuple(getattr(v, name) for name in field_names) for v in violations]
