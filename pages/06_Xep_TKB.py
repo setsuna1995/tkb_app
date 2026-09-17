@@ -12,7 +12,7 @@ from core.validation import (
     find_teacher_lone_session_violations, find_teacher_missing_mandatory_morning_violations,
     find_teacher_split_day_violations,
 )
-from core.rules_registry import RULES
+from core.rules import RULES
 from data import repository as repo
 from io_excel.exporter import export_xlsx
 from ui_common import get_conn, require_auth, require_school, sidebar_backup_export, sidebar_school_switcher

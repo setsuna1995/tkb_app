@@ -993,7 +993,7 @@ def test_lone_session_exempt_teacher_still_gets_small_soft_penalty():
     assert len(built.penalty_terms.get("II.4", [])) == 0
     assert len(built.penalty_terms.get("II.8", [])) == 0
     # Nhưng phải có bucket phạt mềm riêng, khác II.4/II.8/rules_registry.
-    from core.rules_registry import HARD_POST_GENERATION_IDS
+    from core.rules import HARD_POST_GENERATION_IDS
     assert "_exempt_lone_session" not in HARD_POST_GENERATION_IDS
     soft_terms = built.penalty_terms.get("_exempt_lone_session", [])
     assert len(soft_terms) == 2  # 2 tiết, mỗi tiết 1 ngày riêng -> 2 buổi lẻ

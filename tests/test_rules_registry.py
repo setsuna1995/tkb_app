@@ -1,4 +1,4 @@
-from core.rules_registry import RULES, HARD_POST_GENERATION_IDS, RuleTier
+from core.rules import RULES, HARD_POST_GENERATION_IDS, RuleTier
 
 
 def test_registry_contains_all_six_rules():

@@ -8,7 +8,7 @@ import time
 from typing import Callable, Optional, Sequence
 
 from core.models import ScheduleResult, is_bgh, ROLE_HDTN
-from core.rules_registry import HARD_POST_GENERATION_IDS
+from core.rules import HARD_POST_GENERATION_IDS
 from core.scheduler.cpsat.types import CpSatModel, CpSatUnavailable, _HAS_ORTOOLS, cp_model
 from core.scheduler.cpsat.constraints import _is_teacher_busy_morning
 
