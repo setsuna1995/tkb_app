@@ -13,7 +13,7 @@ def test_perfect_tkb_health_score():
         TimeSlot(3, 4, "S", 1), TimeSlot(4, 4, "S", 2),
     ]
     slots = [Slot(i + 1, 101, t) for i, t in enumerate(ts)]
-    subjects = [Subject(1, "Toan", ROLE_THUONG), Subject(2, "Van", ROLE_THUONG)]
+    subjects = [Subject(1, "Toan", ROLE_THUONG), Subject(2, "Van", ROLE_THUONG), Subject(99, "HĐTN", ROLE_HDTN)]
     teachers = [Teacher(10, "GV Toan"), Teacher(20, "GV Van")]
     assigned_teacher = {(1, 101): 10, (2, 101): 20}
     assignment = {1: 1, 2: 1, 3: 2, 4: 2}
@@ -52,7 +52,7 @@ def test_penalized_tkb_health_score():
         TimeSlot(2, 3, "S", 1),
     ]
     slots = [Slot(1, 101, ts[0]), Slot(2, 101, ts[1])]
-    subjects = [Subject(1, "Anh", ROLE_THUONG)]
+    subjects = [Subject(1, "Anh", ROLE_THUONG), Subject(99, "HĐTN", ROLE_HDTN)]
     teachers = [Teacher(10, "GV Anh")]
     assigned_teacher = {(1, 101): 10}
     assignment = {1: 1, 2: 1}
@@ -101,4 +101,14 @@ def test_sample_school_health_score_integration(tmp_path):
     assert health["rating"] in ("Xuất sắc", "Tốt", "Khá", "Cần cải thiện")
     assert isinstance(health["recommendations"], list)
     assert len(health["recommendations"]) > 0
+
+
+def test_health_score_does_not_penalise_rules_the_school_turned_off():
+    from core.models import SchedulingConfig, Slot, TimeSlot
+    from tests.rule_helpers import make_input
+
+    slots = [Slot(1, 101, TimeSlot(1, 2, "S", 1)), Slot(2, 101, TimeSlot(2, 2, "S", 4))]
+    inp = make_input(slots, assigned_teacher={(7, 101): 10}, config=SchedulingConfig(avoid_teacher_gaps=False))
+    health = compute_tkb_health_score(inp, {1: 7, 2: 7})
+    assert health["metrics"]["teacher_gaps_total"] == 0
 
