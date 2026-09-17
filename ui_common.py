@@ -33,7 +33,13 @@ def sidebar_branding() -> None:
         st.markdown(
             """
             <div class="tkb-sidebar-header">
-                <div class="tkb-sidebar-logo">🏫</div>
+                <div class="tkb-sidebar-logo">
+                    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                        <path d="M4 19.5v-15A2.5 2.5 0 0 1 6.5 2H20v20H6.5a2.5 2.5 0 0 1-2.5-2.5Z"/>
+                        <path d="M6 6h10"/>
+                        <path d="M6 10h10"/>
+                    </svg>
+                </div>
                 <div>
                     <div class="tkb-sidebar-title">Xếp TKB Tự Động</div>
                     <div class="tkb-sidebar-subtitle">THCS & THPT Pro Max</div>

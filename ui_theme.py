@@ -49,6 +49,69 @@ THEME_CSS = """
     --tkb-shadow-hover: 0 10px 15px -3px rgb(0 0 0 / 0.08), 0 4px 6px -4px rgb(0 0 0 / 0.04);
 }
 
+/* Dark Mode Tokens (OS auto-detect & Streamlit dark theme parity) */
+@media (prefers-color-scheme: dark) {
+    :root {
+        --tkb-primary: #3B82F6;
+        --tkb-primary-hover: #60A5FA;
+        --tkb-primary-light: rgba(59, 130, 246, 0.18);
+        --tkb-primary-border: rgba(59, 130, 246, 0.35);
+        --tkb-secondary: #60A5FA;
+        --tkb-accent: #FB923C;
+        --tkb-bg: #0B0F19;
+        --tkb-surface: #131B2E;
+        --tkb-text: #F8FAFC;
+        --tkb-text-muted: #94A3B8;
+        --tkb-border: #1E293B;
+        --tkb-border-hover: #334155;
+        --tkb-success: #34D399;
+        --tkb-success-light: rgba(16, 185, 129, 0.18);
+        --tkb-success-text: #6EE7B7;
+        --tkb-warning: #FBBF24;
+        --tkb-warning-light: rgba(245, 158, 11, 0.18);
+        --tkb-warning-text: #FDE68A;
+        --tkb-danger: #F87171;
+        --tkb-danger-light: rgba(239, 68, 68, 0.18);
+        --tkb-danger-text: #FCA5A5;
+        --tkb-info: #38BDF8;
+        --tkb-info-light: rgba(2, 132, 199, 0.18);
+        --tkb-info-text: #7DD3FC;
+        --tkb-shadow-sm: 0 1px 2px 0 rgb(0 0 0 / 0.4);
+        --tkb-shadow-md: 0 4px 6px -1px rgb(0 0 0 / 0.5), 0 2px 4px -2px rgb(0 0 0 / 0.4);
+        --tkb-shadow-hover: 0 10px 15px -3px rgb(0 0 0 / 0.6), 0 4px 6px -4px rgb(0 0 0 / 0.5);
+    }
+}
+
+[data-theme="dark"], .stDarkTheme {
+    --tkb-primary: #3B82F6;
+    --tkb-primary-hover: #60A5FA;
+    --tkb-primary-light: rgba(59, 130, 246, 0.18);
+    --tkb-primary-border: rgba(59, 130, 246, 0.35);
+    --tkb-secondary: #60A5FA;
+    --tkb-accent: #FB923C;
+    --tkb-bg: #0B0F19;
+    --tkb-surface: #131B2E;
+    --tkb-text: #F8FAFC;
+    --tkb-text-muted: #94A3B8;
+    --tkb-border: #1E293B;
+    --tkb-border-hover: #334155;
+    --tkb-success: #34D399;
+    --tkb-success-light: rgba(16, 185, 129, 0.18);
+    --tkb-success-text: #6EE7B7;
+    --tkb-warning: #FBBF24;
+    --tkb-warning-light: rgba(245, 158, 11, 0.18);
+    --tkb-warning-text: #FDE68A;
+    --tkb-danger: #F87171;
+    --tkb-danger-light: rgba(239, 68, 68, 0.18);
+    --tkb-danger-text: #FCA5A5;
+    --tkb-info: #38BDF8;
+    --tkb-info-light: rgba(2, 132, 199, 0.18);
+    --tkb-info-text: #7DD3FC;
+    --tkb-shadow-sm: 0 1px 2px 0 rgb(0 0 0 / 0.4);
+    --tkb-shadow-md: 0 4px 6px -1px rgb(0 0 0 / 0.5), 0 2px 4px -2px rgb(0 0 0 / 0.4);
+    --tkb-shadow-hover: 0 10px 15px -3px rgb(0 0 0 / 0.6), 0 4px 6px -4px rgb(0 0 0 / 0.5);
+}
+
 /* Global Typography */
 html, body, .stApp {
     font-family: 'Plus Jakarta Sans', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
@@ -108,7 +171,7 @@ h1, h2, h3, h4, h5, h6, p, label, button, input, select, textarea,
 
 /* Header Component */
 .tkb-page-header {
-    background: linear-gradient(135deg, #FFFFFF 0%, #F1F5F9 100%);
+    background: linear-gradient(135deg, var(--tkb-surface) 0%, var(--tkb-bg) 100%);
     border: 1px solid var(--tkb-border);
     border-radius: var(--tkb-radius-card);
     padding: 1.5rem 1.75rem;
@@ -347,10 +410,16 @@ h1, h2, h3, h4, h5, h6, p, label, button, input, select, textarea,
 
 /* Streamlit Native Widget Enhancements */
 .stButton > button {
+    cursor: pointer !important;
     border-radius: var(--tkb-radius-btn) !important;
     font-weight: 600 !important;
     padding: 0.5rem 1.15rem !important;
-    transition: all 0.15s ease-in-out !important;
+    transition: all 0.18s cubic-bezier(0.4, 0, 0.2, 1) !important;
+}
+
+.stButton > button:focus-visible {
+    outline: 2px solid var(--tkb-primary) !important;
+    outline-offset: 2px !important;
 }
 
 .stButton > button[kind="primary"] {
@@ -380,7 +449,7 @@ h1, h2, h3, h4, h5, h6, p, label, button, input, select, textarea,
 /* Streamlit Tabs Customization */
 .stTabs [data-baseweb="tab-list"] {
     gap: 8px !important;
-    background-color: #F1F5F9 !important;
+    background-color: var(--tkb-bg) !important;
     padding: 6px !important;
     border-radius: var(--tkb-radius-card) !important;
     border: 1px solid var(--tkb-border) !important;
@@ -394,6 +463,8 @@ h1, h2, h3, h4, h5, h6, p, label, button, input, select, textarea,
     border: none !important;
     background-color: transparent !important;
     color: var(--tkb-text-muted) !important;
+    cursor: pointer !important;
+    transition: all 0.15s ease-in-out !important;
 }
 
 .stTabs [aria-selected="true"] {
@@ -411,7 +482,7 @@ h1, h2, h3, h4, h5, h6, p, label, button, input, select, textarea,
 
 /* Sidebar Branding */
 section[data-testid="stSidebar"] {
-    background-color: #FFFFFF !important;
+    background-color: var(--tkb-surface) !important;
     border-right: 1px solid var(--tkb-border) !important;
 }
 
@@ -450,6 +521,35 @@ section[data-testid="stSidebar"] {
     font-size: 0.75rem;
     color: var(--tkb-text-muted);
     margin: 0;
+}
+
+/* Reduced Motion (WCAG 2.3.3) */
+@media (prefers-reduced-motion: reduce) {
+    *, ::before, ::after {
+        animation-duration: 0.01ms !important;
+        animation-iteration-count: 1 !important;
+        transition-duration: 0.01ms !important;
+        scroll-behavior: auto !important;
+    }
+}
+
+/* Responsive Breakpoints (Tablet & Mobile) */
+@media (max-width: 768px) {
+    .block-container {
+        padding-top: 1rem !important;
+        padding-left: 0.75rem !important;
+        padding-right: 0.75rem !important;
+    }
+    .tkb-page-header {
+        padding: 1.1rem 1.25rem;
+        gap: 0.75rem;
+    }
+    .tkb-page-header-h1 {
+        font-size: 1.35rem !important;
+    }
+    .tkb-kpi-grid {
+        grid-template-columns: 1fr;
+    }
 }
 </style>
 """
@@ -530,29 +630,30 @@ def render_kpi_row(cards_data: list[dict[str, Any]]) -> None:
 
 
 def render_status_badge(label: str, status: str = "info") -> str:
-    """Returns a styled HTML pill badge."""
-    icon_map = {
-        "success": "✓",
-        "warning": "⚠",
-        "danger": "✕",
-        "info": "ℹ",
+    """Returns a styled HTML pill badge with vector SVG icon."""
+    svg_badges = {
+        "success": '<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="20 6 9 17 4 12"/></svg>',
+        "warning": '<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/></svg>',
+        "danger": '<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>',
+        "info": '<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="10"/><line x1="12" y1="16" x2="12" y2="12"/><line x1="12" y1="8" x2="12.01" y2="8"/></svg>',
     }
-    icon = icon_map.get(status, "•")
-    return f'<span class="tkb-badge tkb-badge-{html.escape(status)}">{icon} {html.escape(label)}</span>'
+    icon_svg = svg_badges.get(status, svg_badges["info"])
+    return f'<span class="tkb-badge tkb-badge-{html.escape(status)}">{icon_svg} <span>{html.escape(label)}</span></span>'
 
 
 def render_callout_html(message: str, level: str = "info", title: str | None = None) -> str:
-    """Returns HTML for a custom callout box."""
-    icons = {"info": "ℹ️", "warning": "⚠️", "danger": "🚨", "success": "✅"}
-    icon = icons.get(level, "ℹ️")
-    title_html = (
-        f'<div class="tkb-callout-title">{icon} {html.escape(title)}</div>'
-        if title
-        else f'<div class="tkb-callout-title">{icon} Thông báo</div>'
-    )
+    """Returns HTML for a custom callout box with vector SVG icons."""
+    svg_icons = {
+        "info": '<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="10"/><path d="M12 16v-4"/><path d="M12 8h.01"/></svg>',
+        "warning": '<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m21.73 18-8-14a2 2 0 0 0-3.48 0l-8 14A2 2 0 0 0 4 21h16a2 2 0 0 0 1.73-3Z"/><line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/></svg>',
+        "danger": '<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="10"/><line x1="15" y1="9" x2="9" y2="15"/><line x1="9" y1="9" x2="15" y2="15"/></svg>',
+        "success": '<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"/><polyline points="22 4 12 14.01 9 11.01"/></svg>',
+    }
+    icon_svg = svg_icons.get(level, svg_icons["info"])
+    title_text = title if title else "Thông báo"
     return (
         f'<div class="tkb-callout tkb-callout-{html.escape(level)}">'
-        f'{title_html}'
+        f'<div class="tkb-callout-title">{icon_svg} <span>{html.escape(title_text)}</span></div>'
         f'<div>{html.escape(message)}</div>'
         f'</div>'
     )

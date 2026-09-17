@@ -16,7 +16,7 @@ from core.rules_registry import RULES
 from data import repository as repo
 from io_excel.exporter import export_xlsx
 from ui_common import get_conn, require_auth, require_school, sidebar_backup_export, sidebar_school_switcher
-from ui_theme import render_callout, render_page_header, render_status_badge
+from ui_theme import render_callout, render_kpi_row, render_page_header, render_status_badge
 
 
 def _format_rule_item(rule_id: str, item: tuple) -> str:
@@ -222,23 +222,26 @@ with tab_schedule:
             format_func=lambda m: "Tự động (Thuật toán tự tìm thời điểm đồng bộ tối ưu)" if m == "auto" else "Cố định theo thời gian",
             key="single_hdtn_thematic_mode",
         )
-        if hdtn_thematic_mode == "fixed":
-            c_wd, c_sess, c_p = c_th_opt.columns(3)
-            hdtn_thematic_weekday = c_wd.selectbox(
-                "Thứ", [2, 3, 4, 5, 6, 7],
-                format_func=lambda w: f"Thứ {w}" if w < 7 else "Thứ 7",
-                key="single_hdtn_thematic_wd",
-            )
-            hdtn_thematic_session = c_sess.selectbox(
-                "Buổi", ["S", "C"],
-                format_func=lambda s: "Sáng" if s == "S" else "Chiều",
-                key="single_hdtn_thematic_sess",
-            )
-            hdtn_thematic_start_period = c_p.selectbox(
-                "Tiết bắt đầu (3 tiết liền kề)", [1, 2, 3],
-                format_func=lambda p: f"Tiết {p} (đến tiết {p+2})",
-                key="single_hdtn_thematic_p",
-            )
+        with c_th_opt:
+            if hdtn_thematic_mode == "fixed":
+                c_wd, c_sess, c_p = st.columns(3)
+                hdtn_thematic_weekday = c_wd.selectbox(
+                    "Thứ", [2, 3, 4, 5, 6, 7],
+                    format_func=lambda w: f"Thứ {w}",
+                    key="single_hdtn_thematic_wd",
+                )
+                hdtn_thematic_session = c_sess.selectbox(
+                    "Buổi", ["S", "C"],
+                    format_func=lambda s: "Sáng" if s == "S" else "Chiều",
+                    key="single_hdtn_thematic_sess",
+                )
+                hdtn_thematic_start_period = c_p.selectbox(
+                    "Tiết bắt đầu (3 tiết liền kề)", [1, 2, 3],
+                    format_func=lambda p: f"Tiết {p} (đến tiết {p+2})",
+                    key="single_hdtn_thematic_p",
+                )
+            else:
+                st.info("💡 **Chế độ Tự động**: Thuật toán CP-SAT sẽ tự động tìm dải 3 tiết liền kề tối ưu nhất trong tuần, đồng thời đảm bảo 100% các lớp trong toàn trường học HĐTN vào cùng một thời điểm.")
 
     sched_config = repo.get_scheduling_config(conn)
     st.caption("✨ Động cơ lập lịch: **Google OR-Tools CP-SAT** (Tối ưu hóa toàn cục, triệt tiêu vi phạm II.3, II.4, II.8)")
@@ -334,16 +337,42 @@ with tab_schedule:
             health = compute_tkb_health_score(inp, result.assignment)
             with st.container():
                 st.markdown(f"### 🩺 Bảng Đánh Giá Sức Khỏe TKB: **{health['overall_score']}/100** — *Xếp loại: {health['rating']}*")
-                h_col1, h_col2, h_col3, h_col4 = st.columns(4)
-                with h_col1:
-                    st.metric("Điểm Tổng Thể", f"{health['overall_score']}/100", delta=health["rating"],
-                              delta_color="normal" if health["overall_score"] >= 80 else "inverse")
-                with h_col2:
-                    st.metric("📚 Sư Phạm Học Sinh", f"{health['pedagogical_score']}/100")
-                with h_col3:
-                    st.metric("👩‍🏫 Tiện Nghi & Công Bằng GV", f"{health['teacher_score']}/100")
-                with h_col4:
-                    st.metric("⚖️ Tuân Thủ HĐSP", f"{health['compliance_score']}/100")
+                rating_variant = (
+                    "success" if health["overall_score"] >= 85
+                    else "primary" if health["overall_score"] >= 75
+                    else "warning" if health["overall_score"] >= 60
+                    else "danger"
+                )
+                render_kpi_row([
+                    {
+                        "title": "Điểm Tổng Thể",
+                        "value": f"{health['overall_score']}/100",
+                        "subtitle": f"Xếp loại: {health['rating']}",
+                        "icon": "🏆",
+                        "variant": rating_variant,
+                    },
+                    {
+                        "title": "Sư Phạm Học Sinh",
+                        "value": f"{health['pedagogical_score']}/100",
+                        "subtitle": "Phân bổ môn & giãn cách",
+                        "icon": "📚",
+                        "variant": "info",
+                    },
+                    {
+                        "title": "Tiện Nghi & Công Bằng GV",
+                        "value": f"{health['teacher_score']}/100",
+                        "subtitle": "Tránh lủng tiết & trống lẻ",
+                        "icon": "👩‍🏫",
+                        "variant": "warning",
+                    },
+                    {
+                        "title": "Tuân Thủ HĐSP",
+                        "value": f"{health['compliance_score']}/100",
+                        "subtitle": "Ràng buộc mềm & ưu tiên",
+                        "icon": "⚖️",
+                        "variant": "success",
+                    },
+                ])
 
                 with st.expander(f"📋 Khuyến nghị sư phạm & Chi tiết đánh giá ({len(health['recommendations'])} mục)", expanded=(health["overall_score"] < 85)):
                     for rec in health["recommendations"]:
@@ -842,23 +871,26 @@ with tab_schedule:
                     format_func=lambda m: "Tự động (Thuật toán tự tìm thời điểm đồng bộ tối ưu)" if m == "auto" else "Cố định theo thời gian",
                     key="batch_hdtn_thematic_mode",
                 )
-                if batch_hdtn_thematic_mode == "fixed":
-                    c_wd, c_sess, c_p = c_b_opt.columns(3)
-                    batch_hdtn_thematic_weekday = c_wd.selectbox(
-                        "Thứ", [2, 3, 4, 5, 6, 7],
-                        format_func=lambda w: f"Thứ {w}" if w < 7 else "Thứ 7",
-                        key="batch_hdtn_thematic_wd",
-                    )
-                    batch_hdtn_thematic_session = c_sess.selectbox(
-                        "Buổi", ["S", "C"],
-                        format_func=lambda s: "Sáng" if s == "S" else "Chiều",
-                        key="batch_hdtn_thematic_sess",
-                    )
-                    batch_hdtn_thematic_start_period = c_p.selectbox(
-                        "Tiết bắt đầu (3 tiết liền kề)", [1, 2, 3],
-                        format_func=lambda p: f"Tiết {p} (đến tiết {p+2})",
-                        key="batch_hdtn_thematic_p",
-                    )
+                with c_b_opt:
+                    if batch_hdtn_thematic_mode == "fixed":
+                        c_wd, c_sess, c_p = st.columns(3)
+                        batch_hdtn_thematic_weekday = c_wd.selectbox(
+                            "Thứ", [2, 3, 4, 5, 6, 7],
+                            format_func=lambda w: f"Thứ {w}",
+                            key="batch_hdtn_thematic_wd",
+                        )
+                        batch_hdtn_thematic_session = c_sess.selectbox(
+                            "Buổi", ["S", "C"],
+                            format_func=lambda s: "Sáng" if s == "S" else "Chiều",
+                            key="batch_hdtn_thematic_sess",
+                        )
+                        batch_hdtn_thematic_start_period = c_p.selectbox(
+                            "Tiết bắt đầu (3 tiết liền kề)", [1, 2, 3],
+                            format_func=lambda p: f"Tiết {p} (đến tiết {p+2})",
+                            key="batch_hdtn_thematic_p",
+                        )
+                    else:
+                        st.info("💡 **Chế độ Tự động**: Thuật toán CP-SAT sẽ tự động tìm dải 3 tiết liền kề tối ưu cho mỗi tuần và đồng bộ tất cả các lớp cùng thời điểm.")
 
             batch_quota_warnings = []
             for wn in batch_week_nos:
