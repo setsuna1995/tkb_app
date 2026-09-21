@@ -1,3 +1,4 @@
+import dataclasses
 import pandas as pd
 import streamlit as st
 
@@ -230,45 +231,166 @@ with tab_schedule:
     )
     extra_kep_ids = frozenset(s.subject_id for s in subjects if s.name in extra_kep_names)
 
-    hdtn_thematic_week = st.checkbox(
-        "Tuần này tổ chức chuyên đề (HDTN dồn 3 tiết liền kề toàn trường, bỏ ghim chào cờ + SHL)",
-        help="Áp dụng cho toàn trường, chỉ lần chạy xếp TKB này -- không đổi vĩnh viễn.",
-    )
-    hdtn_thematic_mode = "auto"
-    hdtn_thematic_weekday = None
-    hdtn_thematic_session = "S"
-    hdtn_thematic_start_period = None
+    sched_config = repo.get_scheduling_config(conn)
 
-    if hdtn_thematic_week:
-        c_th_mode, c_th_opt = st.columns([1, 2])
-        hdtn_thematic_mode = c_th_mode.radio(
-            "Chế độ xếp 3 tiết HĐTN toàn trường:",
-            ["auto", "fixed"],
-            format_func=lambda m: "Tự động (Thuật toán tự tìm thời điểm đồng bộ tối ưu)" if m == "auto" else "Cố định theo thời gian",
-            key="single_hdtn_thematic_mode",
+    with st.container(border=True):
+        st.markdown("##### 🎯 Phương án xếp môn Hoạt động trải nghiệm (HĐTN)")
+        st.caption("Lựa chọn cách tổ chức môn HĐTN cho tuần này. Mặc định nhận theo Cấu hình xếp lịch của trường.")
+
+        default_hdtn_is_thematic = (getattr(sched_config, "hdtn_mode", "separate") == "thematic")
+        hdtn_plan = st.radio(
+            "Phương án tổ chức HĐTN tuần này:",
+            ["separate", "thematic"],
+            index=1 if default_hdtn_is_thematic else 0,
+            format_func=lambda p: (
+                "📅 Tuần học chuẩn (3 tiết: Chào cờ + Hoạt động chủ đề + Sinh hoạt lớp)"
+                if p == "separate"
+                else "🎪 Tuần chuyên đề (Dồn 3 tiết liền kề toàn trường)"
+            ),
+            key="single_hdtn_plan_radio",
+            horizontal=True,
         )
-        with c_th_opt:
-            if hdtn_thematic_mode == "fixed":
+
+        hdtn_thematic_week = (hdtn_plan == "thematic")
+        hdtn_thematic_mode = "auto"
+        hdtn_thematic_weekday = None
+        hdtn_thematic_session = "S"
+        hdtn_thematic_start_period = None
+
+        single_custom_cfg = None
+        if not hdtn_thematic_week:
+            p1_str = f"{WEEKDAY_NAMES.get(sched_config.hdtn_p1_weekday, f'Thứ {sched_config.hdtn_p1_weekday}')} ({'Sáng' if sched_config.hdtn_p1_session == 'S' else 'Chiều'} Tiết {sched_config.hdtn_p1_period})"
+            if sched_config.hdtn_p2_weekday is not None:
+                p2_str = f"{WEEKDAY_NAMES.get(sched_config.hdtn_p2_weekday, f'Thứ {sched_config.hdtn_p2_weekday}')} ({'Sáng' if sched_config.hdtn_p2_session == 'S' else 'Chiều'} Tiết {sched_config.hdtn_p2_period})"
+            else:
+                p2_str = "Tự do linh hoạt" + (" (ưu tiên chiều)" if getattr(sched_config, "hdtn_period2_afternoon", True) else "")
+            if sched_config.hdtn_p3_weekday is not None:
+                p3_str = f"{WEEKDAY_NAMES.get(sched_config.hdtn_p3_weekday, f'Thứ {sched_config.hdtn_p3_weekday}')} ({'Sáng' if sched_config.hdtn_p3_session == 'S' else 'Chiều'} {'Tiết ' + str(sched_config.hdtn_p3_period) if sched_config.hdtn_p3_period else 'cuối buổi'})"
+            else:
+                p3_str = "Tự động tiết cuối tuần (Chiều T6 hoặc Sáng T7)"
+
+            custom_single_periods = st.checkbox(
+                "✏️ Tự chỉnh lịch 3 tiết HĐTN riêng cho tuần này (không đổi cấu hình gốc)",
+                value=False,
+                key="single_custom_periods_chk",
+            )
+
+            if not custom_single_periods:
+                st.info(
+                    f"📌 **Mốc tiết HĐTN áp dụng tuần này**:\n"
+                    f"- **Tiết 1 (Chào cờ)**: {p1_str}\n"
+                    f"- **Tiết 2 (Chủ đề)**: {p2_str}\n"
+                    f"- **Tiết 3 (SHL)**: {p3_str}"
+                )
+            else:
+                c_p1_col, c_p2_col, c_p3_col = st.columns(3)
+                with c_p1_col:
+                    st.markdown("**🚩 Tiết 1 (Chào cờ)**")
+                    c1_w, c1_s, c1_p = st.columns(3)
+                    p1_w_cur = getattr(sched_config, "hdtn_p1_weekday", 2)
+                    w_p1 = c1_w.selectbox("Thứ", WEEKDAYS, index=WEEKDAYS.index(p1_w_cur) if p1_w_cur in WEEKDAYS else 0,
+                                          format_func=lambda w: f"T{w}", key="sin_p1_w")
+                    s_p1 = c1_s.selectbox("Buổi", ["S", "C"], index=0 if getattr(sched_config, "hdtn_p1_session", "S") == "S" else 1,
+                                          format_func=lambda s: "Sáng" if s == "S" else "Chiều", key="sin_p1_s")
+                    p_p1 = c1_p.selectbox("Tiết", list(range(1, 6)), index=max(0, min(getattr(sched_config, "hdtn_p1_period", 1) - 1, 4)), key="sin_p1_p")
+
+                with c_p2_col:
+                    st.markdown("**📘 Tiết 2 (Chủ đề)**")
+                    p2_is_fixed = getattr(sched_config, "hdtn_p2_weekday", None) is not None
+                    m_p2 = st.selectbox("Chế độ", ["auto", "fixed"], index=1 if p2_is_fixed else 0,
+                                        format_func=lambda m: "🤖 Tự do" if m == "auto" else "📌 Cố định", key="sin_p2_m")
+                    if m_p2 == "fixed":
+                        c2_w, c2_s, c2_p = st.columns(3)
+                        p2_w_cur = getattr(sched_config, "hdtn_p2_weekday", 4) or 4
+                        w_p2 = c2_w.selectbox("Thứ", WEEKDAYS, index=WEEKDAYS.index(p2_w_cur) if p2_w_cur in WEEKDAYS else 2,
+                                              format_func=lambda w: f"T{w}", key="sin_p2_w")
+                        s_p2 = c2_s.selectbox("Buổi", ["S", "C"], index=0 if getattr(sched_config, "hdtn_p2_session", "S") == "S" else 1,
+                                              format_func=lambda s: "Sáng" if s == "S" else "Chiều", key="sin_p2_s")
+                        p_p2 = c2_p.selectbox("Tiết", list(range(1, 6)), index=max(0, min((getattr(sched_config, "hdtn_p2_period", 2) or 2) - 1, 4)), key="sin_p2_p")
+                    else:
+                        w_p2, s_p2, p_p2 = None, "S", None
+                        p2_chieu_pref = st.checkbox(
+                            "Ưu tiên xếp chiều",
+                            value=getattr(sched_config, "hdtn_period2_afternoon", True),
+                            key="sin_p2_chieu_pref",
+                        )
+
+                with c_p3_col:
+                    st.markdown("**👥 Tiết 3 (SHL)**")
+                    p3_is_fixed = getattr(sched_config, "hdtn_p3_weekday", None) is not None
+                    m_p3 = st.selectbox("Chế độ", ["auto", "fixed"], index=1 if p3_is_fixed else 0,
+                                        format_func=lambda m: "🤖 Tiết cuối tuần" if m == "auto" else "📌 Cố định", key="sin_p3_m")
+                    if m_p3 == "fixed":
+                        c3_w, c3_s, c3_p = st.columns(3)
+                        p3_w_cur = getattr(sched_config, "hdtn_p3_weekday", 6) or 6
+                        w_p3 = c3_w.selectbox("Thứ", WEEKDAYS, index=WEEKDAYS.index(p3_w_cur) if p3_w_cur in WEEKDAYS else 4,
+                                              format_func=lambda w: f"T{w}", key="sin_p3_w")
+                        s_p3 = c3_s.selectbox("Buổi", ["S", "C"], index=0 if getattr(sched_config, "hdtn_p3_session", "S") == "S" else 1,
+                                              format_func=lambda s: "Sáng" if s == "S" else "Chiều", key="sin_p3_s")
+                        p3_opts = [0, 1, 2, 3, 4, 5]
+                        cur_p3_val = getattr(sched_config, "hdtn_p3_period", 0) or 0
+                        p_p3 = c3_p.selectbox("Tiết", p3_opts, index=p3_opts.index(cur_p3_val) if cur_p3_val in p3_opts else 0,
+                                              format_func=lambda p: "Cuối" if p == 0 else f"T{p}", key="sin_p3_p")
+                    else:
+                        w_p3, s_p3, p_p3 = None, "S", None
+
+                single_custom_cfg = dataclasses.replace(
+                    sched_config,
+                    hdtn_p1_weekday=int(w_p1),
+                    hdtn_p1_session=str(s_p1),
+                    hdtn_p1_period=int(p_p1),
+                    chao_co_weekday=int(w_p1),
+                    chao_co_session=str(s_p1),
+                    chao_co_period=int(p_p1),
+                    hdtn_p2_weekday=int(w_p2) if m_p2 == "fixed" else None,
+                    hdtn_p2_session=str(s_p2) if m_p2 == "fixed" else "S",
+                    hdtn_p2_period=int(p_p2) if m_p2 == "fixed" else None,
+                    hdtn_period2_afternoon=bool(p2_chieu_pref if m_p2 != "fixed" else getattr(sched_config, "hdtn_period2_afternoon", True)),
+                    hdtn_p3_weekday=int(w_p3) if m_p3 == "fixed" else None,
+                    hdtn_p3_session=str(s_p3) if m_p3 == "fixed" else "S",
+                    hdtn_p3_period=int(p_p3) if (m_p3 == "fixed" and int(p_p3) > 0) else None,
+                )
+        else:
+            hdtn_thematic_mode = "auto"
+            hdtn_thematic_weekday = None
+            hdtn_thematic_session = "S"
+            hdtn_thematic_start_period = None
+
+            st.success(
+                "🤖 **Chế độ Tự động tối ưu toàn trường (Mặc định)**:\n\n"
+                "Thuật toán CP-SAT sẽ tự động tìm dải 3 tiết liền kề tối ưu nhất trong tuần, đồng thời bảo đảm 100% các lớp "
+                "được học HĐTN cùng lúc. **Bạn không cần phải tự chọn thời gian thủ công**."
+            )
+            allow_manual_fixed = st.checkbox(
+                "Chỉ định khung giờ cố định (chỉ dùng nếu có lịch ấn định sẵn từ Ban Giám hiệu)",
+                value=False,
+                key="single_allow_manual_thematic_fixed",
+            )
+            if allow_manual_fixed:
                 c_wd, c_sess, c_p = st.columns(3)
+                def_wd = getattr(sched_config, "hdtn_thematic_weekday", None) or 2
                 hdtn_thematic_weekday = c_wd.selectbox(
                     "Thứ", [2, 3, 4, 5, 6, 7],
+                    index=[2, 3, 4, 5, 6, 7].index(def_wd) if def_wd in [2, 3, 4, 5, 6, 7] else 0,
                     format_func=lambda w: f"Thứ {w}",
                     key="single_hdtn_thematic_wd",
                 )
+                def_sess = getattr(sched_config, "hdtn_thematic_session", "S") or "S"
                 hdtn_thematic_session = c_sess.selectbox(
                     "Buổi", ["S", "C"],
+                    index=0 if def_sess == "S" else 1,
                     format_func=lambda s: "Sáng" if s == "S" else "Chiều",
                     key="single_hdtn_thematic_sess",
                 )
+                def_p = getattr(sched_config, "hdtn_thematic_start_period", None) or 1
                 hdtn_thematic_start_period = c_p.selectbox(
-                    "Tiết bắt đầu (3 tiết liền kề)", [1, 2, 3],
-                    format_func=lambda p: f"Tiết {p} (đến tiết {p+2})",
+                    "Dải 3 tiết bắt đầu", [1, 2, 3],
+                    index=[1, 2, 3].index(def_p) if def_p in [1, 2, 3] else 0,
+                    format_func=lambda p: f"Tiết {p} → Tiết {p+2}",
                     key="single_hdtn_thematic_p",
                 )
-            else:
-                st.info("💡 **Chế độ Tự động**: Thuật toán CP-SAT sẽ tự động tìm dải 3 tiết liền kề tối ưu nhất trong tuần, đồng thời đảm bảo 100% các lớp trong toàn trường học HĐTN vào cùng một thời điểm.")
+                hdtn_thematic_mode = "fixed"
 
-    sched_config = repo.get_scheduling_config(conn)
     st.caption("✨ Động cơ lập lịch: **Google OR-Tools CP-SAT** (Tối ưu hóa toàn cục, triệt tiêu vi phạm II.3, II.4, II.8)")
 
     if st.button("🚀 Chạy xếp TKB", type="primary"):
@@ -280,6 +402,7 @@ with tab_schedule:
             hdtn_thematic_session=hdtn_thematic_session,
             hdtn_thematic_start_period=hdtn_thematic_start_period,
             week_no=chosen_week,
+            config_override=single_custom_cfg,
         )
 
         # Thanh tiến trình theo TỪNG ĐỢT giải CP-SAT
@@ -726,43 +849,141 @@ with tab_schedule:
             )
             batch_extra_kep_ids = frozenset(s.subject_id for s in subjects if s.name in batch_extra_kep_names)
 
-            batch_hdtn_thematic_week = st.checkbox(
-                "Các tuần này tổ chức chuyên đề (HDTN dồn 3 tiết liền kề toàn trường, bỏ ghim chào cờ + SHL)",
-                key="batch_hdtn_thematic_week",
-            )
-            batch_hdtn_thematic_mode = "auto"
-            batch_hdtn_thematic_weekday = None
-            batch_hdtn_thematic_session = "S"
-            batch_hdtn_thematic_start_period = None
+            batch_sched_config = repo.get_scheduling_config(conn)
+            with st.container(border=True):
+                st.markdown("##### 🎯 Phương án xếp môn Hoạt động trải nghiệm (HĐTN) cho các tuần chọn")
+                st.caption("Lựa chọn cách tổ chức môn HĐTN áp dụng cho toàn bộ các tuần được xếp đợt này.")
 
-            if batch_hdtn_thematic_week:
-                c_b_mode, c_b_opt = st.columns([1, 2])
-                batch_hdtn_thematic_mode = c_b_mode.radio(
-                    "Chế độ xếp 3 tiết HĐTN toàn trường:",
-                    ["auto", "fixed"],
-                    format_func=lambda m: "Tự động (Thuật toán tự tìm thời điểm đồng bộ tối ưu)" if m == "auto" else "Cố định theo thời gian",
-                    key="batch_hdtn_thematic_mode",
+                batch_default_thematic = (getattr(batch_sched_config, "hdtn_mode", "separate") == "thematic")
+                batch_hdtn_plan = st.radio(
+                    "Phương án tổ chức HĐTN cho các tuần này:",
+                    ["separate", "thematic"],
+                    index=1 if batch_default_thematic else 0,
+                    format_func=lambda p: (
+                        "📅 Các tuần học chuẩn (3 tiết: Chào cờ + Hoạt động chủ đề + Sinh hoạt lớp)"
+                        if p == "separate"
+                        else "🎪 Các tuần chuyên đề (Dồn 3 tiết liền kề toàn trường)"
+                    ),
+                    key="batch_hdtn_plan_radio",
+                    horizontal=True,
                 )
-                with c_b_opt:
-                    if batch_hdtn_thematic_mode == "fixed":
+
+                batch_hdtn_thematic_week = (batch_hdtn_plan == "thematic")
+                batch_hdtn_thematic_mode = "auto"
+                batch_hdtn_thematic_weekday = None
+                batch_hdtn_thematic_session = "S"
+                batch_hdtn_thematic_start_period = None
+
+                batch_custom_cfg = None
+                if not batch_hdtn_thematic_week:
+                    batch_custom_periods = st.checkbox(
+                        "✏️ Tự chỉnh lịch 3 tiết HĐTN riêng cho các tuần này (không đổi cấu hình gốc)",
+                        value=False,
+                        key="batch_custom_periods_chk",
+                    )
+                    if not batch_custom_periods:
+                        st.info("📌 Các tuần này sẽ tự động áp dụng cấu hình 3 tiết HĐTN phân bổ chuẩn của trường (Chào cờ đầu tuần, Chủ đề, SHL cuối tuần).")
+                    else:
+                        c_bp1, c_bp2, c_bp3 = st.columns(3)
+                        with c_bp1:
+                            st.markdown("**🚩 Tiết 1 (Chào cờ)**")
+                            b_c1w, b_c1s, b_c1p = st.columns(3)
+                            bp1_w_cur = getattr(batch_sched_config, "hdtn_p1_weekday", 2)
+                            bw_p1 = b_c1w.selectbox("Thứ", WEEKDAYS, index=WEEKDAYS.index(bp1_w_cur) if bp1_w_cur in WEEKDAYS else 0,
+                                                    format_func=lambda w: f"T{w}", key="b_p1_w")
+                            bs_p1 = b_c1s.selectbox("Buổi", ["S", "C"], index=0 if getattr(batch_sched_config, "hdtn_p1_session", "S") == "S" else 1,
+                                                    format_func=lambda s: "Sáng" if s == "S" else "Chiều", key="b_p1_s")
+                            bp_p1 = b_c1p.selectbox("Tiết", list(range(1, 6)), index=max(0, min(getattr(batch_sched_config, "hdtn_p1_period", 1) - 1, 4)), key="b_p1_p")
+
+                        with c_bp2:
+                            st.markdown("**📘 Tiết 2 (Chủ đề)**")
+                            bp2_is_fixed = getattr(batch_sched_config, "hdtn_p2_weekday", None) is not None
+                            bm_p2 = st.selectbox("Chế độ", ["auto", "fixed"], index=1 if bp2_is_fixed else 0,
+                                                 format_func=lambda m: "🤖 Tự do" if m == "auto" else "📌 Cố định", key="b_p2_m")
+                            if bm_p2 == "fixed":
+                                b_c2w, b_c2s, b_c2p = st.columns(3)
+                                bp2_w_cur = getattr(batch_sched_config, "hdtn_p2_weekday", 4) or 4
+                                bw_p2 = b_c2w.selectbox("Thứ", WEEKDAYS, index=WEEKDAYS.index(bp2_w_cur) if bp2_w_cur in WEEKDAYS else 2,
+                                                        format_func=lambda w: f"T{w}", key="b_p2_w")
+                                bs_p2 = b_c2s.selectbox("Buổi", ["S", "C"], index=0 if getattr(batch_sched_config, "hdtn_p2_session", "S") == "S" else 1,
+                                                        format_func=lambda s: "Sáng" if s == "S" else "Chiều", key="b_p2_s")
+                                bp_p2 = b_c2p.selectbox("Tiết", list(range(1, 6)), index=max(0, min((getattr(batch_sched_config, "hdtn_p2_period", 2) or 2) - 1, 4)), key="b_p2_p")
+                            else:
+                                bw_p2, bs_p2, bp_p2 = None, "S", None
+
+                        with c_bp3:
+                            st.markdown("**👥 Tiết 3 (SHL)**")
+                            bp3_is_fixed = getattr(batch_sched_config, "hdtn_p3_weekday", None) is not None
+                            bm_p3 = st.selectbox("Chế độ", ["auto", "fixed"], index=1 if bp3_is_fixed else 0,
+                                                 format_func=lambda m: "🤖 Tiết cuối tuần" if m == "auto" else "📌 Cố định", key="b_p3_m")
+                            if bm_p3 == "fixed":
+                                b_c3w, b_c3s, b_c3p = st.columns(3)
+                                bp3_w_cur = getattr(batch_sched_config, "hdtn_p3_weekday", 6) or 6
+                                bw_p3 = b_c3w.selectbox("Thứ", WEEKDAYS, index=WEEKDAYS.index(bp3_w_cur) if bp3_w_cur in WEEKDAYS else 4,
+                                                        format_func=lambda w: f"T{w}", key="b_p3_w")
+                                bs_p3 = b_c3s.selectbox("Buổi", ["S", "C"], index=0 if getattr(batch_sched_config, "hdtn_p3_session", "S") == "S" else 1,
+                                                        format_func=lambda s: "Sáng" if s == "S" else "Chiều", key="b_p3_s")
+                                bp3_opts = [0, 1, 2, 3, 4, 5]
+                                cur_bp3_val = getattr(batch_sched_config, "hdtn_p3_period", 0) or 0
+                                bp_p3 = b_c3p.selectbox("Tiết", bp3_opts, index=bp3_opts.index(cur_bp3_val) if cur_bp3_val in bp3_opts else 0,
+                                                        format_func=lambda p: "Cuối" if p == 0 else f"T{p}", key="b_p3_p")
+                            else:
+                                bw_p3, bs_p3, bp_p3 = None, "S", None
+
+                        batch_custom_cfg = dataclasses.replace(
+                            batch_sched_config,
+                            hdtn_p1_weekday=int(bw_p1),
+                            hdtn_p1_session=str(bs_p1),
+                            hdtn_p1_period=int(bp_p1),
+                            chao_co_weekday=int(bw_p1),
+                            chao_co_session=str(bs_p1),
+                            chao_co_period=int(bp_p1),
+                            hdtn_p2_weekday=int(bw_p2) if bm_p2 == "fixed" else None,
+                            hdtn_p2_session=str(bs_p2) if bm_p2 == "fixed" else "S",
+                            hdtn_p2_period=int(bp_p2) if bm_p2 == "fixed" else None,
+                            hdtn_p3_weekday=int(bw_p3) if bm_p3 == "fixed" else None,
+                            hdtn_p3_session=str(bs_p3) if bm_p3 == "fixed" else "S",
+                            hdtn_p3_period=int(bp_p3) if (bm_p3 == "fixed" and int(bp_p3) > 0) else None,
+                        )
+                else:
+                    batch_hdtn_thematic_mode = "auto"
+                    batch_hdtn_thematic_weekday = None
+                    batch_hdtn_thematic_session = "S"
+                    batch_hdtn_thematic_start_period = None
+
+                    st.success(
+                        "🤖 **Chế độ Tự động tối ưu toàn trường (Mặc định)**:\n\n"
+                        "Thuật toán CP-SAT sẽ tự động tìm dải 3 tiết liền kề tối ưu cho mỗi tuần và đồng bộ tất cả các lớp cùng thời điểm. **Bạn không cần phải tự chọn thời gian thủ công**."
+                    )
+                    b_allow_fixed = st.checkbox(
+                        "Chỉ định khung giờ cố định cho các tuần này (nếu có lịch ấn định sẵn)",
+                        value=False,
+                        key="batch_allow_manual_thematic_fixed",
+                    )
+                    if b_allow_fixed:
                         c_wd, c_sess, c_p = st.columns(3)
+                        b_def_wd = getattr(batch_sched_config, "hdtn_thematic_weekday", None) or 2
                         batch_hdtn_thematic_weekday = c_wd.selectbox(
                             "Thứ", [2, 3, 4, 5, 6, 7],
+                            index=[2, 3, 4, 5, 6, 7].index(b_def_wd) if b_def_wd in [2, 3, 4, 5, 6, 7] else 0,
                             format_func=lambda w: f"Thứ {w}",
                             key="batch_hdtn_thematic_wd",
                         )
+                        b_def_sess = getattr(batch_sched_config, "hdtn_thematic_session", "S") or "S"
                         batch_hdtn_thematic_session = c_sess.selectbox(
                             "Buổi", ["S", "C"],
+                            index=0 if b_def_sess == "S" else 1,
                             format_func=lambda s: "Sáng" if s == "S" else "Chiều",
                             key="batch_hdtn_thematic_sess",
                         )
+                        b_def_p = getattr(batch_sched_config, "hdtn_thematic_start_period", None) or 1
                         batch_hdtn_thematic_start_period = c_p.selectbox(
-                            "Tiết bắt đầu (3 tiết liền kề)", [1, 2, 3],
-                            format_func=lambda p: f"Tiết {p} (đến tiết {p+2})",
+                            "Dải 3 tiết bắt đầu", [1, 2, 3],
+                            index=[1, 2, 3].index(b_def_p) if b_def_p in [1, 2, 3] else 0,
+                            format_func=lambda p: f"Tiết {p} → Tiết {p+2}",
                             key="batch_hdtn_thematic_p",
                         )
-                    else:
-                        st.info("💡 **Chế độ Tự động**: Thuật toán CP-SAT sẽ tự động tìm dải 3 tiết liền kề tối ưu cho mỗi tuần và đồng bộ tất cả các lớp cùng thời điểm.")
+                        batch_hdtn_thematic_mode = "fixed"
 
             batch_quota_warnings = []
             for wn in batch_week_nos:
@@ -800,6 +1021,7 @@ with tab_schedule:
                         hdtn_thematic_session=batch_hdtn_thematic_session,
                         hdtn_thematic_start_period=batch_hdtn_thematic_start_period,
                         week_no=wn,
+                        config_override=batch_custom_cfg,
                     )
                     with st.spinner(f"Đang xếp Tuần {wn} (áp dụng định lượng Tuần {wn})..."):
                         b_result = sched.run(b_inp)

@@ -118,6 +118,11 @@ class SchedulingConfig:
     hdtn_p3_weekday: Optional[int] = None   # None = Tự động tiết cuối tuần (T6 nếu học chiều, T7 nếu chỉ học sáng)
     hdtn_p3_session: Optional[str] = "S"
     hdtn_p3_period: Optional[int] = None   # None hoặc 0 = Tiết cuối buổi; 1..5 = Tiết cụ thể
+    hdtn_mode: str = "separate"             # "separate" (phân bổ 3 tiết chuẩn) hoặc "thematic" (dồn 3 tiết liền kề)
+    hdtn_thematic_mode: str = "auto"       # "auto" (thuật toán tự tìm thời điểm tối ưu) hoặc "fixed" (cố định)
+    hdtn_thematic_weekday: Optional[int] = None   # 2..7 (Thứ) khi hdtn_thematic_mode == "fixed"
+    hdtn_thematic_session: Optional[str] = "S"    # "S" hoặc "C" khi hdtn_thematic_mode == "fixed"
+    hdtn_thematic_start_period: Optional[int] = None  # 1..3 (tiết bắt đầu) khi hdtn_thematic_mode == "fixed"
     max_heavy_consecutive: int = 3
     max_periods_per_session: int = 4
     teacher_off_sessions_per_week: int = 1

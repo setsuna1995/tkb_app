@@ -102,8 +102,7 @@ with tab4:
     st.markdown("### 🚀 Xếp Thời khóa biểu tự động & Xuất Excel")
     st.markdown(
         """
-        - **Chọn tuần xếp lịch**: Chọn tuần cụ thể từ 1 đến 35 để nạp đúng định mức của tuần đó.
-        - **Chuyên đề HDTN**: Tùy chọn dồn 3 tiết HDTN thành 1 khối tập trung cho toàn trường khi tổ chức sự kiện.
+        - **Phương án tổ chức HĐTN linh hoạt**: Hỗ trợ chuyển đổi nhanh giữa *Tuần học chuẩn* (3 tiết phân bổ: Chào cờ đầu tuần, Hoạt động chủ đề, Sinh hoạt lớp cuối tuần) và *Tuần chuyên đề* (Dồn 3 tiết liền kề tập trung toàn trường đồng bộ bằng CP-SAT).
         - **Bộ giải Google OR-Tools CP-SAT**:
           - **Pass 1**: Chẩn đoán tính khả thi (Pure Feasibility) và phát hiện các xung đột toán học.
           - **Pass 2**: Tối ưu hóa đa mục tiêu với cơ chế Early Stopping để tìm phương án có điểm chất lượng tốt nhất.

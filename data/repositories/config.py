@@ -169,6 +169,19 @@ def get_scheduling_config(conn: sqlite3.Connection) -> SchedulingConfig:
             if get_meta(conn, "sched_hdtn_p3_period") is not None and str(get_meta(conn, "sched_hdtn_p3_period")).strip() != ""
             else default.hdtn_p3_period
         ),
+        hdtn_mode=str(get_meta(conn, "sched_hdtn_mode") or default.hdtn_mode),
+        hdtn_thematic_mode=str(get_meta(conn, "sched_hdtn_thematic_mode") or default.hdtn_thematic_mode),
+        hdtn_thematic_weekday=(
+            int(get_meta(conn, "sched_hdtn_thematic_weekday"))
+            if get_meta(conn, "sched_hdtn_thematic_weekday") is not None and str(get_meta(conn, "sched_hdtn_thematic_weekday")).strip() != ""
+            else default.hdtn_thematic_weekday
+        ),
+        hdtn_thematic_session=str(get_meta(conn, "sched_hdtn_thematic_session") or default.hdtn_thematic_session),
+        hdtn_thematic_start_period=(
+            int(get_meta(conn, "sched_hdtn_thematic_start_period"))
+            if get_meta(conn, "sched_hdtn_thematic_start_period") is not None and str(get_meta(conn, "sched_hdtn_thematic_start_period")).strip() != ""
+            else default.hdtn_thematic_start_period
+        ),
         max_heavy_consecutive=int(get_meta(conn, "sched_max_heavy_consecutive") or default.max_heavy_consecutive),
         max_periods_per_session=int(
             get_meta(conn, "sched_max_periods_per_session") or default.max_periods_per_session
@@ -310,6 +323,11 @@ def set_scheduling_config(conn: sqlite3.Connection, config: SchedulingConfig) ->
     set_meta(conn, "sched_hdtn_p3_weekday", str(config.hdtn_p3_weekday) if config.hdtn_p3_weekday is not None else "")
     set_meta(conn, "sched_hdtn_p3_session", str(config.hdtn_p3_session) if config.hdtn_p3_session is not None else "")
     set_meta(conn, "sched_hdtn_p3_period", str(config.hdtn_p3_period) if config.hdtn_p3_period is not None else "")
+    set_meta(conn, "sched_hdtn_mode", str(config.hdtn_mode))
+    set_meta(conn, "sched_hdtn_thematic_mode", str(config.hdtn_thematic_mode))
+    set_meta(conn, "sched_hdtn_thematic_weekday", str(config.hdtn_thematic_weekday) if config.hdtn_thematic_weekday is not None else "")
+    set_meta(conn, "sched_hdtn_thematic_session", str(config.hdtn_thematic_session) if config.hdtn_thematic_session is not None else "S")
+    set_meta(conn, "sched_hdtn_thematic_start_period", str(config.hdtn_thematic_start_period) if config.hdtn_thematic_start_period is not None else "")
     set_meta(conn, "sched_max_heavy_consecutive", str(config.max_heavy_consecutive))
     set_meta(conn, "sched_max_periods_per_session", str(config.max_periods_per_session))
     set_meta(conn, "sched_teacher_off_sessions_per_week", str(config.teacher_off_sessions_per_week))

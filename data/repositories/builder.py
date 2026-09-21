@@ -35,17 +35,29 @@ def _weekday_matches(row_weekday: str, ts_weekday: int) -> bool:
 
 def build_scheduling_input(conn: sqlite3.Connection, parity: str = "C", seed: int = 0,
                             extra_kep_ids: frozenset = frozenset(),
-                            hdtn_thematic_week: bool = False,
-                            hdtn_thematic_mode: str = "auto",
+                            hdtn_thematic_week: Optional[bool] = None,
+                            hdtn_thematic_mode: Optional[str] = None,
                             hdtn_thematic_weekday: Optional[int] = None,
-                            hdtn_thematic_session: Optional[str] = "S",
+                            hdtn_thematic_session: Optional[str] = None,
                             hdtn_thematic_start_period: Optional[int] = None,
-                            week_no: Optional[int] = None) -> SchedulingInput:
+                            week_no: Optional[int] = None,
+                            config_override: Optional[SchedulingConfig] = None) -> SchedulingInput:
     classes = list_classes(conn)
     subjects = list_subjects(conn)
     teachers = list_teachers(conn)
-    config = get_scheduling_config(conn)
+    config = config_override if config_override is not None else get_scheduling_config(conn)
     subject_class_allowed_cells = get_subject_class_allowed_cells(conn)
+
+    if hdtn_thematic_week is None:
+        hdtn_thematic_week = (getattr(config, "hdtn_mode", "separate") == "thematic")
+    if hdtn_thematic_mode is None:
+        hdtn_thematic_mode = getattr(config, "hdtn_thematic_mode", "auto")
+    if hdtn_thematic_weekday is None:
+        hdtn_thematic_weekday = getattr(config, "hdtn_thematic_weekday", None)
+    if hdtn_thematic_session is None:
+        hdtn_thematic_session = getattr(config, "hdtn_thematic_session", "S") or "S"
+    if hdtn_thematic_start_period is None:
+        hdtn_thematic_start_period = getattr(config, "hdtn_thematic_start_period", None)
 
     if week_no is not None:
         need = {(s, c): p for (s, c), p in get_periods_for_week(conn, week_no=week_no, parity=parity).items() if p > 0}
