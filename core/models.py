@@ -210,6 +210,8 @@ class SchedulingInput:
     hdtn_thematic_start_period: Optional[int] = None  # 1..3 (tiết bắt đầu) khi mode="fixed"
     config: SchedulingConfig = field(default_factory=SchedulingConfig)
     subject_class_allowed_cells: dict = field(default_factory=dict)  # (subject_id, class_id) -> frozenset[(weekday, session)]
+    locked_slots: dict = field(default_factory=dict)  # slot_id -> subject_id bị khóa cứng
+    reference_assignment: dict = field(default_factory=dict)  # slot_id -> subject_id của nghiệm nền tảng (dùng cho hint & minimize_changes)
 
 
 @dataclass

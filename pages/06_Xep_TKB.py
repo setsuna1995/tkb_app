@@ -1,4 +1,5 @@
 import dataclasses
+import random
 import pandas as pd
 import streamlit as st
 
@@ -9,6 +10,8 @@ from core.rules.detectors import run_detectors
 from core.rules.params import resolve_effective_params
 from core.rules.view import build_schedule_view
 from core.rules.violations import BREACH, FORCED, SHORTFALL, classify, group_by_rule
+from core.scheduler.placement import _build_effective_assigned_teacher
+from core.scheduler.refinement import compute_candidate_metrics, validate_and_swap_slots
 from core.validation import compute_quota_diff, compute_tkb_health_score
 from data import repository as repo
 from io_excel.exporter import export_xlsx
@@ -393,19 +396,19 @@ with tab_schedule:
 
     st.caption("✨ Động cơ lập lịch: **Google OR-Tools CP-SAT** (Tối ưu hóa toàn cục, triệt tiêu vi phạm II.3, II.4, II.8)")
 
-    if st.button("🚀 Chạy xếp TKB", type="primary"):
-        inp = repo.build_scheduling_input(
-            conn, parity=parity, seed=seed, extra_kep_ids=extra_kep_ids,
+    def _run_single_solver(s_seed, s_cfg_override, s_locked_slots=None, s_reference_assignment=None):
+        inp_obj = repo.build_scheduling_input(
+            conn, parity=parity, seed=s_seed, extra_kep_ids=extra_kep_ids,
             hdtn_thematic_week=hdtn_thematic_week,
             hdtn_thematic_mode=hdtn_thematic_mode,
             hdtn_thematic_weekday=hdtn_thematic_weekday,
             hdtn_thematic_session=hdtn_thematic_session,
             hdtn_thematic_start_period=hdtn_thematic_start_period,
             week_no=chosen_week,
-            config_override=single_custom_cfg,
+            config_override=s_cfg_override,
+            locked_slots=s_locked_slots,
+            reference_assignment=s_reference_assignment,
         )
-
-        # Thanh tiến trình theo TỪNG ĐỢT giải CP-SAT
         progress_bar = st.progress(0, text="Đang khởi tạo mô hình toán học CP-SAT...")
         status_log = st.empty()
         log_lines = []
@@ -439,12 +442,36 @@ with tab_schedule:
             log_lines.append(line)
             status_log.caption("  \n".join(log_lines[-8:]))
 
-        result = sched.run(inp, progress_cb=_on_cpsat_progress)
+        res_obj = sched.run(inp_obj, progress_cb=_on_cpsat_progress)
         progress_bar.progress(1.0, text="Hoàn tất.")
+        return inp_obj, res_obj
 
+    if "candidates" not in st.session_state or st.session_state.get("candidates_week") != chosen_week:
+        st.session_state["candidates"] = {}
+        st.session_state["candidates_week"] = chosen_week
+        st.session_state["active_candidate_id"] = None
+        st.session_state["locked_classes"] = []
+        st.session_state["locked_teachers"] = []
+
+    if st.button("🚀 Chạy xếp TKB", type="primary"):
+        inp, result = _run_single_solver(seed, single_custom_cfg)
         st.session_state["last_result"] = result
         st.session_state["last_input"] = inp
         st.session_state["last_scheduled_week"] = chosen_week
+        if result.success:
+            metrics = compute_candidate_metrics(inp, result)
+            st.session_state["candidates"] = {
+                1: {
+                    "id": 1,
+                    "name": "Phương án 1 (Gốc)",
+                    "seed": seed or 0,
+                    "time_limit": getattr(single_custom_cfg, "cpsat_time_limit_s", 45) if single_custom_cfg else 45,
+                    "result": result,
+                    "inp": inp,
+                    "metrics": metrics,
+                }
+            }
+            st.session_state["active_candidate_id"] = 1
 
     result = st.session_state.get("last_result")
     inp = st.session_state.get("last_input")
@@ -480,6 +507,272 @@ with tab_schedule:
                     rule_id = item.get("rule_id")
                     title = RULES[rule_id].title_vi if rule_id in RULES else rule_id
                     st.write(f"- {rule_id}: {title}")
+
+            # ══════════════════════════════════════════════════════════════════
+            # 🌟 STUDIO ĐIỀU PHỐI TKB 2 GIAI ĐOẠN & HỆ THỐNG DẪN DẮT 3 TẦNG
+            # ══════════════════════════════════════════════════════════════════
+            with st.container():
+                # TẦNG 1: Trợ lý Gợi ý tại chỗ (In-Context Guidance)
+                render_callout(
+                    "💡 **Chưa hoàn toàn vừa ý với TKB lần đầu? Bạn có thể tối ưu theo 2 bước đơn giản:**\n\n"
+                    "• **Bước 1 (Khảo sát phương án):** Bấm **`🎲 Thử phương án khác (Đổi Seed)`** để máy tính tìm nhánh xếp mới, "
+                    "hoặc bấm **`⏱️ Giải sâu hơn (+30s)`** để triệt tiêu các tiết trống/lủng của giáo viên.\n"
+                    "• **Bước 2 (Khóa & Tinh chỉnh):** Chọn phương án ưng ý nhất làm nền tảng ➔ Mở mục Khóa & Tinh chỉnh ➔ Khóa các lớp đã đẹp ➔ Bấm **`🎯 Tinh chỉnh các ô còn lại`**.",
+                    level="info",
+                    title="🎯 Studio Điều Phối & Tinh Chỉnh TKB",
+                )
+
+                # TẦNG 2: Hộp Cẩm nang Tối ưu TKB 30 giây (Quick Help Expander)
+                with st.expander("❓ Cẩm nang 30 giây: Nên làm gì khi TKB chưa đúng ý? (Bấm xem nhanh)", expanded=False):
+                    st.markdown(
+                        """
+                        | Tình huống thực tế bạn gặp | Giải pháp khuyên dùng | Nút cần bấm |
+                        | :--- | :--- | :--- |
+                        | **"Thấy TKB nhìn chung chưa ưng, muốn xem kiểu bố trí khác"** | Đổi sang nhánh tìm kiếm ngẫu nhiên mới (đổi Seed). | Bấm **`🎲 Thử phương án khác (Đổi Seed)`** |
+                        | **"TKB khá ổn nhưng vẫn còn 1-2 GV bị lủng tiết giữa buổi"** | Cho máy tính thêm thời gian để ghép kín tiết hơn. | Bấm **`⏱️ Giải sâu hơn (+30s)`** |
+                        | **"Khối 12 TKB đã rất đẹp, chỉ còn Khối 10 bị xấu"** | Khóa trọn vẹn Khối 12, chỉ cho solver xếp lại Khối 10. | Mở phần **`🔒 Khóa & Tinh chỉnh`** ➔ Chọn Lớp ➔ Bấm **`🎯 Tinh chỉnh`** |
+                        | **"Chỉ muốn tráo đổi vị trí 2 tiết cụ thể cho nhau"** | Đổi thủ công trực tiếp, tự kiểm tra trùng lịch GV. | Dùng công cụ **`🔄 Smart Swap (Đổi chéo)`** bên dưới |
+                        """
+                    )
+
+                # GIAI ĐOẠN 1: ACTION BAR SINH PHƯƠNG ÁN (ON-DEMAND)
+                col_bar1, col_bar2 = st.columns([1, 1])
+                with col_bar1:
+                    if st.button(
+                        "🎲 Thử phương án khác (Đổi Seed)",
+                        key="btn_cand_seed",
+                        help="Đổi số ngẫu nhiên (Seed) để thuật toán khám phá cách xếp mới hoàn toàn nhưng vẫn đúng 100% quy chuẩn.",
+                        use_container_width=True,
+                    ):
+                        new_seed = random.randint(100, 99999)
+                        new_id = len(st.session_state["candidates"]) + 1
+                        cand_name = f"Phương án {new_id} (Seed {new_seed})"
+                        inp_new, res_new = _run_single_solver(new_seed, single_custom_cfg)
+                        if res_new.success:
+                            metrics_new = compute_candidate_metrics(inp_new, res_new)
+                            st.session_state["candidates"][new_id] = {
+                                "id": new_id,
+                                "name": cand_name,
+                                "seed": new_seed,
+                                "time_limit": getattr(single_custom_cfg, "cpsat_time_limit_s", 45) if single_custom_cfg else 45,
+                                "result": res_new,
+                                "inp": inp_new,
+                                "metrics": metrics_new,
+                            }
+                            st.session_state["active_candidate_id"] = new_id
+                            st.session_state["last_result"] = res_new
+                            st.session_state["last_input"] = inp_new
+                            st.rerun()
+                        else:
+                            st.error(f"Thử nghiệm với Seed {new_seed} không thành công: {res_new.failure_reason}")
+
+                with col_bar2:
+                    if st.button(
+                        "⏱️ Giải sâu hơn (+30s Time Limit)",
+                        key="btn_cand_deep",
+                        help="Tăng thời gian chạy CP-SAT để máy tính suy nghĩ kỹ hơn, giúp triệt tiêu các tiết trống/lủng của giáo viên.",
+                        use_container_width=True,
+                    ):
+                        active_cand = st.session_state["candidates"].get(st.session_state.get("active_candidate_id", 1))
+                        cur_tl = active_cand["time_limit"] if active_cand else 45
+                        new_tl = cur_tl + 30
+                        new_id = len(st.session_state["candidates"]) + 1
+                        cand_name = f"Phương án {new_id} (Sâu {new_tl}s)"
+                        base_cfg = active_cand["inp"].config if active_cand else single_custom_cfg
+                        deep_cfg = dataclasses.replace(base_cfg, cpsat_time_limit_s=new_tl)
+                        cand_seed = active_cand["seed"] if active_cand else seed
+                        inp_new, res_new = _run_single_solver(cand_seed, deep_cfg)
+                        if res_new.success:
+                            metrics_new = compute_candidate_metrics(inp_new, res_new)
+                            st.session_state["candidates"][new_id] = {
+                                "id": new_id,
+                                "name": cand_name,
+                                "seed": cand_seed,
+                                "time_limit": new_tl,
+                                "result": res_new,
+                                "inp": inp_new,
+                                "metrics": metrics_new,
+                            }
+                            st.session_state["active_candidate_id"] = new_id
+                            st.session_state["last_result"] = res_new
+                            st.session_state["last_input"] = inp_new
+                            st.rerun()
+                        else:
+                            st.error(f"Giải sâu không thành công: {res_new.failure_reason}")
+
+                # BẢNG ĐỐI SÁNH KPI ĐA PHƯƠNG ÁN (Khi có >= 2 phương án)
+                cand_items = list(st.session_state.get("candidates", {}).values())
+                if len(cand_items) >= 2:
+                    st.markdown("#### 📊 Đối sánh các phương án đã sinh:")
+                    cand_table = []
+                    for c in cand_items:
+                        m = c["metrics"]
+                        is_cur = (c["id"] == st.session_state.get("active_candidate_id"))
+                        cand_table.append({
+                            "Mã": f"#{c['id']}",
+                            "Tên phương án": f"{'👉 ' if is_cur else ''}{c['name']}",
+                            "Điểm TKB": f"{m['health_score']}/100 🏆" if m['health_score'] >= 90 else f"{m['health_score']}/100",
+                            "Tiết lủng GV": f"{m['hole_periods']} tiết {'✅' if m['hole_periods'] == 0 else '⚠️'}",
+                            "GV dạy >4 tiết": f"{m['over_4_periods']} lượt",
+                            "Vi phạm mềm": f"{m['shortfalls_count']} mục",
+                            "Trạng thái": "Đang chọn xem" if is_cur else "Ứng viên",
+                        })
+                    st.dataframe(pd.DataFrame(cand_table), hide_index=True, width="stretch")
+
+                    c_pick_col1, c_pick_col2 = st.columns([3, 1])
+                    with c_pick_col1:
+                        chosen_cand_id = st.selectbox(
+                            "Chọn Phương án làm Nền tảng (Hiển thị & Tinh chỉnh):",
+                            options=[c["id"] for c in cand_items],
+                            index=[c["id"] for c in cand_items].index(st.session_state.get("active_candidate_id", 1))
+                            if st.session_state.get("active_candidate_id") in [c["id"] for c in cand_items] else 0,
+                            format_func=lambda cid: next(c["name"] for c in cand_items if c["id"] == cid),
+                            key="sb_pick_active_cand",
+                        )
+                    with c_pick_col2:
+                        st.write("")
+                        st.write("")
+                        if st.button("👉 Xem & Kích hoạt", key="btn_apply_cand", use_container_width=True):
+                            st.session_state["active_candidate_id"] = chosen_cand_id
+                            selected_c = next(c for c in cand_items if c["id"] == chosen_cand_id)
+                            st.session_state["last_result"] = selected_c["result"]
+                            st.session_state["last_input"] = selected_c["inp"]
+                            st.rerun()
+
+                # GIAI ĐOẠN 2: KHÓA & TINH CHỈNH CHI TIẾT
+                with st.expander("🔒 GIAI ĐOẠN 2: Khóa & Tinh chỉnh chi tiết (Incremental Re-solve & Smart Swap)", expanded=False):
+                    st.markdown(
+                        "Tại đây, bạn có thể **Khóa cố định** các lớp hoặc giáo viên đã có TKB rất đẹp, "
+                        "sau đó yêu cầu thuật toán **chỉ đảo các ô còn lại** để triệt tiêu các điểm lủng/xấu mà không làm thay đổi các phần đã khóa."
+                    )
+
+                    tab_lock, tab_swap = st.tabs(["🔒 Khóa & Tinh chỉnh CP-SAT", "🔄 Đổi chéo 2 tiết (Smart Swap)"])
+
+                    with tab_lock:
+                        col_l1, col_l2 = st.columns(2)
+                        with col_l1:
+                            st.markdown("**1. Chọn Lớp cần khóa (Giữ nguyên 100% TKB của lớp):**")
+                            c_names = [c.name for c in inp.classes]
+                            # Nút chọn nhanh
+                            btn_k12, btn_k11, btn_k10, btn_clr = st.columns(4)
+                            if btn_k12.button("Khóa K12", key="btn_lk12"):
+                                st.session_state["locked_classes"] = [c.name for c in inp.classes if "12" in c.name]
+                                st.rerun()
+                            if btn_k11.button("Khóa K11", key="btn_lk11"):
+                                st.session_state["locked_classes"] = [c.name for c in inp.classes if "11" in c.name]
+                                st.rerun()
+                            if btn_k10.button("Khóa K10", key="btn_lk10"):
+                                st.session_state["locked_classes"] = [c.name for c in inp.classes if "10" in c.name]
+                                st.rerun()
+                            if btn_clr.button("Bỏ chọn", key="btn_lclr"):
+                                st.session_state["locked_classes"] = []
+                                st.rerun()
+
+                            sel_classes = st.multiselect(
+                                "Danh sách lớp khóa:",
+                                options=c_names,
+                                default=st.session_state.get("locked_classes", []),
+                                key="ms_locked_classes",
+                            )
+                            st.session_state["locked_classes"] = sel_classes
+
+                        with col_l2:
+                            st.markdown("**2. Chọn Giáo viên cần khóa (Giữ nguyên lịch dạy của GV):**")
+                            t_names = [t.name for t in inp.teachers]
+                            sel_teachers = st.multiselect(
+                                "Danh sách giáo viên khóa:",
+                                options=t_names,
+                                default=st.session_state.get("locked_teachers", []),
+                                key="ms_locked_teachers",
+                            )
+                            st.session_state["locked_teachers"] = sel_teachers
+
+                        st.markdown("---")
+                        if st.button("🎯 Tinh chỉnh các ô còn lại (Chạy Solver Khóa)", type="primary", key="btn_do_refine"):
+                            locked_class_ids = {c.class_id for c in inp.classes if c.name in sel_classes}
+                            locked_teacher_ids = {t.teacher_id for t in inp.teachers if t.name in sel_teachers}
+
+                            # Tìm các slot thuộc lớp bị khóa hoặc GV bị khóa
+                            eff_assigned = _build_effective_assigned_teacher(inp)
+                            computed_locked_slots = {}
+                            for s in inp.slots:
+                                subj_id = result.assignment.get(s.slot_id)
+                                if subj_id is None:
+                                    continue
+                                if s.class_id in locked_class_ids:
+                                    computed_locked_slots[s.slot_id] = subj_id
+                                else:
+                                    tid = eff_assigned.get((subj_id, s.class_id))
+                                    if tid in locked_teacher_ids:
+                                        computed_locked_slots[s.slot_id] = subj_id
+
+                            # Bật cờ cpsat_minimize_changes
+                            refine_cfg = dataclasses.replace(
+                                single_custom_cfg or inp.config,
+                                cpsat_minimize_changes=True,
+                            )
+                            refine_seed = seed or random.randint(100, 99999)
+                            inp_ref, res_ref = _run_single_solver(
+                                refine_seed,
+                                refine_cfg,
+                                s_locked_slots=computed_locked_slots,
+                                s_reference_assignment=result.assignment,
+                            )
+                            if res_ref.success:
+                                metrics_ref = compute_candidate_metrics(inp_ref, res_ref)
+                                new_id = len(st.session_state["candidates"]) + 1
+                                cand_name = f"Phương án {new_id} (Tinh chỉnh: {len(sel_classes)} lớp, {len(sel_teachers)} GV khóa)"
+                                st.session_state["candidates"][new_id] = {
+                                    "id": new_id,
+                                    "name": cand_name,
+                                    "seed": refine_seed,
+                                    "time_limit": getattr(refine_cfg, "cpsat_time_limit_s", 45),
+                                    "result": res_ref,
+                                    "inp": inp_ref,
+                                    "metrics": metrics_ref,
+                                }
+                                st.session_state["active_candidate_id"] = new_id
+                                st.session_state["last_result"] = res_ref
+                                st.session_state["last_input"] = inp_ref
+                                st.success(f"🎉 Tinh chỉnh thành công! Đã khóa cố định {len(computed_locked_slots)} ô tiết.")
+                                st.rerun()
+                            else:
+                                st.error(f"Không thể tinh chỉnh với các ràng buộc khóa hiện tại: {res_ref.failure_reason}")
+
+                    with tab_swap:
+                        st.markdown("**Đổi chéo thủ công 2 tiết có kiểm tra an toàn sư phạm:**")
+                        c_swap_cls = st.selectbox("Chọn lớp:", options=[c.name for c in inp.classes], key="swap_cls_pick")
+                        target_cls = next(c for c in inp.classes if c.name == c_swap_cls)
+                        cls_slots = [s for s in inp.slots if s.class_id == target_cls.class_id]
+
+                        subj_map = {s.subject_id: s.name for s in inp.subjects}
+                        slot_labels = {}
+                        for s in cls_slots:
+                            s_subj = result.assignment.get(s.slot_id)
+                            subj_label = subj_map.get(s_subj, "(Trống)")
+                            sess_label = "Sáng" if s.ts.session == "S" else "Chiều"
+                            slot_labels[s.slot_id] = f"{WEEKDAY_NAMES.get(s.ts.weekday)} - {sess_label} Tiết {s.ts.period}: {subj_label}"
+
+                        col_sw1, col_sw2 = st.columns(2)
+                        with col_sw1:
+                            slot_a_id = st.selectbox("Chọn Tiết 1:", options=list(slot_labels.keys()), format_func=lambda sid: slot_labels[sid], key="sw_slot_a")
+                        with col_sw2:
+                            slot_b_id = st.selectbox("Chọn Tiết 2:", options=list(slot_labels.keys()), index=min(1, len(slot_labels) - 1), format_func=lambda sid: slot_labels[sid], key="sw_slot_b")
+
+                        if st.button("🔄 Thực hiện Đổi chéo 2 tiết", key="btn_exec_smart_swap"):
+                            ok, msg, new_ass = validate_and_swap_slots(result.assignment, slot_a_id, slot_b_id, inp)
+                            if ok:
+                                result.assignment = new_ass
+                                cur_cid = st.session_state.get("active_candidate_id", 1)
+                                if cur_cid in st.session_state.get("candidates", {}):
+                                    st.session_state["candidates"][cur_cid]["metrics"] = compute_candidate_metrics(inp, result)
+                                st.session_state["last_result"] = result
+                                st.success(f"✅ {msg}")
+                                st.rerun()
+                            else:
+                                st.error(f"❌ Không thể đổi chéo: {msg}")
+
+                st.markdown("---")
 
             # ── Bảng Đánh Giá Sức Khỏe TKB (Thang điểm 100) ──
             health = compute_tkb_health_score(inp, result.assignment)
@@ -733,6 +1026,10 @@ with tab_schedule:
                     st.session_state.pop("last_result", None)
                     st.session_state.pop("last_input", None)
                     st.session_state.pop("last_scheduled_week", None)
+                    st.session_state.pop("candidates", None)
+                    st.session_state.pop("active_candidate_id", None)
+                    st.session_state.pop("locked_classes", None)
+                    st.session_state.pop("locked_teachers", None)
                     st.rerun()
 
             with col_acc2:

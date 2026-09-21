@@ -41,7 +41,9 @@ def build_scheduling_input(conn: sqlite3.Connection, parity: str = "C", seed: in
                             hdtn_thematic_session: Optional[str] = None,
                             hdtn_thematic_start_period: Optional[int] = None,
                             week_no: Optional[int] = None,
-                            config_override: Optional[SchedulingConfig] = None) -> SchedulingInput:
+                            config_override: Optional[SchedulingConfig] = None,
+                            locked_slots: Optional[dict] = None,
+                            reference_assignment: Optional[dict] = None) -> SchedulingInput:
     classes = list_classes(conn)
     subjects = list_subjects(conn)
     teachers = list_teachers(conn)
@@ -72,6 +74,9 @@ def build_scheduling_input(conn: sqlite3.Connection, parity: str = "C", seed: in
     frame_templates = get_all_frame_templates(conn)
     all_class_allowed_cells = get_all_class_allowed_cells(conn)
 
+    locked_slots_dict = dict(locked_slots or {})
+    reference_assignment_dict = dict(reference_assignment or {})
+
     slots = []
     used_ts_ids = set()
     slot_id = 0
@@ -85,7 +90,7 @@ def build_scheduling_input(conn: sqlite3.Connection, parity: str = "C", seed: in
                 ts = ts_by_key[(wd, session, period)]
                 used_ts_ids.add(ts.ts_id)
                 slot_id += 1
-                old_subject = tkb_nhap.get((cls.class_id, wd, session, period))
+                old_subject = reference_assignment_dict.get(slot_id) if reference_assignment_dict else tkb_nhap.get((cls.class_id, wd, session, period))
                 slots.append(Slot(slot_id, cls.class_id, ts, old_subject_id=old_subject))
         else:
             # Fallback to frame_template logic
@@ -101,7 +106,7 @@ def build_scheduling_input(conn: sqlite3.Connection, parity: str = "C", seed: in
                 ts = ts_by_key[(wd, session, period)]
                 used_ts_ids.add(ts.ts_id)
                 slot_id += 1
-                old_subject = tkb_nhap.get((cls.class_id, wd, session, period))
+                old_subject = reference_assignment_dict.get(slot_id) if reference_assignment_dict else tkb_nhap.get((cls.class_id, wd, session, period))
                 slots.append(Slot(slot_id, cls.class_id, ts, old_subject_id=old_subject))
 
     timeslots = sorted((t for t in all_ts if t.ts_id in used_ts_ids), key=lambda t: t.order_key)
@@ -125,4 +130,6 @@ def build_scheduling_input(conn: sqlite3.Connection, parity: str = "C", seed: in
         hdtn_thematic_start_period=hdtn_thematic_start_period,
         config=config,
         subject_class_allowed_cells=subject_class_allowed_cells,
+        locked_slots=locked_slots_dict,
+        reference_assignment=reference_assignment_dict,
     )
