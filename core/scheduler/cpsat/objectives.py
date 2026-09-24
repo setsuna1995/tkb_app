@@ -16,6 +16,7 @@ from core.scheduler.constants import (
     TEACHER_LONE_SESSION_SPREAD_PENALTY,
     TEACHER_SPLIT_DAY_PENALTY,
     TEACHER_STRICT_MORNING_MISS_PENALTY,
+    TEACHER_OFF_SHORTFALL_PENALTY,
     MORNING_ACADEMIC_UNDERLOAD_SOFT_PENALTY,
     GVCN_MONDAY_PERIOD2_MISS_PENALTY,
 )
@@ -113,6 +114,9 @@ def _add_objective(built: CpSatModel) -> None:
     compact_ids = getattr(config, "compact_schedule_teacher_ids", frozenset()) or frozenset()
 
     penalty_terms = defaultdict(list)
+    if built.penalty_terms:
+        for k, v in built.penalty_terms.items():
+            penalty_terms[k].extend(v)
     lone_sess_terms = []
     lone_day_terms = []
     lone_spread_terms = []
@@ -467,6 +471,9 @@ def _add_objective(built: CpSatModel) -> None:
 
     # Tổng hợp hàm mục tiêu
     obj_terms = []
+    teacher_off_terms = penalty_terms.get("_teacher_off", []) + penalty_terms.get("OFF", [])
+    if teacher_off_terms:
+        obj_terms.append(TEACHER_OFF_SHORTFALL_PENALTY * sum(teacher_off_terms))
     if penalty_terms.get("II.3"):
         obj_terms.append(800 * sum(penalty_terms["II.3"]))
     if strict_morning_terms:
@@ -526,7 +533,7 @@ def _add_objective(built: CpSatModel) -> None:
             for c_id in built.slots_by_class
         )
         if any_oversubscribed:
-            obj_terms.append(-1000 * sum(x.values()))
+            obj_terms.append(-10000 * sum(x.values()))
 
         if obj_terms:
             m.Minimize(sum(obj_terms))

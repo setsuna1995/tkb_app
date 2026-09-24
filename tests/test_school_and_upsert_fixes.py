@@ -64,3 +64,136 @@ def test_list_schools_closes_connections(tmp_path, monkeypatch):
     schools = ui_common.list_schools()
     assert len(schools) == 2
     assert {s["name"] for s in schools} == {"Trường A", "Trường B"}
+
+
+def test_teacher_off_sessions_hard_mode():
+    from core.models import (
+        ClassRoom, SchedulingConfig, SchedulingInput, Slot, Subject, Teacher, TimeSlot,
+        ROLE_THUONG, ROLE_HDTN
+    )
+    from core.scheduler.cpsat_model import build_model, solve
+
+    ts = [TimeSlot(i + 1, wd, "S", 1) for i, wd in enumerate([2, 3, 4, 5, 6, 7])]
+    slots = [Slot(i + 1, 101, t) for i, t in enumerate(ts)]
+    subjects = [Subject(1, "Toan", ROLE_THUONG), Subject(2, "HDTN", ROLE_HDTN)]
+    teachers = [Teacher(10, "GV A"), Teacher(20, "GV B")]
+    inp = SchedulingInput(
+        classes=[ClassRoom(101, "6A1")],
+        subjects=subjects,
+        teachers=teachers,
+        need={(1, 101): 3, (2, 101): 3},
+        assigned_teacher={(1, 101): 10, (2, 101): 20},
+        ban_busy=set(),
+        slots=slots,
+        timeslots=ts,
+        config=SchedulingConfig(
+            teacher_off_sessions_per_week=2,
+            teacher_off_sessions_mode="hard",
+            forbidden_off_cells=frozenset(),
+            mandatory_morning_weekdays=(),
+            chao_co_weekday=2,
+            chao_co_period=1,
+        ),
+    )
+    built = build_model(inp)
+    assignment = solve(built, time_limit_s=10.0)
+    assert assignment is not None, "Solver must find a solution with hard off sessions"
+
+    slot_by_id = {s.slot_id: s for s in slots}
+    taught_sessions = set()
+    for s_id, subj_id in assignment.items():
+        t_id = inp.assigned_teacher.get((subj_id, 101))
+        if t_id == 10:
+            s = slot_by_id[s_id]
+            taught_sessions.add((s.ts.weekday, s.ts.session))
+
+    all_sessions = {(t.weekday, t.session) for t in ts}
+    off_sessions_count = len(all_sessions - taught_sessions)
+    assert off_sessions_count >= 2, f"Expected at least 2 off sessions in hard mode, got {off_sessions_count}"
+
+
+def test_teacher_off_sessions_hard_mode_overloaded_fallback():
+    from core.models import (
+        ClassRoom, SchedulingConfig, SchedulingInput, Slot, Subject, Teacher, TimeSlot,
+        ROLE_THUONG, ROLE_HDTN
+    )
+    from core.scheduler.cpsat_model import build_model, solve
+
+    # 6 sessions, teacher 10 teaches 4 periods, but config requests 4 off sessions.
+    # 6 - 4 = 2 workable sessions < 4 periods needed. Hard mode would be INFEASIBLE.
+    # The capacity fallback detects overload and falls back to soft mode, solving successfully.
+    ts = [TimeSlot(i + 1, wd, "S", 1) for i, wd in enumerate([2, 3, 4, 5, 6, 7])]
+    slots = [Slot(i + 1, 101, t) for i, t in enumerate(ts)]
+    subjects = [Subject(1, "Toan", ROLE_THUONG), Subject(2, "HDTN", ROLE_HDTN)]
+    teachers = [Teacher(10, "GV A"), Teacher(20, "GV B")]
+    inp = SchedulingInput(
+        classes=[ClassRoom(101, "6A1")],
+        subjects=subjects,
+        teachers=teachers,
+        need={(1, 101): 4, (2, 101): 2},
+        assigned_teacher={(1, 101): 10, (2, 101): 20},
+        ban_busy=set(),
+        slots=slots,
+        timeslots=ts,
+        config=SchedulingConfig(
+            teacher_off_sessions_per_week=4,
+            teacher_off_sessions_mode="hard",
+            mandatory_morning_weekdays=(),
+            chao_co_weekday=2,
+            chao_co_period=1,
+        ),
+    )
+    built = build_model(inp)
+    assignment = solve(built, time_limit_s=10.0)
+    assert assignment is not None, "Solver should gracefully solve overloaded teacher via soft fallback"
+
+
+def test_teacher_off_sessions_soft_mode():
+    from core.models import (
+        ClassRoom, SchedulingConfig, SchedulingInput, Slot, Subject, Teacher, TimeSlot,
+        ROLE_THUONG, ROLE_HDTN
+    )
+    from core.scheduler.cpsat_model import build_model, solve
+
+    ts = [TimeSlot(i + 1, wd, "S", 1) for i, wd in enumerate([2, 3, 4, 5, 6, 7])]
+    slots = [Slot(i + 1, 101, t) for i, t in enumerate(ts)]
+    subjects = [Subject(1, "Toan", ROLE_THUONG), Subject(2, "HDTN", ROLE_HDTN)]
+    teachers = [Teacher(10, "GV A"), Teacher(20, "GV B")]
+    inp = SchedulingInput(
+        classes=[ClassRoom(101, "6A1")],
+        subjects=subjects,
+        teachers=teachers,
+        need={(1, 101): 3, (2, 101): 3},
+        assigned_teacher={(1, 101): 10, (2, 101): 20},
+        ban_busy=set(),
+        slots=slots,
+        timeslots=ts,
+        config=SchedulingConfig(
+            teacher_off_sessions_per_week=2,
+            teacher_off_sessions_mode="soft",
+            forbidden_off_cells=frozenset(),
+            mandatory_morning_weekdays=(),
+            chao_co_weekday=2,
+            chao_co_period=1,
+        ),
+    )
+    built = build_model(inp)
+    assert "_teacher_off" in built.penalty_terms
+    assert len(built.penalty_terms["_teacher_off"]) == 2  # 1 shortfall var per teacher
+
+    assignment = solve(built, time_limit_s=10.0)
+    assert assignment is not None
+
+    slot_by_id = {s.slot_id: s for s in slots}
+    taught_sessions = set()
+    for s_id, subj_id in assignment.items():
+        t_id = inp.assigned_teacher.get((subj_id, 101))
+        if t_id == 10:
+            s = slot_by_id[s_id]
+            taught_sessions.add((s.ts.weekday, s.ts.session))
+
+    all_sessions = {(t.weekday, t.session) for t in ts}
+    off_sessions_count = len(all_sessions - taught_sessions)
+    assert off_sessions_count >= 2, f"Expected at least 2 off sessions in soft mode, got {off_sessions_count}"
+
+

@@ -126,6 +126,7 @@ class SchedulingConfig:
     max_heavy_consecutive: int = 3
     max_periods_per_session: int = 4
     teacher_off_sessions_per_week: int = 1
+    teacher_off_sessions_mode: str = "soft"  # "soft" (Ưu tiên cao) hoặc "hard" (Bắt buộc tuyệt đối)
     forbidden_off_cells: frozenset = field(
         default_factory=lambda: frozenset({(2, "S"), (5, "S"), (6, "S"), (5, "C"), (6, "C")})
     )

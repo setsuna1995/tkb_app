@@ -329,10 +329,26 @@ with tab2:
         help="GV có tổng số tiết/tuần dưới ngưỡng này được miễn, không bắt buộc có mặt (mặc định 10 tiết).",
     )
 
-    teacher_off_sessions_per_week = st.number_input(
-        "Số buổi nghỉ tối đa cho mỗi giáo viên trong tuần (buổi):",
+    col_off1, col_off2 = st.columns([1, 1])
+    teacher_off_sessions_per_week = col_off1.number_input(
+        "Số buổi nghỉ cho mỗi giáo viên trong tuần (buổi):",
         0, 3, config.teacher_off_sessions_per_week,
-        help="Mặc định: 1 buổi nghỉ/tuần (thường là 1 buổi chiều hoặc sáng không bị cấm).",
+        help="Số buổi nghỉ trọn vẹn trong tuần cho mỗi giáo viên (0 = tắt luật; 1 = 1 buổi/tuần; 2 = 2 buổi/tuần).",
+    )
+    off_mode_options = {
+        "soft": "Ưu tiên cao (Mềm - phạt nặng nếu thiếu, không gây vô nghiệm)",
+        "hard": "Bắt buộc tuyệt đối (Cứng - giáo viên đủ điều kiện phải được nghỉ)",
+    }
+    current_off_mode = getattr(config, "teacher_off_sessions_mode", "soft")
+    if current_off_mode not in off_mode_options:
+        current_off_mode = "soft"
+    teacher_off_sessions_mode = col_off2.selectbox(
+        "Mức độ áp dụng buổi nghỉ:",
+        options=list(off_mode_options.keys()),
+        index=list(off_mode_options.keys()).index(current_off_mode),
+        format_func=lambda k: off_mode_options[k],
+        help="Bắt buộc tuyệt đối: Ép cứng số buổi nghỉ cho các GV có đủ điều kiện số tiết (tự động chuyển mềm cho GV quá tải tiết). "
+             "Ưu tiên cao: Dồn tiết để xếp buổi nghỉ trước với trọng số phạt 850 điểm/buổi thiếu.",
     )
 
     st.markdown("---")
@@ -560,6 +576,7 @@ if st.button("💾 Lưu toàn bộ cấu hình xếp lịch", type="primary"):
         max_heavy_consecutive=int(max_heavy_consecutive),
         max_periods_per_session=int(max_periods_per_session),
         teacher_off_sessions_per_week=int(teacher_off_sessions_per_week),
+        teacher_off_sessions_mode=str(teacher_off_sessions_mode),
         forbidden_off_cells=frozenset(forbidden_selection),
         reserved_off_weekdays_chieu=tuple(sorted(reserved_weekdays_selection)),
         heavy_subject_priority_periods=int(heavy_subject_priority_periods),
