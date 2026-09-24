@@ -17,6 +17,8 @@ from core.scheduler.constants import (
     TEACHER_SPLIT_DAY_PENALTY,
     TEACHER_STRICT_MORNING_MISS_PENALTY,
     TEACHER_OFF_SHORTFALL_PENALTY,
+    TEACHER_ZERO_OFF_PENALTY,
+    TEACHER_OFF_EXCESS_PENALTY,
     MORNING_ACADEMIC_UNDERLOAD_SOFT_PENALTY,
     GVCN_MONDAY_PERIOD2_MISS_PENALTY,
 )
@@ -474,6 +476,12 @@ def _add_objective(built: CpSatModel) -> None:
     teacher_off_terms = penalty_terms.get("_teacher_off", []) + penalty_terms.get("OFF", [])
     if teacher_off_terms:
         obj_terms.append(TEACHER_OFF_SHORTFALL_PENALTY * sum(teacher_off_terms))
+    zero_off_terms = penalty_terms.get("_teacher_zero_off", [])
+    if zero_off_terms:
+        obj_terms.append(TEACHER_ZERO_OFF_PENALTY * sum(zero_off_terms))
+    off_excess_terms = penalty_terms.get("_teacher_off_excess", [])
+    if off_excess_terms:
+        obj_terms.append(TEACHER_OFF_EXCESS_PENALTY * sum(off_excess_terms))
     if penalty_terms.get("II.3"):
         obj_terms.append(800 * sum(penalty_terms["II.3"]))
     if strict_morning_terms:

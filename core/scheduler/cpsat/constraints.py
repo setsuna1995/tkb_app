@@ -162,6 +162,8 @@ def _add_off_day_constraints(built: CpSatModel, vars_by_teacher_session: dict) -
 
     all_teacher_ids = {t for (t, _wd, _sess) in vars_by_teacher_session}
     off_shortfalls = []
+    off_excesses = []
+    zero_off_indicators = []
 
     for teacher_id in all_teacher_ids:
         teacher = teachers_by_id.get(teacher_id)
@@ -186,26 +188,36 @@ def _add_off_day_constraints(built: CpSatModel, vars_by_teacher_session: dict) -
         if required_total <= 0:
             continue
 
-        off_vars = []
         eligible_sessions = []
         for (wd, sess) in all_wd_sess:
-            if (wd, sess) in forbidden and (wd, sess) not in pinned:
+            teach_vars = vars_by_teacher_session.get((teacher_id, wd, sess), [])
+            is_pinned = (wd, sess) in pinned
+            # Buổi không có biến dạy và không ghim -> GV vốn không dạy buổi này, không được tính là buổi nghỉ
+            if not teach_vars and not is_pinned:
+                continue
+            if (wd, sess) in forbidden and not is_pinned:
                 continue
             eligible_sessions.append((wd, sess))
+
+        if not eligible_sessions:
+            continue
+
+        off_vars = []
+        for (wd, sess) in eligible_sessions:
             off_var = m.NewBoolVar(f"off_t{teacher_id}_wd{wd}_{sess}")
             off_vars.append(off_var)
             if (wd, sess) in pinned:
                 m.Add(off_var == 1)
             teach_vars = vars_by_teacher_session.get((teacher_id, wd, sess), [])
             if teach_vars:
+                # off_var == 1 <=> sum(teach_vars) == 0
                 m.Add(sum(teach_vars) == 0).OnlyEnforceIf(off_var)
-
-        # Capped: không tính vượt quá số buổi nghỉ cấu hình
-        m.Add(sum(off_vars) <= required_total)
+                m.Add(sum(teach_vars) >= 1).OnlyEnforceIf(off_var.Not())
 
         total_p = teacher_total_periods.get(teacher_id, 0)
-        available_sessions = max(0, len(all_wd_sess) - required_total)
-        max_workable_periods = sum(sorted_caps_desc[:available_sessions])
+        teach_sessions_count = sum(1 for (wd, sess) in all_wd_sess if vars_by_teacher_session.get((teacher_id, wd, sess)))
+        avail_sessions = max(0, teach_sessions_count - required_total)
+        max_workable_periods = sum(sorted_caps_desc[:avail_sessions])
 
         # Nếu chọn chế độ bắt buộc tuyệt đối ("hard") và GV đủ điều kiện khả thi:
         is_feasible_hard = (
@@ -222,10 +234,31 @@ def _add_off_day_constraints(built: CpSatModel, vars_by_teacher_session: dict) -
             m.Add(shortfall >= required_total - sum(off_vars))
             off_shortfalls.append(shortfall)
 
+        # Phạt cực nặng cho người không được nghỉ buổi nào (sum(off_vars) == 0)
+        zero_off = m.NewBoolVar(f"zero_off_t{teacher_id}")
+        m.Add(sum(off_vars) == 0).OnlyEnforceIf(zero_off)
+        m.Add(sum(off_vars) >= 1).OnlyEnforceIf(zero_off.Not())
+        zero_off_indicators.append(zero_off)
+
+        # Phạt mềm cho người nghỉ quá nhiều buổi (sum(off_vars) > required_total)
+        excess = m.NewIntVar(0, len(eligible_sessions), f"off_excess_t{teacher_id}")
+        m.Add(excess >= sum(off_vars) - required_total)
+        off_excesses.append(excess)
+
     if off_shortfalls:
         if "_teacher_off" not in built.penalty_terms:
             built.penalty_terms["_teacher_off"] = []
         built.penalty_terms["_teacher_off"].extend(off_shortfalls)
+
+    if zero_off_indicators:
+        if "_teacher_zero_off" not in built.penalty_terms:
+            built.penalty_terms["_teacher_zero_off"] = []
+        built.penalty_terms["_teacher_zero_off"].extend(zero_off_indicators)
+
+    if off_excesses:
+        if "_teacher_off_excess" not in built.penalty_terms:
+            built.penalty_terms["_teacher_off_excess"] = []
+        built.penalty_terms["_teacher_off_excess"].extend(off_excesses)
 
 
 def _add_subject_constraints(built: CpSatModel) -> None:

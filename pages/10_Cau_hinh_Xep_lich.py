@@ -1,4 +1,8 @@
 import streamlit as st
+import importlib
+import core.models
+if not hasattr(core.models.SchedulingConfig, "teacher_off_sessions_mode"):
+    importlib.reload(core.models)
 
 from core import frame as frame_mod
 from core.models import (
@@ -348,7 +352,7 @@ with tab2:
         index=list(off_mode_options.keys()).index(current_off_mode),
         format_func=lambda k: off_mode_options[k],
         help="Bắt buộc tuyệt đối: Ép cứng số buổi nghỉ cho các GV có đủ điều kiện số tiết (tự động chuyển mềm cho GV quá tải tiết). "
-             "Ưu tiên cao: Dồn tiết để xếp buổi nghỉ trước với trọng số phạt 850 điểm/buổi thiếu.",
+             "Ưu tiên cao: Dồn tiết để xếp buổi nghỉ trước (phạt 1.000 điểm/buổi thiếu và phạt thêm 2.500 điểm nếu hoàn toàn không được nghỉ buổi nào).",
     )
 
     st.markdown("---")
@@ -557,7 +561,7 @@ if conflict_afternoon_morning:
     st.warning(f"⚠️ **Xung đột cấu hình:** Môn **{', '.join(c_names)}** vừa được đặt \"Bắt buộc sáng (cấm chiều)\" vừa được chọn \"Ưu tiên buổi chiều\". Hãy bỏ chọn ở một trong hai mục.")
 
 if st.button("💾 Lưu toàn bộ cấu hình xếp lịch", type="primary"):
-    new_config = SchedulingConfig(
+    cfg_kwargs = dict(
         gdtc_avoid_period=int(gdtc_avoid_period),
         gdtc_morning_allowed_periods=tuple(sorted(gdtc_morning_allowed)),
         gdtc_afternoon_allowed_periods=tuple(sorted(gdtc_afternoon_allowed)),
@@ -576,7 +580,6 @@ if st.button("💾 Lưu toàn bộ cấu hình xếp lịch", type="primary"):
         max_heavy_consecutive=int(max_heavy_consecutive),
         max_periods_per_session=int(max_periods_per_session),
         teacher_off_sessions_per_week=int(teacher_off_sessions_per_week),
-        teacher_off_sessions_mode=str(teacher_off_sessions_mode),
         forbidden_off_cells=frozenset(forbidden_selection),
         reserved_off_weekdays_chieu=tuple(sorted(reserved_weekdays_selection)),
         heavy_subject_priority_periods=int(heavy_subject_priority_periods),
@@ -612,6 +615,9 @@ if st.button("💾 Lưu toàn bộ cấu hình xếp lịch", type="primary"):
         cpsat_minimize_changes=bool(cpsat_minimize_changes),
         cpsat_workers=int(chosen_workers),
     )
+    if "teacher_off_sessions_mode" in getattr(SchedulingConfig, "__dataclass_fields__", {}):
+        cfg_kwargs["teacher_off_sessions_mode"] = str(teacher_off_sessions_mode)
+    new_config = SchedulingConfig(**cfg_kwargs)
     repo.set_scheduling_config(conn, new_config)
     st.success("✅ Đã lưu toàn bộ cấu hình xếp lịch thành công!")
     st.rerun()

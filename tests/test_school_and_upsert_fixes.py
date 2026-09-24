@@ -197,3 +197,66 @@ def test_teacher_off_sessions_soft_mode():
     assert off_sessions_count >= 2, f"Expected at least 2 off sessions in soft mode, got {off_sessions_count}"
 
 
+def test_teacher_off_sessions_fairness_and_no_cheating():
+    from core.models import (
+        ClassRoom, SchedulingConfig, SchedulingInput, Slot, Subject, Teacher, TimeSlot,
+        ROLE_KEP, ROLE_HDTN
+    )
+    from core.scheduler.cpsat_model import build_model, solve
+
+    # 4 morning sessions (2, 3, 4, 5) with 2 periods each = 8 slots
+    # Teacher 10 has 4 periods (Van - ROLE_KEP), Teacher 20 has 4 periods (HDTN).
+    # Config requests 1 off session per week.
+    # The zero-off penalty (1500) and excess penalty (60) ensure neither teacher has 0 off sessions.
+    timeslots = []
+    slot_id = 1
+    for wd in (2, 3, 4, 5):
+        for period in (1, 2):
+            timeslots.append(TimeSlot(slot_id, wd, "S", period))
+            slot_id += 1
+
+    slots = [Slot(ts.ts_id, 101, ts) for ts in timeslots]
+    subjects = [Subject(1, "Van", ROLE_KEP), Subject(2, "HDTN", ROLE_HDTN)]
+    teachers = [Teacher(10, "GV Van"), Teacher(20, "GV HDTN")]
+    inp = SchedulingInput(
+        classes=[ClassRoom(101, "6A1")],
+        subjects=subjects,
+        teachers=teachers,
+        need={(1, 101): 4, (2, 101): 4},
+        assigned_teacher={(1, 101): 10, (2, 101): 20},
+        ban_busy=set(),
+        slots=slots,
+        timeslots=timeslots,
+        config=SchedulingConfig(
+            teacher_off_sessions_per_week=1,
+            teacher_off_sessions_mode="soft",
+            forbidden_off_cells=frozenset(),
+            mandatory_morning_weekdays=(),
+            chao_co_weekday=2,
+            chao_co_period=1,
+        ),
+    )
+    built = build_model(inp)
+    assert "_teacher_zero_off" in built.penalty_terms
+    assert "_teacher_off_excess" in built.penalty_terms
+
+    assignment = solve(built, time_limit_s=10.0)
+    assert assignment is not None
+
+    slot_by_id = {s.slot_id: s for s in slots}
+    taught_by_teacher = {10: set(), 20: set()}
+    for s_id, subj_id in assignment.items():
+        t_id = inp.assigned_teacher.get((subj_id, 101))
+        if t_id in taught_by_teacher:
+            s = slot_by_id[s_id]
+            taught_by_teacher[t_id].add(s.ts.weekday)
+
+    all_wds = {2, 3, 4, 5}
+    off_t10 = len(all_wds - taught_by_teacher[10])
+    off_t20 = len(all_wds - taught_by_teacher[20])
+    # Both teachers MUST get at least 1 off session (no one left with 0 off sessions)
+    assert off_t10 >= 1, f"GV Van must have at least 1 off session, got {off_t10}"
+    assert off_t20 >= 1, f"GV HDTN must have at least 1 off session, got {off_t20}"
+
+
+
