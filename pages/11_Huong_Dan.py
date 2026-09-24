@@ -102,13 +102,37 @@ with tab4:
     st.markdown("### 🚀 Xếp Thời khóa biểu tự động & Xuất Excel")
     st.markdown(
         """
-        - **Chọn tuần xếp lịch**: Chọn tuần cụ thể từ 1 đến 35 để nạp đúng định mức của tuần đó.
-        - **Chuyên đề HDTN**: Tùy chọn dồn 3 tiết HDTN thành 1 khối tập trung cho toàn trường khi tổ chức sự kiện.
+        - **Phương án tổ chức HĐTN linh hoạt**: Hỗ trợ chuyển đổi nhanh giữa *Tuần học chuẩn* (3 tiết phân bổ: Chào cờ đầu tuần, Hoạt động chủ đề, Sinh hoạt lớp cuối tuần) và *Tuần chuyên đề* (Dồn 3 tiết liền kề tập trung toàn trường đồng bộ bằng CP-SAT).
         - **Bộ giải Google OR-Tools CP-SAT**:
           - **Pass 1**: Chẩn đoán tính khả thi (Pure Feasibility) và phát hiện các xung đột toán học.
           - **Pass 2**: Tối ưu hóa đa mục tiêu với cơ chế Early Stopping để tìm phương án có điểm chất lượng tốt nhất.
-        - **Xuất Excel TKB trực tiếp**: Bạn có thể tải ngay file Excel TKB Toàn trường, TKB theo Lớp, hoặc TKB theo Giáo viên "
-          ngay tại trang **Xếp TKB tự động** mà không cần chuyển qua trang khác.
+        - **Xuất Excel TKB trực tiếp**: Bạn có thể tải ngay file Excel TKB Toàn trường, TKB theo Lớp, hoặc TKB theo Giáo viên ngay tại trang **Xếp TKB tự động** mà không cần chuyển qua trang khác.
+        """
+    )
+    
+    st.markdown("---")
+    st.markdown("### 🎯 Chiến lược Tối ưu hóa & Tinh chỉnh TKB khi chưa vừa ý (Studio 2 Giai đoạn)")
+    render_callout(
+        "Khi chạy xếp TKB lần đầu, kết quả có thể chưa hoàn toàn đúng ý về phân bổ môn học hoặc còn 1 vài giáo viên bị trống tiết giữa buổi. "
+        "Hệ thống cung cấp quy trình 2 giai đoạn chuyên nghiệp giúp bạn tinh chỉnh TKB đến độ hoàn hảo:",
+        level="info",
+        title="Quy trình chuẩn khuyến nghị",
+    )
+    st.markdown(
+        """
+        #### 1. Giai đoạn 1: Khảo sát & Đối sánh Phương án (On-Demand Candidate Studio)
+        - **Đổi Seed ngẫu nhiên (`🎲 Thử phương án khác`)**: 
+          - Bản chất toán học: Bộ giải CP-SAT xuất phát từ một điểm mầm ngẫu nhiên (Seed). 
+          - Khi bạn bấm đổi Seed, máy tính sẽ rẽ sang một nhánh tìm kiếm hoàn toàn mới, tạo ra một bố cục thời khóa biểu khác biệt 100% nhưng vẫn thỏa mãn đầy đủ các quy chuẩn của trường.
+        - **Giải sâu hơn (`⏱️ Giải sâu hơn +30s`)**:
+          - Dành cho các trường quy mô lớn hoặc nhiều giáo viên dạy chéo. Nâng thời gian giải giúp thuật toán có thêm tài nguyên tính toán để triệt tiêu các điểm phạt nhỏ (tiết lủng/trống giữa buổi của giáo viên).
+        - **Bảng đối sánh KPI**: Hệ thống tự động chấm Điểm sức khỏe TKB (0 - 100), đếm số tiết lủng GV, lượt dạy dồn quá 4 tiết và vi phạm mềm giữa các phương án để bạn chọn ra bản nền tảng tốt nhất.
+
+        #### 2. Giai đoạn 2: Khóa & Tinh chỉnh Chi tiết (Lock & Incremental Refinement)
+        - **Khóa theo Lớp (`🔒 Khóa Lớp`)**: Tích chọn các lớp có TKB đã rất đẹp (ví dụ toàn bộ Khối 12). Thuật toán sẽ biến các ô của lớp này thành **Ràng buộc cứng**, tuyệt đối không thay đổi.
+        - **Khóa theo Giáo viên (`🔒 Khóa GV`)**: Bảo vệ lịch dạy của các giáo viên đã hài lòng.
+        - **Bấm `🎯 Tinh chỉnh các ô còn lại`**: Thuật toán kích hoạt chế độ `cpsat_minimize_changes`, nạp TKB hiện tại làm điểm xuất phát và chỉ điều phối lại những ô còn xấu ở các lớp chưa khóa. Quá trình giải cục bộ diễn ra rất nhanh (chỉ từ 5 – 15 giây).
+        - **Đổi chéo thông minh (`🔄 Smart Swap`)**: Cho phép bạn chủ động tráo đổi 2 tiết cụ thể. Hệ thống sẽ tự động kiểm tra xem giáo viên có bị trùng tiết tại các lớp khác hay có báo bận hay không trước khi thực hiện.
         """
     )
 

@@ -626,3 +626,13 @@ def _is_teacher_busy_morning(inp: SchedulingInput, teacher_id: int, weekday: int
         return len(free_periods) < 2
     free_periods = {s.ts.period for s in candidate_slots if (teacher_id, s.ts.ts_id) not in inp.ban_busy}
     return len(free_periods) < 2
+
+
+def _add_locked_slots_constraints(built: CpSatModel) -> None:
+    """Áp đặt ràng buộc CỨNG tuyệt đối cho các ô đã được người dùng khóa."""
+    m = built.model
+    x = built.x
+    locked_slots = getattr(built.inp, "locked_slots", {}) or {}
+    for slot_id, subject_id in locked_slots.items():
+        if (slot_id, subject_id) in x:
+            m.Add(x[slot_id, subject_id] == 1)

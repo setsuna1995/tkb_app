@@ -25,6 +25,7 @@ from core.scheduler.cpsat.constraints import (
     _add_subject_constraints,
     _add_class_constraints,
     _add_block_constraints,
+    _add_locked_slots_constraints,
     _is_teacher_busy_morning,
 )
 from core.scheduler.cpsat.objectives import (
@@ -160,6 +161,7 @@ def build_model(inp: SchedulingInput) -> CpSatModel:
     _add_subject_constraints(built)
     _add_class_constraints(built)
     _add_block_constraints(built)
+    _add_locked_slots_constraints(built)
     _add_change_minimisation(built)
     _add_objective(built)
     _add_solution_hint(built)
@@ -185,6 +187,7 @@ __all__ = [
     "_add_subject_constraints",
     "_add_class_constraints",
     "_add_block_constraints",
+    "_add_locked_slots_constraints",
     "_add_objective",
     "_add_change_minimisation",
     "_add_solution_hint",
