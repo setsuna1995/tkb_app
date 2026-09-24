@@ -217,7 +217,13 @@ def _add_off_day_constraints(built: CpSatModel, vars_by_teacher_session: dict) -
         total_p = teacher_total_periods.get(teacher_id, 0)
         teach_sessions_count = sum(1 for (wd, sess) in all_wd_sess if vars_by_teacher_session.get((teacher_id, wd, sess)))
         avail_sessions = max(0, teach_sessions_count - required_total)
-        max_workable_periods = sum(sorted_caps_desc[:avail_sessions])
+        # Dung lượng các buổi mà GV này thực sự có thể dạy (phù hợp cho cả trường 1 ca và trường 2 ca)
+        teacher_sess_caps = [
+            min(max_p_sess, len({ts.period for ts in inp.timeslots if ts.weekday == wd and ts.session == sess}))
+            for (wd, sess) in eligible_sessions
+        ]
+        sorted_teacher_caps = sorted(teacher_sess_caps, reverse=True)
+        max_workable_periods = sum(sorted_teacher_caps[:avail_sessions])
 
         # Nếu chọn chế độ bắt buộc tuyệt đối ("hard") và GV đủ điều kiện khả thi:
         is_feasible_hard = (
@@ -235,10 +241,13 @@ def _add_off_day_constraints(built: CpSatModel, vars_by_teacher_session: dict) -
             off_shortfalls.append(shortfall)
 
         # Phạt cực nặng cho người không được nghỉ buổi nào (sum(off_vars) == 0)
-        zero_off = m.NewBoolVar(f"zero_off_t{teacher_id}")
-        m.Add(sum(off_vars) == 0).OnlyEnforceIf(zero_off)
-        m.Add(sum(off_vars) >= 1).OnlyEnforceIf(zero_off.Not())
-        zero_off_indicators.append(zero_off)
+        # Chỉ phạt nếu GV về mặt toán học có khả năng nghỉ ít nhất 1 buổi
+        can_have_at_least_one_off = (len(eligible_sessions) > 1 and total_p <= sum(sorted_teacher_caps[:-1]))
+        if can_have_at_least_one_off:
+            zero_off = m.NewBoolVar(f"zero_off_t{teacher_id}")
+            m.Add(sum(off_vars) == 0).OnlyEnforceIf(zero_off)
+            m.Add(sum(off_vars) >= 1).OnlyEnforceIf(zero_off.Not())
+            zero_off_indicators.append(zero_off)
 
         # Phạt mềm cho người nghỉ quá nhiều buổi (sum(off_vars) > required_total)
         excess = m.NewIntVar(0, len(eligible_sessions), f"off_excess_t{teacher_id}")

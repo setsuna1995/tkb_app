@@ -259,4 +259,143 @@ def test_teacher_off_sessions_fairness_and_no_cheating():
     assert off_t20 >= 1, f"GV HDTN must have at least 1 off session, got {off_t20}"
 
 
+def test_ii14_penalty_capped_and_weights_aligned():
+    from core.models import (
+        ClassRoom, SchedulingConfig, SchedulingInput, Slot, Subject, Teacher, TimeSlot,
+    )
+    from core.validation import compute_tkb_health_score
+    from core.scheduler.constants import TEACHER_4CONSEC_MORNING_PENALTY
+
+    # TEACHER_4CONSEC_MORNING_PENALTY must be significantly lower than gap penalties (350+)
+    assert TEACHER_4CONSEC_MORNING_PENALTY < 250, "II.14 penalty must be lower than gap penalty to avoid creating gaps"
+
+    # Create dummy schedule where a teacher has 10 days of 4 consecutive morning periods
+    slots = []
+    assignment = {}
+    slot_id = 1
+    for wd in (2, 3, 4, 5, 6):
+        for period in (1, 2, 3, 4):
+            ts = TimeSlot(slot_id, wd, "S", period)
+            s = Slot(slot_id, 101, ts)
+            slots.append(s)
+            assignment[slot_id] = 1
+            slot_id += 1
+
+    inp = SchedulingInput(
+        classes=[ClassRoom(101, "6A1")],
+        subjects=[Subject(1, "Toan", 1), Subject(2, "HDTN", 5)],
+        teachers=[Teacher(10, "GV Toan")],
+        need={(1, 101): 20},
+        assigned_teacher={(1, 101): 10},
+        ban_busy=set(),
+        slots=slots,
+        timeslots=[s.ts for s in slots],
+        config=SchedulingConfig(
+            avoid_teacher_4_consecutive_morning=True,
+            avoid_teacher_gaps=True,
+        ),
+    )
+    health = compute_tkb_health_score(inp, assignment)
+    # Teacher penalty for II.14 is capped at 15.0 pts, so teacher_score must be at least 85.0
+    assert health["teacher_score"] >= 85.0, f"Teacher score should not be wiped out by II.14: {health['teacher_score']}"
+
+
+def test_shift_adaptive_rules_single_vs_two_shift():
+    """Kiểm tra:
+    1. Trường toàn sáng (4 tiết/buổi):
+       - Không phạt II.14 trong CP-SAT (penalty_terms['II.14'] trống).
+       - Health score không trừ điểm II.14 (teacher_score = 100.0).
+    2. Trường chia 2 ca (có ca sáng + ca chiều):
+       - Kích hoạt phạt II.14 trong CP-SAT cho giáo viên.
+       - Buổi nghỉ của GV sáng chỉ tính ca sáng, GV chiều chỉ tính ca chiều.
+    """
+    from core.models import (
+        ClassRoom, SchedulingConfig, SchedulingInput, Slot, Subject, Teacher, TimeSlot,
+        ROLE_HDTN,
+    )
+    from core.scheduler.cpsat_model import build_model
+    from core.validation import compute_tkb_health_score
+
+    # --- 1. Trường toàn sáng (Single-shift morning only, 4 periods) ---
+    ts_morning = []
+    slots_morning = []
+    assignment_morn = {}
+    sid = 1
+    for wd in (2, 3, 4, 5):
+        for p in (1, 2, 3, 4):
+            t = TimeSlot(sid, wd, "S", p)
+            s = Slot(sid, 101, t)
+            ts_morning.append(t)
+            slots_morning.append(s)
+            assignment_morn[sid] = 1
+            sid += 1
+
+    inp_morning = SchedulingInput(
+        classes=[ClassRoom(101, "9A")],
+        subjects=[Subject(1, "Toan", 1), Subject(99, "HDTN", ROLE_HDTN)],
+        teachers=[Teacher(10, "GV Toan")],
+        need={(1, 101): 16},
+        assigned_teacher={(1, 101): 10},
+        ban_busy=set(),
+        slots=slots_morning,
+        timeslots=ts_morning,
+        config=SchedulingConfig(avoid_teacher_4_consecutive_morning=True),
+    )
+    built_morn = build_model(inp_morning)
+    # Trường toàn sáng 4 tiết: Không thêm terms II.14
+    assert not built_morn.penalty_terms.get("II.14"), "Trường toàn sáng 4 tiết không được phạt II.14 trong CP-SAT"
+
+    score_morn = compute_tkb_health_score(inp_morning, assignment_morn)
+    # Không trừ điểm cho buổi sáng 4 tiết chuẩn
+    assert score_morn["teacher_score"] == 100.0, f"Teacher score phải là 100, got {score_morn['teacher_score']}"
+
+    # --- 2. Trường chia 2 ca (Two-shift: 6A học chiều, 9A học sáng) ---
+    ts_twoshift = []
+    slots_twoshift = []
+    sid = 1
+    # 9A: ca sáng (Thứ 2..5, 4 tiết)
+    for wd in (2, 3, 4, 5):
+        for p in (1, 2, 3, 4):
+            t = TimeSlot(sid, wd, "S", p)
+            s = Slot(sid, 101, t)
+            ts_twoshift.append(t)
+            slots_twoshift.append(s)
+            sid += 1
+    # 6A: ca chiều (Thứ 2..5, 4 tiết)
+    for wd in (2, 3, 4, 5):
+        for p in (1, 2, 3, 4):
+            t = TimeSlot(sid, wd, "C", p)
+            s = Slot(sid, 102, t)
+            ts_twoshift.append(t)
+            slots_twoshift.append(s)
+            sid += 1
+
+    inp_twoshift = SchedulingInput(
+        classes=[ClassRoom(101, "9A"), ClassRoom(102, "6A")],
+        subjects=[
+            Subject(1, "Toan", 1), Subject(2, "Van", 1), Subject(3, "Anh", 1),
+            Subject(99, "HDTN", ROLE_HDTN),
+        ],
+        teachers=[
+            Teacher(10, "GV Toan 9"),   # Thuần sáng
+            Teacher(20, "GV Van 6"),    # Thuần chiều
+            Teacher(30, "GV Anh"),      # Dạy cả 2 ca
+        ],
+        need={(1, 101): 8, (2, 102): 8, (3, 101): 8, (3, 102): 8},
+        assigned_teacher={(1, 101): 10, (2, 102): 20, (3, 101): 30, (3, 102): 30},
+        ban_busy=set(),
+        slots=slots_twoshift,
+        timeslots=ts_twoshift,
+        config=SchedulingConfig(
+            teacher_off_sessions_per_week=1,
+            avoid_teacher_4_consecutive_morning=True,
+        ),
+    )
+    built_twoshift = build_model(inp_twoshift)
+    # Trường chia 2 ca: Có áp dụng II.14 để bảo vệ GV
+    assert "II.14" in built_twoshift.penalty_terms and len(built_twoshift.penalty_terms["II.14"]) > 0
+
+
+
+
 

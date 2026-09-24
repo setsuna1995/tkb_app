@@ -19,6 +19,7 @@ from core.scheduler.constants import (
     TEACHER_OFF_SHORTFALL_PENALTY,
     TEACHER_ZERO_OFF_PENALTY,
     TEACHER_OFF_EXCESS_PENALTY,
+    TEACHER_4CONSEC_MORNING_PENALTY,
     MORNING_ACADEMIC_UNDERLOAD_SOFT_PENALTY,
     GVCN_MONDAY_PERIOD2_MISS_PENALTY,
 )
@@ -273,7 +274,17 @@ def _add_objective(built: CpSatModel) -> None:
                 excess_gap_terms_3rd.append(eg2)
 
     # 4. II.14 >= 4 tiết sáng liên tiếp
-    if params.flags["avoid_teacher_4_consecutive_morning"]:
+    # Tự động thích ứng theo cơ cấu ca học:
+    # - Trường toàn sáng 4 tiết (không có ca chiều): 4 tiết sáng là trọn vẹn 1 buổi học chuẩn (tiết 1-4).
+    #   GV cần gom tiết vào 4 buổi để có 1 buổi sáng nghỉ trong tuần. Do đó KHÔNG phạt II.14 để tránh đục lỗ (gap)
+    #   hoặc xé lẻ lịch làm mất ngày nghỉ.
+    # - Trường chia 2 ca (có ca chiều) hoặc sáng 5 tiết: Áp dụng phạt mềm (80 điểm, thấp hơn gap 350+).
+    has_afternoon = any(s.ts.session == "C" for s in inp.slots)
+    morning_periods = {s.ts.period for s in inp.slots if s.ts.session == "S"}
+    max_morning_p = max(morning_periods, default=4)
+    is_morning_only_4p = (not has_afternoon and max_morning_p <= 4)
+
+    if params.flags["avoid_teacher_4_consecutive_morning"] and not is_morning_only_4p:
         for t in teachers:
             if load[t] <= params.max_load_for_4consec_penalty:
                 for wd in weekdays:
@@ -512,7 +523,7 @@ def _add_objective(built: CpSatModel) -> None:
     if penalty_terms.get("_gvcn_monday_period2"):
         obj_terms.append(GVCN_MONDAY_PERIOD2_MISS_PENALTY * sum(penalty_terms["_gvcn_monday_period2"]))
     if penalty_terms.get("II.14"):
-        obj_terms.append(300 * sum(penalty_terms["II.14"]))
+        obj_terms.append(TEACHER_4CONSEC_MORNING_PENALTY * sum(penalty_terms["II.14"]))
     if lone_day_terms:
         obj_terms.append(250 * sum(lone_day_terms))
     if penalty_terms.get("II.9"):

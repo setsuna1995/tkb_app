@@ -71,6 +71,7 @@ TEACHER_ZERO_OFF_PENALTY = 2500       # Phạt cực nặng khi GV không đư�
 TEACHER_OFF_EXCESS_PENALTY = 60       # Phạt mềm khi 1 GV được nghỉ quá nhiều buổi so với cấu hình (chống dồn nghỉ quá nhiều)
 TEACHER_BACK_TO_BACK_SHIFT_PENALTY = 25  # Phạt nhẹ khi GV dạy chiều muộn hôm trước và sáng sớm hôm sau (tiêu chí phụ)
 SUBJECT_CONSECUTIVE_DAY_SOFT_PENALTY = 10  # Phạt nhẹ khi môn 2-3 tiết xếp 2 ngày liên tiếp (tiêu chí phụ, tie-breaker nếu có thể)
+TEACHER_4CONSEC_MORNING_PENALTY = 80       # Phạt mềm khi GV dạy 4 tiết sáng liên tiếp (tiêu chí II.14, ưu tiên thấp hơn tránh lủng tiết)
 MORNING_ACADEMIC_UNDERLOAD_SOFT_PENALTY = 120  # Phạt mềm khi buổi sáng (>= 3 tiết) có < 2 tiết học thuật cốt lõi
 GVCN_MONDAY_PERIOD2_MISS_PENALTY = 50000  # Phạt nặng khi GVCN không dạy đúng tiết 2 Thứ 2 của lớp chủ nhiệm
                                     # (hoặc bị xếp dạy lớp khác vào tiết này). (2026-09-15) Nâng từ 10000 lên
