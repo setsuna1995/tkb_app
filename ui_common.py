@@ -122,7 +122,10 @@ def sidebar_fixed_rules(conn) -> None:
 
 
 def _slugify(name: str) -> str:
-    s = re.sub(r"[^a-z0-9]+", "-", name.strip().lower()).strip("-")
+    import unicodedata
+    normalized = unicodedata.normalize("NFKD", name.strip().lower())
+    ascii_str = "".join(c for c in normalized if not unicodedata.combining(c)).replace("đ", "d").replace("Đ", "d")
+    s = re.sub(r"[^a-z0-9]+", "-", ascii_str).strip("-")
     return s or "truong"
 
 
