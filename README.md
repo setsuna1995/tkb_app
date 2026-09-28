@@ -62,7 +62,7 @@ streamlit run app.py
 ## ☁️ Triển khai lên Streamlit Community Cloud (Miễn phí)
 
 1. **Đẩy mã nguồn lên GitHub**:
-   - Repository chứa sẵn cơ sở dữ liệu mẫu (`schools/truong-thcs.db` và `data/sample_truong_thcs.db`).
+   - Repository chứa sẵn 2 cơ sở dữ liệu mẫu (`schools/truong-thcs.db`, `schools/truong-thcs-2-buoi.db` và các bản sao tương ứng trong `data/`).
 2. **Tạo App trên Streamlit Cloud**:
    - Truy cập [share.streamlit.io](https://share.streamlit.io) $\to$ Chọn **New app**.
    - Chọn Repository, Branch `main`, và Main file path là `app.py`.
@@ -74,7 +74,9 @@ streamlit run app.py
 ## 📊 Cấu trúc dữ liệu & Quản lý trường học
 
 - **Hỗ trợ đa trường (Multi-tenant)**: Mỗi trường học là một file SQLite độc lập trong thư mục `schools/<mã-trường>.db`.
-- **Trường mẫu mặc định**: `Trường THCS (2026-2027)` (`schools/truong-thcs.db`) được nạp tự động khi khởi động.
+- **Trường mẫu mặc định sẵn có**:
+  - `Trường THCS - Học 1 buổi (2026-2027)` (`schools/truong-thcs.db`): Khung 4 tiết sáng, chiều nghỉ.
+  - `Trường THCS - Học 2 buổi (2026-2027)` (`schools/truong-thcs-2-buoi.db`): Khung 4 tiết sáng + 3 tiết chiều (từ `TKB_sao_luu (1) copy.xlsx`).
 - **Đổi trường hoặc Tạo trường mới**: Có thể chuyển đổi bất cứ lúc nào qua nút **🏫 Đổi trường** ở thanh bên (Sidebar).
 - **Sao lưu & Phục hồi**:
   - Nút **📥 Xuất Excel (sao lưu)** ở thanh bên hỗ trợ tải trọn vẹn toàn bộ dữ liệu cấu hình, giáo viên, định mức và thời khóa biểu ra file `.xlsx`.
@@ -120,10 +122,12 @@ tkb_app/
 │   ├── frame.py                # Xử lý khung thời gian học tập
 │   └── models.py               # Data models và hằng số sư phạm
 ├── data/                       # Quản trị cơ sở dữ liệu SQLite & Repository
-│   ├── sample_truong_thcs.db   # Bản sao dữ liệu mẫu chuẩn năm học 2026-2027
+│   ├── sample_truong_thcs.db   # Bản sao dữ liệu mẫu chuẩn học 1 buổi (2026-2027)
+│   ├── sample_truong_thcs_2_buoi.db # Bản sao dữ liệu mẫu chuẩn học 2 buổi (2026-2027)
 │   └── repository.py           # Các hàm CRUD dữ liệu trường học
 ├── io_excel/                   # Bộ đọc và xuất biểu mẫu Excel chuẩn Bộ GD&ĐT
 ├── schools/                    # Thư mục lưu trữ CSDL các trường học (.db)
-│   └── truong-thcs.db          # Dữ liệu chính thức Trường THCS (2026-2027)
+│   ├── truong-thcs.db          # Dữ liệu Trường THCS - Học 1 buổi (2026-2027)
+│   └── truong-thcs-2-buoi.db   # Dữ liệu Trường THCS - Học 2 buổi (2026-2027)
 └── tests/                      # Bộ kiểm thử tự động (326 test cases đạt 100% pass)
 ```

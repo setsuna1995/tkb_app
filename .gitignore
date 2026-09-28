@@ -3,8 +3,10 @@ __pycache__/
 .streamlit/secrets.toml
 *.db
 !schools/truong-thcs.db
+!schools/truong-thcs-2-buoi.db
 !schools/thcs-do-can-phan-hieu.db
 !data/sample_truong_thcs.db
+!data/sample_truong_thcs_2_buoi.db
 *.db-journal
 *.db-shm
 *.db-wal

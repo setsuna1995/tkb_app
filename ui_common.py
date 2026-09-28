@@ -15,6 +15,7 @@ LEGACY_DB_PATH = str(Path(__file__).parent / "tkb_app_data.db")
 SCHOOLS_DIR = Path(__file__).parent / "schools"
 SAMPLE_SCHOOL_XLSM_PATH = Path(__file__).parent / "io_excel" / "sample_school.xlsm"
 TEMPLATE_DB_PATH = Path(__file__).parent / "data" / "sample_truong_thcs.db"
+TEMPLATE_2_BUOI_DB_PATH = Path(__file__).parent / "data" / "sample_truong_thcs_2_buoi.db"
 
 ROLE_CODE_LABELS = {0: "Thường", 1: "Nặng", 2: "Kép", 3: "Nặng+Kép", 4: "GDTC", 5: "HDTN"}
 ROLE_LABEL_TO_CODE = {v: k for k, v in ROLE_CODE_LABELS.items()}
@@ -149,14 +150,18 @@ def _migrate_legacy_single_db() -> None:
 
 
 def _seed_sample_school_if_empty() -> None:
-    """First-run only: if truly no school exists yet (fresh install, or all data
-    lost on an ephemeral-filesystem host restart), create one default school
-    pre-populated from the bundled sample dataset so the app is never empty."""
-    if any(SCHOOLS_DIR.glob("*.db")):
-        return
+    """Ensure bundled sample schools exist so users have standard ready-to-use environments.
+    Seeds both 1-shift (truong-thcs) and 2-shift (truong-thcs-2-buoi) default schools if missing."""
+    SCHOOLS_DIR.mkdir(exist_ok=True)
     if TEMPLATE_DB_PATH.exists():
         dest = SCHOOLS_DIR / "truong-thcs.db"
-        shutil.copy2(TEMPLATE_DB_PATH, dest)
+        if not dest.exists():
+            shutil.copy2(TEMPLATE_DB_PATH, dest)
+    if TEMPLATE_2_BUOI_DB_PATH.exists():
+        dest_2b = SCHOOLS_DIR / "truong-thcs-2-buoi.db"
+        if not dest_2b.exists():
+            shutil.copy2(TEMPLATE_2_BUOI_DB_PATH, dest_2b)
+    if any(SCHOOLS_DIR.glob("*.db")):
         return
     slug = create_school("Trường mẫu (dữ liệu mẫu)")
     connection = get_conn(slug)
