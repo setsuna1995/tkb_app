@@ -35,19 +35,19 @@ def generate():
         ("Toán học", 3),
         ("Ngữ văn", 3),
         ("Ngoại ngữ", 1),
-        ("Khoa học tự nhiên (Vật lý)", 0),
-        ("Khoa học tự nhiên (Hoá học)", 0),
-        ("Khoa học tự nhiên (Sinh học)", 0),
-        ("Lịch sử và Địa Lý (Lịch sử)", 0),
-        ("Lịch sử và Địa Lý (Địa lý)", 0),
+        ("Khoa học tự nhiên: Vật lý", 0),
+        ("Khoa học tự nhiên: Hóa học", 0),
+        ("Khoa học tự nhiên: Sinh học", 0),
+        ("Lịch sử và Địa lí: Lịch sử", 0),
+        ("Lịch sử và Địa lí: Địa lí", 0),
         ("GDCD", 0),
         ("Công nghệ", 0),
         ("Tin học", 0),
         ("Giáo dục thể chất", 4),
         ("Nội dung giáo dục của địa phương", 0),
         ("Hoạt động trải nghiệm, hướng nghiệp", 5),
-        ("Nghệ thuật (Âm nhạc)", 0),
-        ("Nghệ thuật (Mỹ thuật)", 0),
+        ("Nghệ thuật: Âm nhạc", 0),
+        ("Nghệ thuật: Mĩ thuật", 0),
     ]
     subject_ids = {name: repo.upsert_subject(conn, name, role_code=rc, sort_order=i) for i, (name, rc) in enumerate(subject_defs)}
 
@@ -76,19 +76,19 @@ def generate():
         "Toán học": {"6A5": "Huyền Ly", "6A6": "Huyền Ly", "7A4": "Lệ", "7A5": "Lệ", "8A5": "Minh Anh", "8A6": "Minh Anh", "9A5": "Nguyễn Ly", "9A6": "Nguyễn Ly"},
         "Ngữ văn": {"6A5": "Hoa", "6A6": "Hoa", "7A4": "Nhung", "7A5": "Thành", "8A5": "Uyên", "8A6": "Uyên", "9A5": "Lan", "9A6": "Lan"},
         "Ngoại ngữ": {"6A5": "Giang", "6A6": "Trung", "7A4": "Trung", "7A5": "Trung", "8A5": "Trung", "8A6": "Trung", "9A5": "Giang", "9A6": "Giang"},
-        "Khoa học tự nhiên (Vật lý)": {"6A5": "Sơn", "6A6": "Sơn", "7A4": "Huyền Ly", "7A5": "Huyền Ly", "8A5": "Nguyễn Ly", "8A6": "Nguyễn Ly", "9A5": "Huyền Ly", "9A6": "Huyền Ly"},
-        "Khoa học tự nhiên (Hóa học)": {"6A5": "Sơn", "6A6": "Sơn", "7A4": "Hoà", "7A5": "Hoà", "8A5": "Khu", "8A6": "Khu", "9A5": "Khu", "9A6": "Khu"},
-        "Khoa học tự nhiên (Sinh học)": {"6A5": "Sơn", "6A6": "Sơn", "7A4": "Hoà", "7A5": "Hoà", "8A5": "Hoà", "8A6": "Hoà", "9A5": "Sơn", "9A6": "Sơn"},
-        "Lịch sử và Địa Lý (Lịch sử)": {"6A5": "Hoa", "6A6": "Hoa", "7A4": "Thành", "7A5": "Thành", "8A5": "Thành", "8A6": "Thành", "9A5": "Thành", "9A6": "Thành"},
-        "Lịch sử và Địa Lý (Địa lý)": {"6A5": "Nhung", "6A6": "Nhung", "7A4": "Nhung", "7A5": "Nhung", "8A5": "Nhung", "8A6": "Nhung", "9A5": "Nhung", "9A6": "Nhung"},
+        "Khoa học tự nhiên: Vật lý": {"6A5": "Sơn", "6A6": "Sơn", "7A4": "Huyền Ly", "7A5": "Huyền Ly", "8A5": "Nguyễn Ly", "8A6": "Nguyễn Ly", "9A5": "Huyền Ly", "9A6": "Huyền Ly"},
+        "Khoa học tự nhiên: Hóa học": {"6A5": "Sơn", "6A6": "Sơn", "7A4": "Hoà", "7A5": "Hoà", "8A5": "Khu", "8A6": "Khu", "9A5": "Khu", "9A6": "Khu"},
+        "Khoa học tự nhiên: Sinh học": {"6A5": "Sơn", "6A6": "Sơn", "7A4": "Hoà", "7A5": "Hoà", "8A5": "Hoà", "8A6": "Hoà", "9A5": "Sơn", "9A6": "Sơn"},
+        "Lịch sử và Địa lí: Lịch sử": {"6A5": "Hoa", "6A6": "Hoa", "7A4": "Thành", "7A5": "Thành", "8A5": "Thành", "8A6": "Thành", "9A5": "Thành", "9A6": "Thành"},
+        "Lịch sử và Địa lí: Địa lí": {"6A5": "Nhung", "6A6": "Nhung", "7A4": "Nhung", "7A5": "Nhung", "8A5": "Nhung", "8A6": "Nhung", "9A5": "Nhung", "9A6": "Nhung"},
         "GDCD": {"6A5": "Khu", "6A6": "Khu", "7A4": "Lan Ly", "7A5": "Lan Ly", "8A5": "Hoà", "8A6": "Uyên", "9A5": "Uyên", "9A6": "Uyên"},
         "Công nghệ": {"6A5": "Huyền Ly", "6A6": "Huyền Ly", "7A4": "Sơn", "7A5": "Sơn", "8A5": "Sơn", "8A6": "Sơn", "9A5": "Khu", "9A6": "Khu"},
         "Tin học": {"6A5": "Minh Anh", "6A6": "Sơn", "7A4": "Khu", "7A5": "Khu", "8A5": "Lệ", "8A6": "Lệ", "9A5": "Minh Anh", "9A6": "Minh Anh"},
         "Giáo dục thể chất": {c: "Hồng" for c in class_names},
         "Nội dung giáo dục của địa phương": {"6A5": "Lan", "6A6": "Lan", "7A4": "Khu", "7A5": "Khu", "8A5": "Nhung", "8A6": "Nhung", "9A5": "Thành", "9A6": "Thành"},
         "Hoạt động trải nghiệm, hướng nghiệp": {"6A5": "Giang", "6A6": "Hoa", "7A4": "Lệ", "7A5": "Hoà", "8A5": "Minh Anh", "8A6": "Uyên", "9A5": "Nguyễn Ly", "9A6": "Lan"},
-        "Nghệ thuật (Âm nhạc)": {"6A5": "Hà", "6A6": "Hà", "7A4": "Lan Ly", "7A5": "Lan Ly", "8A5": "Lan Ly", "8A6": "Lan Ly", "9A5": "Hà", "9A6": "Hà"},
-        "Nghệ thuật (Mỹ thuật)": {c: "Lan Ly" for c in class_names}
+        "Nghệ thuật: Âm nhạc": {"6A5": "Hà", "6A6": "Hà", "7A4": "Lan Ly", "7A5": "Lan Ly", "8A5": "Lan Ly", "8A6": "Lan Ly", "9A5": "Hà", "9A6": "Hà"},
+        "Nghệ thuật: Mĩ thuật": {c: "Lan Ly" for c in class_names}
     }
     for subj_name, cls_map in matrix.items():
         for cls_name, t_name in cls_map.items():
@@ -99,20 +99,20 @@ def generate():
 
     grade_quotas = {
         "6": {
-            "C": {"Toán học": 4, "Ngữ văn": 4, "Ngoại ngữ": 3, "Khoa học tự nhiên (Vật lý)": 0, "Khoa học tự nhiên (Hóa học)": 4, "Khoa học tự nhiên (Sinh học)": 0, "Lịch sử và Địa Lý (Lịch sử)": 1, "Lịch sử và Địa Lý (Địa lý)": 2, "GDCD": 1, "Công nghệ": 1, "Tin học": 1, "Giáo dục thể chất": 2, "Nội dung giáo dục của địa phương": 1, "Hoạt động trải nghiệm, hướng nghiệp": 3, "Nghệ thuật (Âm nhạc)": 1, "Nghệ thuật (Mỹ thuật)": 1},
-            "L": {"Toán học": 4, "Ngữ văn": 4, "Ngoại ngữ": 3, "Khoa học tự nhiên (Vật lý)": 2, "Khoa học tự nhiên (Hóa học)": 2, "Khoa học tự nhiên (Sinh học)": 0, "Lịch sử và Địa Lý (Lịch sử)": 1, "Lịch sử và Địa Lý (Địa lý)": 2, "GDCD": 1, "Công nghệ": 1, "Tin học": 1, "Giáo dục thể chất": 2, "Nội dung giáo dục của địa phương": 1, "Hoạt động trải nghiệm, hướng nghiệp": 3, "Nghệ thuật (Âm nhạc)": 1, "Nghệ thuật (Mỹ thuật)": 1}
+            "C": {"Toán học": 4, "Ngữ văn": 4, "Ngoại ngữ": 3, "Khoa học tự nhiên: Vật lý": 0, "Khoa học tự nhiên: Hóa học": 4, "Khoa học tự nhiên: Sinh học": 0, "Lịch sử và Địa lí: Lịch sử": 1, "Lịch sử và Địa lí: Địa lí": 2, "GDCD": 1, "Công nghệ": 1, "Tin học": 1, "Giáo dục thể chất": 2, "Nội dung giáo dục của địa phương": 1, "Hoạt động trải nghiệm, hướng nghiệp": 3, "Nghệ thuật: Âm nhạc": 1, "Nghệ thuật: Mĩ thuật": 1},
+            "L": {"Toán học": 4, "Ngữ văn": 4, "Ngoại ngữ": 3, "Khoa học tự nhiên: Vật lý": 2, "Khoa học tự nhiên: Hóa học": 2, "Khoa học tự nhiên: Sinh học": 0, "Lịch sử và Địa lí: Lịch sử": 1, "Lịch sử và Địa lí: Địa lí": 2, "GDCD": 1, "Công nghệ": 1, "Tin học": 1, "Giáo dục thể chất": 2, "Nội dung giáo dục của địa phương": 1, "Hoạt động trải nghiệm, hướng nghiệp": 3, "Nghệ thuật: Âm nhạc": 1, "Nghệ thuật: Mĩ thuật": 1}
         },
         "7": {
-            "C": {"Toán học": 4, "Ngữ văn": 4, "Ngoại ngữ": 3, "Khoa học tự nhiên (Vật lý)": 1, "Khoa học tự nhiên (Hóa học)": 1, "Khoa học tự nhiên (Sinh học)": 2, "Lịch sử và Địa Lý (Lịch sử)": 2, "Lịch sử và Địa Lý (Địa lý)": 1, "GDCD": 1, "Công nghệ": 1, "Tin học": 1, "Giáo dục thể chất": 2, "Nội dung giáo dục của địa phương": 1, "Hoạt động trải nghiệm, hướng nghiệp": 3, "Nghệ thuật (Âm nhạc)": 1, "Nghệ thuật (Mỹ thuật)": 1},
-            "L": {"Toán học": 4, "Ngữ văn": 4, "Ngoại ngữ": 3, "Khoa học tự nhiên (Vật lý)": 1, "Khoa học tự nhiên (Hóa học)": 1, "Khoa học tự nhiên (Sinh học)": 2, "Lịch sử và Địa Lý (Lịch sử)": 2, "Lịch sử và Địa Lý (Địa lý)": 1, "GDCD": 1, "Công nghệ": 1, "Tin học": 1, "Giáo dục thể chất": 2, "Nội dung giáo dục của địa phương": 1, "Hoạt động trải nghiệm, hướng nghiệp": 3, "Nghệ thuật (Âm nhạc)": 1, "Nghệ thuật (Mỹ thuật)": 1}
+            "C": {"Toán học": 4, "Ngữ văn": 4, "Ngoại ngữ": 3, "Khoa học tự nhiên: Vật lý": 1, "Khoa học tự nhiên: Hóa học": 1, "Khoa học tự nhiên: Sinh học": 2, "Lịch sử và Địa lí: Lịch sử": 2, "Lịch sử và Địa lí: Địa lí": 1, "GDCD": 1, "Công nghệ": 1, "Tin học": 1, "Giáo dục thể chất": 2, "Nội dung giáo dục của địa phương": 1, "Hoạt động trải nghiệm, hướng nghiệp": 3, "Nghệ thuật: Âm nhạc": 1, "Nghệ thuật: Mĩ thuật": 1},
+            "L": {"Toán học": 4, "Ngữ văn": 4, "Ngoại ngữ": 3, "Khoa học tự nhiên: Vật lý": 1, "Khoa học tự nhiên: Hóa học": 1, "Khoa học tự nhiên: Sinh học": 2, "Lịch sử và Địa lí: Lịch sử": 2, "Lịch sử và Địa lí: Địa lí": 1, "GDCD": 1, "Công nghệ": 1, "Tin học": 1, "Giáo dục thể chất": 2, "Nội dung giáo dục của địa phương": 1, "Hoạt động trải nghiệm, hướng nghiệp": 3, "Nghệ thuật: Âm nhạc": 1, "Nghệ thuật: Mĩ thuật": 1}
         },
         "8": {
-            "C": {"Toán học": 4, "Ngữ văn": 4, "Ngoại ngữ": 3, "Khoa học tự nhiên (Vật lý)": 1, "Khoa học tự nhiên (Hóa học)": 3, "Khoa học tự nhiên (Sinh học)": 0, "Lịch sử và Địa Lý (Lịch sử)": 1, "Lịch sử và Địa Lý (Địa lý)": 2, "GDCD": 1, "Công nghệ": 1, "Tin học": 1, "Giáo dục thể chất": 2, "Nội dung giáo dục của địa phương": 1, "Hoạt động trải nghiệm, hướng nghiệp": 3, "Nghệ thuật (Âm nhạc)": 1, "Nghệ thuật (Mỹ thuật)": 1},
-            "L": {"Toán học": 4, "Ngữ văn": 4, "Ngoại ngữ": 3, "Khoa học tự nhiên (Vật lý)": 2, "Khoa học tự nhiên (Hóa học)": 2, "Khoa học tự nhiên (Sinh học)": 0, "Lịch sử và Địa Lý (Lịch sử)": 1, "Lịch sử và Địa Lý (Địa lý)": 2, "GDCD": 1, "Công nghệ": 1, "Tin học": 1, "Giáo dục thể chất": 2, "Nội dung giáo dục của địa phương": 1, "Hoạt động trải nghiệm, hướng nghiệp": 3, "Nghệ thuật (Âm nhạc)": 1, "Nghệ thuật (Mỹ thuật)": 1}
+            "C": {"Toán học": 4, "Ngữ văn": 4, "Ngoại ngữ": 3, "Khoa học tự nhiên: Vật lý": 1, "Khoa học tự nhiên: Hóa học": 3, "Khoa học tự nhiên: Sinh học": 0, "Lịch sử và Địa lí: Lịch sử": 1, "Lịch sử và Địa lí: Địa lí": 2, "GDCD": 1, "Công nghệ": 1, "Tin học": 1, "Giáo dục thể chất": 2, "Nội dung giáo dục của địa phương": 1, "Hoạt động trải nghiệm, hướng nghiệp": 3, "Nghệ thuật: Âm nhạc": 1, "Nghệ thuật: Mĩ thuật": 1},
+            "L": {"Toán học": 4, "Ngữ văn": 4, "Ngoại ngữ": 3, "Khoa học tự nhiên: Vật lý": 2, "Khoa học tự nhiên: Hóa học": 2, "Khoa học tự nhiên: Sinh học": 0, "Lịch sử và Địa lí: Lịch sử": 1, "Lịch sử và Địa lí: Địa lí": 2, "GDCD": 1, "Công nghệ": 1, "Tin học": 1, "Giáo dục thể chất": 2, "Nội dung giáo dục của địa phương": 1, "Hoạt động trải nghiệm, hướng nghiệp": 3, "Nghệ thuật: Âm nhạc": 1, "Nghệ thuật: Mĩ thuật": 1}
         },
         "9": {
-            "C": {"Toán học": 4, "Ngữ văn": 4, "Ngoại ngữ": 3, "Khoa học tự nhiên (Vật lý)": 0, "Khoa học tự nhiên (Hóa học)": 3, "Khoa học tự nhiên (Sinh học)": 1, "Lịch sử và Địa Lý (Lịch sử)": 2, "Lịch sử và Địa Lý (Địa lý)": 1, "GDCD": 1, "Công nghệ": 1, "Tin học": 1, "Giáo dục thể chất": 2, "Nội dung giáo dục của địa phương": 1, "Hoạt động trải nghiệm, hướng nghiệp": 3, "Nghệ thuật (Âm nhạc)": 1, "Nghệ thuật (Mỹ thuật)": 1},
-            "L": {"Toán học": 4, "Ngữ văn": 4, "Ngoại ngữ": 3, "Khoa học tự nhiên (Vật lý)": 3, "Khoa học tự nhiên (Hóa học)": 0, "Khoa học tự nhiên (Sinh học)": 1, "Lịch sử và Địa Lý (Lịch sử)": 2, "Lịch sử và Địa Lý (Địa lý)": 1, "GDCD": 1, "Công nghệ": 1, "Tin học": 1, "Giáo dục thể chất": 2, "Nội dung giáo dục của địa phương": 1, "Hoạt động trải nghiệm, hướng nghiệp": 3, "Nghệ thuật (Âm nhạc)": 1, "Nghệ thuật (Mỹ thuật)": 1}
+            "C": {"Toán học": 4, "Ngữ văn": 4, "Ngoại ngữ": 3, "Khoa học tự nhiên: Vật lý": 0, "Khoa học tự nhiên: Hóa học": 3, "Khoa học tự nhiên: Sinh học": 1, "Lịch sử và Địa lí: Lịch sử": 2, "Lịch sử và Địa lí: Địa lí": 1, "GDCD": 1, "Công nghệ": 1, "Tin học": 1, "Giáo dục thể chất": 2, "Nội dung giáo dục của địa phương": 1, "Hoạt động trải nghiệm, hướng nghiệp": 3, "Nghệ thuật: Âm nhạc": 1, "Nghệ thuật: Mĩ thuật": 1},
+            "L": {"Toán học": 4, "Ngữ văn": 4, "Ngoại ngữ": 3, "Khoa học tự nhiên: Vật lý": 3, "Khoa học tự nhiên: Hóa học": 0, "Khoa học tự nhiên: Sinh học": 1, "Lịch sử và Địa lí: Lịch sử": 2, "Lịch sử và Địa lí: Địa lí": 1, "GDCD": 1, "Công nghệ": 1, "Tin học": 1, "Giáo dục thể chất": 2, "Nội dung giáo dục của địa phương": 1, "Hoạt động trải nghiệm, hướng nghiệp": 3, "Nghệ thuật: Âm nhạc": 1, "Nghệ thuật: Mĩ thuật": 1}
         }
     }
     for cls_name, cid in class_ids.items():

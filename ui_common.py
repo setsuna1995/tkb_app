@@ -48,6 +48,8 @@ def sidebar_branding() -> None:
             """,
             unsafe_allow_html=True,
         )
+    sidebar_school_switcher()
+
 
 
 
@@ -223,6 +225,7 @@ def require_auth() -> None:
 
 def require_school() -> str:
     inject_theme()
+    st.session_state["_sidebar_school_switcher_rendered"] = False
     sidebar_branding()
     slug = st.session_state.get("school_slug")
     if slug and (SCHOOLS_DIR / f"{slug}.db").exists():
@@ -236,24 +239,45 @@ def require_school() -> str:
         st.session_state["school_slug"] = default_school["slug"]
         return default_school["slug"]
 
-    st.title("Chọn trường")
+    st.title("🏫 Quản Lý & Chọn Trường Học")
     if schools:
-        pick = st.selectbox("Trường", schools, format_func=lambda s: s["name"], key="school_pick")
-        if st.button("Vào trường này", type="primary"):
-            st.session_state["school_slug"] = pick["slug"]
-            st.session_state.pop("explicit_school_switch", None)
-            st.rerun()
-    with st.expander("➕ Tạo trường mới", expanded=not schools):
-        new_name = st.text_input("Tên trường mới", key="new_school_name")
-        if st.button("Tạo trường", type="primary") and new_name.strip():
-            new_slug = create_school(new_name.strip())
-            st.session_state["school_slug"] = new_slug
-            st.session_state.pop("explicit_school_switch", None)
-            st.rerun()
+        col_s1, col_s2 = st.columns([3, 1])
+        with col_s1:
+            pick = st.selectbox("Chọn trường đang có:", schools, format_func=lambda s: s["name"], key="school_pick")
+        with col_s2:
+            st.markdown("<div style='height: 28px;'></div>", unsafe_allow_html=True)
+            if st.button("Vào trường này", type="primary", use_container_width=True):
+                st.session_state["school_slug"] = pick["slug"]
+                st.session_state.pop("explicit_school_switch", None)
+                st.rerun()
+
+    st.markdown("---")
+    st.subheader("➕ Thêm trường mới")
+    st.caption("Khởi tạo một trường học mới hoàn toàn để cấu hình và xếp thời khóa biểu riêng biệt.")
+    col_c1, col_c2 = st.columns([3, 1])
+    with col_c1:
+        new_name = st.text_input("Tên trường mới", placeholder="Ví dụ: THCS Lê Quý Đôn", key="new_school_name")
+    with col_c2:
+        st.markdown("<div style='height: 28px;'></div>", unsafe_allow_html=True)
+        if st.button("➕ Tạo trường", type="primary", key="btn_create_school_direct", use_container_width=True):
+            if new_name.strip():
+                try:
+                    new_slug = create_school(new_name.strip())
+                    st.session_state["school_slug"] = new_slug
+                    st.session_state.pop("explicit_school_switch", None)
+                    st.rerun()
+                except Exception as e:
+                    st.error(f"Lỗi: {e}")
+            else:
+                st.warning("Vui lòng nhập tên trường.")
     st.stop()
 
 
 def sidebar_school_switcher() -> None:
+    if st.session_state.get("_sidebar_school_switcher_rendered"):
+        return
+    st.session_state["_sidebar_school_switcher_rendered"] = True
+
     schools = list_schools()
     if not schools:
         return
@@ -276,25 +300,34 @@ def sidebar_school_switcher() -> None:
             st.session_state.pop("explicit_school_switch", None)
             st.rerun()
 
-        with st.expander("➕ Thêm trường mới"):
-            new_name = st.text_input("Tên trường mới", key="sidebar_new_school_name")
-            if st.button("Tạo trường", type="primary", key="sidebar_btn_create_school", use_container_width=True):
-                if new_name.strip():
-                    try:
-                        new_slug = create_school(new_name.strip())
-                        st.session_state["school_slug"] = new_slug
-                        st.session_state.pop("explicit_school_switch", None)
-                        st.success(f"Đã tạo trường '{new_name.strip()}'!")
-                        st.rerun()
-                    except Exception as e:
-                        st.error(f"Lỗi: {e}")
-                else:
-                    st.warning("Vui lòng nhập tên trường.")
+        col_act1, col_act2 = st.columns([1, 1])
+        with col_act1:
+            if st.button("➕ Thêm trường", key="sidebar_btn_add_school_toggle", use_container_width=True):
+                st.session_state["sidebar_show_add_school"] = not st.session_state.get("sidebar_show_add_school", False)
+        with col_act2:
+            if st.button("🔄 Đổi trường", key="sidebar_btn_switch_school", use_container_width=True):
+                st.session_state.pop("school_slug", None)
+                st.session_state["explicit_school_switch"] = True
+                st.rerun()
 
-        if st.button("🔄 Quản lý / Chọn lại trường", key="sidebar_btn_switch_school", use_container_width=True):
-            st.session_state.pop("school_slug", None)
-            st.session_state["explicit_school_switch"] = True
-            st.rerun()
+        if st.session_state.get("sidebar_show_add_school", False):
+            with st.container():
+                st.caption("Nhập tên trường học mới cần khởi tạo:")
+                new_name = st.text_input("Tên trường mới", placeholder="Ví dụ: THCS Trần Phú", key="sidebar_new_school_name")
+                if st.button("🚀 Tạo trường", type="primary", key="sidebar_btn_create_school", use_container_width=True):
+                    if new_name.strip():
+                        try:
+                            new_slug = create_school(new_name.strip())
+                            st.session_state["school_slug"] = new_slug
+                            st.session_state.pop("explicit_school_switch", None)
+                            st.session_state["sidebar_show_add_school"] = False
+                            st.success(f"Đã tạo trường '{new_name.strip()}'!")
+                            st.rerun()
+                        except Exception as e:
+                            st.error(f"Lỗi: {e}")
+                    else:
+                        st.warning("Vui lòng nhập tên trường.")
+        st.divider()
 
 
 

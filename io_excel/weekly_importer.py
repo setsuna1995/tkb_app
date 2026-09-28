@@ -16,23 +16,24 @@ from core.models import ROLE_GDTC, ROLE_HDTN, ROLE_NANG, ROLE_NANG_KEP, ROLE_THU
 from data import repository as repo
 
 # Standard subjects template when importing into fresh database
+# Canonical names from TÊN.docx
 STANDARD_SUBJECTS = [
     ("Toán học", ROLE_NANG_KEP, 0),
     ("Ngữ văn", ROLE_NANG_KEP, 1),
     ("Ngoại ngữ", ROLE_NANG, 2),
-    ("Khoa học tự nhiên (Vật lý)", ROLE_THUONG, 3),
-    ("Khoa học tự nhiên (Hóa học)", ROLE_THUONG, 4),
-    ("Khoa học tự nhiên (Sinh học)", ROLE_THUONG, 5),
-    ("Lịch sử và Địa Lý (Lịch sử)", ROLE_THUONG, 6),
-    ("Lịch sử và Địa Lý (Địa lý)", ROLE_THUONG, 7),
+    ("Khoa học tự nhiên: Vật lý", ROLE_THUONG, 3),
+    ("Khoa học tự nhiên: Hóa học", ROLE_THUONG, 4),
+    ("Khoa học tự nhiên: Sinh học", ROLE_THUONG, 5),
+    ("Lịch sử và Địa lí: Lịch sử", ROLE_THUONG, 6),
+    ("Lịch sử và Địa lí: Địa lí", ROLE_THUONG, 7),
     ("GDCD", ROLE_THUONG, 8),
     ("Công nghệ", ROLE_THUONG, 9),
     ("Tin học", ROLE_THUONG, 10),
     ("Giáo dục thể chất", ROLE_GDTC, 11),
     ("Nội dung giáo dục của địa phương", ROLE_THUONG, 12),
     ("Hoạt động trải nghiệm, hướng nghiệp", ROLE_HDTN, 13),
-    ("Nghệ thuật (Âm nhạc)", ROLE_THUONG, 14),
-    ("Nghệ thuật (Mỹ thuật)", ROLE_THUONG, 15),
+    ("Nghệ thuật: Âm nhạc", ROLE_THUONG, 14),
+    ("Nghệ thuật: Mĩ thuật", ROLE_THUONG, 15),
     ("Chào cờ", ROLE_THUONG, 16),
     ("Sinh hoạt lớp", ROLE_THUONG, 17),
 ]
@@ -49,24 +50,38 @@ def map_subject_name(mon: Optional[str], phan_mon: Optional[str] = None) -> Opti
     m = str(mon).strip() if mon is not None else ""
     pm = str(phan_mon).strip() if phan_mon is not None else ""
 
+    # Direct match for full subject names from TÊN.docx or existing format
+    canonical_list = [
+        "Khoa học tự nhiên: Hóa học",
+        "Khoa học tự nhiên: Vật lý",
+        "Khoa học tự nhiên: Sinh học",
+        "Lịch sử và Địa lí: Địa lí",
+        "Lịch sử và Địa lí: Lịch sử",
+        "Nghệ thuật: Mĩ thuật",
+        "Nghệ thuật: Âm nhạc",
+    ]
+    for cname in canonical_list:
+        if m.lower() == cname.lower():
+            return cname
+
     # Check compound subjects
     if m in ["LS&ĐL", "Lịch sử và Địa lí", "Lịch sử và Địa lý", "LS-ĐL", "LS&DL"]:
         if "sử" in pm.lower() or "su" in pm.lower():
-            return "Lịch sử và Địa Lý (Lịch sử)"
+            return "Lịch sử và Địa lí: Lịch sử"
         if "địa" in pm.lower() or "dia" in pm.lower():
-            return "Lịch sử và Địa Lý (Địa lý)"
+            return "Lịch sử và Địa lí: Địa lí"
     if m in ["KHTN", "Khoa học tự nhiên"]:
         if any(x in pm.lower() for x in ["vật", "vat", "lí", "li", "lý", "ly"]):
-            return "Khoa học tự nhiên (Vật lý)"
+            return "Khoa học tự nhiên: Vật lý"
         if any(x in pm.lower() for x in ["hoá", "hoa", "hóa"]):
-            return "Khoa học tự nhiên (Hóa học)"
+            return "Khoa học tự nhiên: Hóa học"
         if "sinh" in pm.lower():
-            return "Khoa học tự nhiên (Sinh học)"
+            return "Khoa học tự nhiên: Sinh học"
     if m in ["NT", "Nghệ thuật"]:
         if any(x in pm.lower() for x in ["an", "ân", "âm", "nhạc", "nhac"]):
-            return "Nghệ thuật (Âm nhạc)"
+            return "Nghệ thuật: Âm nhạc"
         if any(x in pm.lower() for x in ["mt", "mỹ", "mĩ", "thuật", "thuat"]):
-            return "Nghệ thuật (Mỹ thuật)"
+            return "Nghệ thuật: Mĩ thuật"
     if any(x in m.lower() for x in ["địa phương", "dia phuong", "gdđp", "gddp"]):
         return "Nội dung giáo dục của địa phương"
     if any(x in m.lower() for x in ["hđtn", "hdtn", "hđ hn-tn", "hd hn-tn", "trải nghiệm", "trai nghiem"]):
@@ -97,6 +112,57 @@ SUBJECT_ALIASES: dict[str, list[str]] = {
     "Toán": ["Toán", "Toán học"],
     "Ngữ văn": ["Ngữ văn", "Văn"],
     "Văn": ["Văn", "Ngữ văn"],
+    # Sub-subjects aliases mapping both canonical colon format and legacy parentheses format
+    "Khoa học tự nhiên: Vật lý": [
+        "Khoa học tự nhiên: Vật lý", "Khoa học tự nhiên (Vật lý)", "Khoa học tự nhiên (Vật lí)",
+        "Khoa học tự nhiên: Vật lí", "KHTN (Vật lý)", "KHTN: Vật lý", "Vật lý", "Vật lí"
+    ],
+    "Khoa học tự nhiên (Vật lý)": [
+        "Khoa học tự nhiên (Vật lý)", "Khoa học tự nhiên: Vật lý", "Khoa học tự nhiên (Vật lí)", "Khoa học tự nhiên: Vật lí"
+    ],
+    "Khoa học tự nhiên: Hóa học": [
+        "Khoa học tự nhiên: Hóa học", "Khoa học tự nhiên (Hóa học)", "Khoa học tự nhiên (Hoá học)",
+        "Khoa học tự nhiên: Hoá học", "KHTN (Hóa học)", "KHTN: Hóa học", "Hóa học", "Hoá học"
+    ],
+    "Khoa học tự nhiên (Hóa học)": [
+        "Khoa học tự nhiên (Hóa học)", "Khoa học tự nhiên: Hóa học", "Khoa học tự nhiên (Hoá học)", "Khoa học tự nhiên: Hoá học"
+    ],
+    "Khoa học tự nhiên (Hoá học)": [
+        "Khoa học tự nhiên (Hoá học)", "Khoa học tự nhiên: Hóa học", "Khoa học tự nhiên (Hóa học)"
+    ],
+    "Khoa học tự nhiên: Sinh học": [
+        "Khoa học tự nhiên: Sinh học", "Khoa học tự nhiên (Sinh học)", "KHTN (Sinh học)", "KHTN: Sinh học", "Sinh học"
+    ],
+    "Khoa học tự nhiên (Sinh học)": [
+        "Khoa học tự nhiên (Sinh học)", "Khoa học tự nhiên: Sinh học"
+    ],
+    "Lịch sử và Địa lí: Lịch sử": [
+        "Lịch sử và Địa lí: Lịch sử", "Lịch sử và Địa Lý (Lịch sử)", "Lịch sử và Địa lí (Lịch sử)",
+        "LS&ĐL (Lịch sử)", "LS&ĐL: Lịch sử", "Lịch sử", "Sử"
+    ],
+    "Lịch sử và Địa Lý (Lịch sử)": [
+        "Lịch sử và Địa Lý (Lịch sử)", "Lịch sử và Địa lí: Lịch sử"
+    ],
+    "Lịch sử và Địa lí: Địa lí": [
+        "Lịch sử và Địa lí: Địa lí", "Lịch sử và Địa Lý (Địa lý)", "Lịch sử và Địa lí (Địa lí)",
+        "Lịch sử và Địa lí: Địa lý", "LS&ĐL (Địa lý)", "LS&ĐL: Địa lí", "Địa lí", "Địa lý", "Địa"
+    ],
+    "Lịch sử và Địa Lý (Địa lý)": [
+        "Lịch sử và Địa Lý (Địa lý)", "Lịch sử và Địa lí: Địa lí"
+    ],
+    "Nghệ thuật: Âm nhạc": [
+        "Nghệ thuật: Âm nhạc", "Nghệ thuật (Âm nhạc)", "NT (Âm nhạc)", "NT: Âm nhạc", "Âm nhạc", "Nhạc", "AN"
+    ],
+    "Nghệ thuật (Âm nhạc)": [
+        "Nghệ thuật (Âm nhạc)", "Nghệ thuật: Âm nhạc"
+    ],
+    "Nghệ thuật: Mĩ thuật": [
+        "Nghệ thuật: Mĩ thuật", "Nghệ thuật (Mỹ thuật)", "Nghệ thuật (Mĩ thuật)", "Nghệ thuật: Mỹ thuật",
+        "NT (Mỹ thuật)", "NT: Mĩ thuật", "Mĩ thuật", "Mỹ thuật", "MT"
+    ],
+    "Nghệ thuật (Mỹ thuật)": [
+        "Nghệ thuật (Mỹ thuật)", "Nghệ thuật: Mĩ thuật", "Nghệ thuật (Mĩ thuật)"
+    ],
 }
 
 

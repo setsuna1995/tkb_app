@@ -38,6 +38,22 @@ render_page_header(
     icon="🏫",
 )
 
+school_name = repo.get_meta(conn, "school_name") or school_slug
+col_sch1, col_sch2, col_sch3 = st.columns([3, 1, 1])
+with col_sch1:
+    st.markdown(f"🏫 **Trường đang làm việc:** `{school_name}`")
+with col_sch2:
+    if st.button("➕ Thêm trường mới", key="home_btn_add_school", use_container_width=True):
+        st.session_state["explicit_school_switch"] = True
+        st.session_state.pop("school_slug", None)
+        st.rerun()
+with col_sch3:
+    if st.button("🔄 Đổi trường", key="home_btn_switch_school", use_container_width=True):
+        st.session_state["explicit_school_switch"] = True
+        st.session_state.pop("school_slug", None)
+        st.rerun()
+st.markdown("---")
+
 assignments = repo.get_assignments(conn)
 ppw = repo.get_periods_per_week(conn)
 
