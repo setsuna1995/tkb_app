@@ -40,10 +40,15 @@ from core.scheduler.quality import (
     _count_teacher_missing_mandatory_mornings, _count_teacher_split_sessions,
     _teacher_quality_penalty,
 )
+from core.scheduler.refinement import (
+    compute_candidate_metrics, validate_and_swap_slots,
+)
 from core.scheduler.engine import run
 
 __all__ = [
     "run",
+    "compute_candidate_metrics",
+    "validate_and_swap_slots",
     "_State",
     "_feasible",
     "_put_at",

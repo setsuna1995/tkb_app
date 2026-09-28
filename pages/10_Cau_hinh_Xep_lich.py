@@ -1,8 +1,4 @@
 import streamlit as st
-import importlib
-import core.models
-if not hasattr(core.models.SchedulingConfig, "teacher_off_sessions_mode"):
-    importlib.reload(core.models)
 
 from core import frame as frame_mod
 from core.models import (
