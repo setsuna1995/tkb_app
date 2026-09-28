@@ -189,6 +189,9 @@ def get_scheduling_config(conn: sqlite3.Connection) -> SchedulingConfig:
         teacher_off_sessions_per_week=int(
             get_meta(conn, "sched_teacher_off_sessions_per_week") or default.teacher_off_sessions_per_week
         ),
+        teacher_off_sessions_mode=str(
+            get_meta(conn, "sched_teacher_off_sessions_mode") or default.teacher_off_sessions_mode
+        ),
         forbidden_off_cells=_parse_off_cells(forbidden_raw) if forbidden_raw else default.forbidden_off_cells,
         reserved_off_weekdays_chieu=(
             _parse_weekday_tuple(reserved_raw) if reserved_raw else default.reserved_off_weekdays_chieu
@@ -331,6 +334,7 @@ def set_scheduling_config(conn: sqlite3.Connection, config: SchedulingConfig) ->
     set_meta(conn, "sched_max_heavy_consecutive", str(config.max_heavy_consecutive))
     set_meta(conn, "sched_max_periods_per_session", str(config.max_periods_per_session))
     set_meta(conn, "sched_teacher_off_sessions_per_week", str(config.teacher_off_sessions_per_week))
+    set_meta(conn, "sched_teacher_off_sessions_mode", str(config.teacher_off_sessions_mode))
     set_meta(conn, "sched_forbidden_off_cells", _format_off_cells(config.forbidden_off_cells))
     set_meta(conn, "sched_reserved_off_weekdays_chieu", _format_weekday_tuple(config.reserved_off_weekdays_chieu))
     set_meta(conn, "sched_heavy_subject_priority_periods", str(config.heavy_subject_priority_periods))

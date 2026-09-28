@@ -45,18 +45,33 @@ with tab_classes:
     if st.button("💾 Lưu danh sách lớp", type="primary", key="btn_save_classes"):
         existing_ids = {c.class_id for c in classes}
         kept_ids = set()
+        class_rows = []
+        names_seen = set()
+        dup_names = set()
         for _, row in edited_classes.iterrows():
             name = str(row["Tên lớp"] or "").strip()
             if not name:
                 continue
+            if name.lower() in names_seen:
+                dup_names.add(name)
+            names_seen.add(name.lower())
             cid = row.get("class_id")
             cid = int(cid) if pd.notna(cid) else None
-            new_id = repo.upsert_class(conn, name, int(row.get("Thứ tự") or 0), class_id=cid)
-            kept_ids.add(new_id)
-        for cid in existing_ids - kept_ids:
-            repo.delete_class(conn, cid)
-        st.success("✅ Đã lưu danh sách lớp học thành công.")
-        st.rerun()
+            class_rows.append((name, int(row.get("Thứ tự") or 0), cid))
+
+        if dup_names:
+            st.error(f"❌ Tên lớp bị trùng lặp: {', '.join(sorted(dup_names))}. Vui lòng đặt tên phân biệt cho từng lớp.")
+        else:
+            try:
+                for name, sort_order, cid in class_rows:
+                    new_id = repo.upsert_class(conn, name, sort_order, class_id=cid)
+                    kept_ids.add(new_id)
+                for cid in existing_ids - kept_ids:
+                    repo.delete_class(conn, cid)
+                st.success("✅ Đã lưu danh sách lớp học thành công.")
+                st.rerun()
+            except Exception as e:
+                st.error(f"❌ Không thể lưu danh sách lớp: {e}")
 
 with tab_subjects:
     st.markdown("#### 📚 Danh mục Môn học & Phân loại Sư phạm")
@@ -76,19 +91,34 @@ with tab_subjects:
     if st.button("💾 Lưu danh sách môn", type="primary", key="btn_save_subjects"):
         existing_ids = {s.subject_id for s in subjects}
         kept_ids = set()
+        subject_rows = []
+        names_seen = set()
+        dup_names = set()
         for _, row in edited_subjects.iterrows():
             name = str(row["Tên môn"] or "").strip()
             if not name:
                 continue
+            if name.lower() in names_seen:
+                dup_names.add(name)
+            names_seen.add(name.lower())
             sid = row.get("subject_id")
             sid = int(sid) if pd.notna(sid) else None
             role_code = ROLE_LABEL_TO_CODE.get(str(row["Vai trò"]), 0)
-            new_id = repo.upsert_subject(conn, name, role_code, int(row.get("Thứ tự") or 0), subject_id=sid)
-            kept_ids.add(new_id)
-        for sid in existing_ids - kept_ids:
-            repo.delete_subject(conn, sid)
-        st.success("✅ Đã lưu danh sách môn học thành công.")
-        st.rerun()
+            subject_rows.append((name, role_code, int(row.get("Thứ tự") or 0), sid))
+
+        if dup_names:
+            st.error(f"❌ Tên môn học bị trùng lặp: {', '.join(sorted(dup_names))}. Vui lòng kiểm tra lại.")
+        else:
+            try:
+                for name, role_code, sort_order, sid in subject_rows:
+                    new_id = repo.upsert_subject(conn, name, role_code, sort_order, subject_id=sid)
+                    kept_ids.add(new_id)
+                for sid in existing_ids - kept_ids:
+                    repo.delete_subject(conn, sid)
+                st.success("✅ Đã lưu danh sách môn học thành công.")
+                st.rerun()
+            except Exception as e:
+                st.error(f"❌ Không thể lưu danh sách môn: {e}")
 
 with tab_teachers:
     st.markdown("#### 👨‍🏫 Danh sách Giáo viên & Ngoại lệ Xếp lịch")
@@ -122,10 +152,14 @@ with tab_teachers:
         weekday_name_to_num = {WEEKDAY_NAMES[wd]: wd for wd in WEEKDAYS}
         errors = []
         to_save = []
+        teacher_names_seen = set()
         for _, row in edited_teachers.iterrows():
             name = str(row["Tên GV"] or "").strip()
             if not name:
                 continue
+            if name.lower() in teacher_names_seen:
+                errors.append(f"Tên giáo viên '{name}' bị trùng lặp. Mỗi giáo viên cần có tên phân biệt.")
+            teacher_names_seen.add(name.lower())
             tid = row.get("teacher_id")
             tid = int(tid) if pd.notna(tid) else None
             must_monday = bool(row["Đi T2"])
@@ -158,20 +192,23 @@ with tab_teachers:
             for e in errors:
                 render_callout(e, level="danger", title="Lỗi cấu hình giáo viên")
         else:
-            existing_ids = {t.teacher_id for t in teachers}
-            kept_ids = set()
-            for tid, name, role, must_monday, is_gvcn, off_override, full_day_off, afternoon_off in to_save:
-                new_id = repo.upsert_teacher(
-                    conn, name, role, must_monday, is_gvcn, teacher_id=tid,
-                    off_sessions_override=off_override,
-                    pinned_full_day_off=full_day_off,
-                    pinned_afternoon_off=afternoon_off,
-                )
-                kept_ids.add(new_id)
-            for tid in existing_ids - kept_ids:
-                repo.delete_teacher(conn, tid)
-            st.success("✅ Đã lưu danh sách giáo viên thành công.")
-            st.rerun()
+            try:
+                existing_ids = {t.teacher_id for t in teachers}
+                kept_ids = set()
+                for tid, name, role, must_monday, is_gvcn, off_override, full_day_off, afternoon_off in to_save:
+                    new_id = repo.upsert_teacher(
+                        conn, name, role, must_monday, is_gvcn, teacher_id=tid,
+                        off_sessions_override=off_override,
+                        pinned_full_day_off=full_day_off,
+                        pinned_afternoon_off=afternoon_off,
+                    )
+                    kept_ids.add(new_id)
+                for tid in existing_ids - kept_ids:
+                    repo.delete_teacher(conn, tid)
+                st.success("✅ Đã lưu danh sách giáo viên thành công.")
+                st.rerun()
+            except Exception as e:
+                st.error(f"❌ Không thể lưu danh sách giáo viên: {e}")
 
 sidebar_backup_export(conn)
 sidebar_fixed_rules(conn)

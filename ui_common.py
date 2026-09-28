@@ -59,7 +59,7 @@ def sidebar_fixed_rules(conn) -> None:
         f"Môn nặng (Toán/Lý/Hoá) tối đa {config.max_heavy_consecutive} tiết liên tiếp trong 1 buổi",
         f"Thể dục chỉ xếp tiết {', '.join(str(p) for p in config.gdtc_morning_allowed_periods)} sáng và tiết {', '.join(str(p) for p in config.gdtc_afternoon_allowed_periods)} chiều",
         f"Chào cờ Thứ {config.chao_co_weekday} Tiết {config.chao_co_period}",
-        f"Mỗi giáo viên được xếp đúng {config.teacher_off_sessions_per_week} buổi nghỉ/tuần",
+        f"Mỗi giáo viên được xếp {config.teacher_off_sessions_per_week} buổi nghỉ/tuần ({'bắt buộc tuyệt đối' if getattr(config, 'teacher_off_sessions_mode', 'soft') == 'hard' else 'ưu tiên cao'})",
         f"Mỗi giáo viên tối đa {config.max_periods_per_session} tiết/buổi",
         "Buổi/ngày không được chọn làm buổi nghỉ GV: "
         + ", ".join(f"Thứ {wd} {'sáng' if s == 'S' else 'chiều'}"
@@ -172,9 +172,13 @@ def list_schools() -> list:
     schools = []
     for p in sorted(SCHOOLS_DIR.glob("*.db")):
         slug = p.stem
-        connection = db.get_connection(str(p))
-        db.init_db(connection)
-        name = repo.get_meta(connection, "school_name") or slug
+        conn = db.get_connection(str(p))
+        try:
+            name = repo.get_meta(conn, "school_name") or slug
+        except Exception:
+            name = slug
+        finally:
+            conn.close()
         schools.append({"slug": slug, "name": name})
     return schools
 
@@ -185,9 +189,12 @@ def create_school(name: str) -> str:
     if path.exists():
         raise ValueError(f"Trường '{name}' đã tồn tại.")
     connection = db.get_connection(str(path))
-    db.init_db(connection)
-    from data import repository as repo
-    repo.set_meta(connection, "school_name", name)
+    try:
+        db.init_db(connection)
+        from data import repository as repo
+        repo.set_meta(connection, "school_name", name)
+    finally:
+        connection.close()
     return slug
 
 
@@ -267,6 +274,26 @@ def sidebar_school_switcher() -> None:
         if selected_slug != current_slug:
             st.session_state["school_slug"] = selected_slug
             st.session_state.pop("explicit_school_switch", None)
+            st.rerun()
+
+        with st.expander("➕ Thêm trường mới"):
+            new_name = st.text_input("Tên trường mới", key="sidebar_new_school_name")
+            if st.button("Tạo trường", type="primary", key="sidebar_btn_create_school", use_container_width=True):
+                if new_name.strip():
+                    try:
+                        new_slug = create_school(new_name.strip())
+                        st.session_state["school_slug"] = new_slug
+                        st.session_state.pop("explicit_school_switch", None)
+                        st.success(f"Đã tạo trường '{new_name.strip()}'!")
+                        st.rerun()
+                    except Exception as e:
+                        st.error(f"Lỗi: {e}")
+                else:
+                    st.warning("Vui lòng nhập tên trường.")
+
+        if st.button("🔄 Quản lý / Chọn lại trường", key="sidebar_btn_switch_school", use_container_width=True):
+            st.session_state.pop("school_slug", None)
+            st.session_state["explicit_school_switch"] = True
             st.rerun()
 
 

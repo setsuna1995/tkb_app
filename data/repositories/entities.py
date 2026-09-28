@@ -19,6 +19,9 @@ def get_class_by_name(conn: sqlite3.Connection, name: str) -> Optional[int]:
 
 
 def upsert_class(conn: sqlite3.Connection, name: str, sort_order: int = 0, class_id: Optional[int] = None) -> int:
+    name = name.strip()
+    if class_id is None:
+        class_id = get_class_by_name(conn, name)
     if class_id is not None:
         conn.execute("UPDATE classes SET name=?, sort_order=? WHERE class_id=?", (name, sort_order, class_id))
         conn.commit()
@@ -47,6 +50,9 @@ def get_subject_by_name(conn: sqlite3.Connection, name: str) -> Optional[int]:
 
 def upsert_subject(conn: sqlite3.Connection, name: str, role_code: int = 0, sort_order: int = 0,
                    subject_id: Optional[int] = None) -> int:
+    name = name.strip()
+    if subject_id is None:
+        subject_id = get_subject_by_name(conn, name)
     if subject_id is not None:
         conn.execute(
             "UPDATE subjects SET name=?, role_code=?, sort_order=? WHERE subject_id=?",
@@ -83,10 +89,18 @@ def list_teachers(conn: sqlite3.Connection) -> list[Teacher]:
     ) for r in rows]
 
 
+def get_teacher_by_name(conn: sqlite3.Connection, name: str) -> Optional[int]:
+    row = conn.execute("SELECT teacher_id FROM teachers WHERE name=?", (name,)).fetchone()
+    return row["teacher_id"] if row else None
+
+
 def upsert_teacher(conn: sqlite3.Connection, name: str, role: str = "", must_monday: bool = False,
                     is_gvcn: bool = False, teacher_id: Optional[int] = None,
                     off_sessions_override=_KEEP, pinned_full_day_off=_KEEP, pinned_afternoon_off=_KEEP,
                     reduction_override=_KEEP) -> int:
+    name = name.strip()
+    if teacher_id is None:
+        teacher_id = get_teacher_by_name(conn, name)
     cols = {row["name"] for row in conn.execute("PRAGMA table_info(teachers)")}
     if "reduction_override" not in cols:
         conn.execute("ALTER TABLE teachers ADD COLUMN reduction_override INTEGER")
@@ -119,11 +133,6 @@ def upsert_teacher(conn: sqlite3.Connection, name: str, role: str = "", must_mon
     )
     conn.commit()
     return cur.lastrowid
-
-
-def get_teacher_by_name(conn: sqlite3.Connection, name: str) -> Optional[int]:
-    row = conn.execute("SELECT teacher_id FROM teachers WHERE name=?", (name,)).fetchone()
-    return row["teacher_id"] if row else None
 
 
 def delete_teacher(conn: sqlite3.Connection, teacher_id: int) -> None:
