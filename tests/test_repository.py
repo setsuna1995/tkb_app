@@ -139,6 +139,24 @@ def test_get_scheduling_config_reads_raw_zero_string_saved_via_set_meta(conn):
     assert loaded.min_weekly_periods_for_lone_penalty == 0
 
 
+def test_get_scheduling_config_resilient_to_empty_string_and_invalid_metadata(conn):
+    """Regression test: empty string or 'auto' stored in boolean/integer metadata
+    must safely fall back to defaults rather than crashing with ValueError."""
+    repo.set_meta(conn, "sched_use_cpsat", "")
+    repo.set_meta(conn, "sched_avoid_teacher_gaps", "auto")
+    repo.set_meta(conn, "sched_max_teacher_periods_per_day", "")
+    repo.set_meta(conn, "sched_cpsat_workers", "invalid")
+    repo.set_meta(conn, "sched_hdtn_period2_afternoon", "true")
+    repo.set_meta(conn, "sched_avoid_heavy_afternoon_period3", "false")
+    loaded = repo.get_scheduling_config(conn)
+    assert loaded.use_cpsat is True  # default
+    assert loaded.avoid_teacher_gaps is True  # default
+    assert loaded.max_teacher_periods_per_day == 5  # default
+    assert loaded.cpsat_workers == 0  # default
+    assert loaded.hdtn_period2_afternoon is True  # parsed from "true"
+    assert loaded.avoid_heavy_afternoon_period3 is False  # parsed from "false"
+
+
 def test_upsert_and_list_teacher_round_trips_off_override_and_pins(conn):
     tid = repo.upsert_teacher(
         conn, "GV The duc", role="", must_monday=False, is_gvcn=False,

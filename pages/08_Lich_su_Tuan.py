@@ -48,7 +48,7 @@ if history:
     if "parity" in history_df.columns:
         history_df = history_df.drop(columns=["parity"])
     history_df = history_df.rename(columns={"week_no": "Tuần", "seed": "Seed", "created_at": "Thời điểm tạo"})
-    st.dataframe(history_df, hide_index=True, use_container_width=True)
+    st.dataframe(history_df, hide_index=True, width="stretch")
 
     c_act1, c_act2 = st.columns(2)
     with c_act1:

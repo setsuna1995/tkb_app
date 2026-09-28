@@ -199,7 +199,7 @@ with tab_schedule:
                     mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
                     key=f"btn_quick_export_top_{chosen_week}",
                     type="primary",
-                    use_container_width=True,
+                    width="stretch",
                 )
             except Exception:
                 pass
@@ -542,7 +542,7 @@ with tab_schedule:
                         "🎲 Thử phương án khác (Đổi Seed)",
                         key="btn_cand_seed",
                         help="Đổi số ngẫu nhiên (Seed) để thuật toán khám phá cách xếp mới hoàn toàn nhưng vẫn đúng 100% quy chuẩn.",
-                        use_container_width=True,
+                        width="stretch",
                     ):
                         new_seed = random.randint(100, 99999)
                         new_id = len(st.session_state["candidates"]) + 1
@@ -571,7 +571,7 @@ with tab_schedule:
                         "⏱️ Giải sâu hơn (+30s Time Limit)",
                         key="btn_cand_deep",
                         help="Tăng thời gian chạy CP-SAT để máy tính suy nghĩ kỹ hơn, giúp triệt tiêu các tiết trống/lủng của giáo viên.",
-                        use_container_width=True,
+                        width="stretch",
                     ):
                         active_cand = st.session_state["candidates"].get(st.session_state.get("active_candidate_id", 1))
                         cur_tl = active_cand["time_limit"] if active_cand else 45
@@ -632,7 +632,7 @@ with tab_schedule:
                     with c_pick_col2:
                         st.write("")
                         st.write("")
-                        if st.button("👉 Xem & Kích hoạt", key="btn_apply_cand", use_container_width=True):
+                        if st.button("👉 Xem & Kích hoạt", key="btn_apply_cand", width="stretch"):
                             st.session_state["active_candidate_id"] = chosen_cand_id
                             selected_c = next(c for c in cand_items if c["id"] == chosen_cand_id)
                             st.session_state["last_result"] = selected_c["result"]

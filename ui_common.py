@@ -254,7 +254,7 @@ def require_school() -> str:
             pick = st.selectbox("Chọn trường đang có:", schools, format_func=lambda s: s["name"], key="school_pick")
         with col_s2:
             st.markdown("<div style='height: 28px;'></div>", unsafe_allow_html=True)
-            if st.button("Vào trường này", type="primary", use_container_width=True):
+            if st.button("Vào trường này", type="primary", width="stretch"):
                 st.session_state["school_slug"] = pick["slug"]
                 st.session_state.pop("explicit_school_switch", None)
                 st.rerun()
@@ -267,7 +267,7 @@ def require_school() -> str:
         new_name = st.text_input("Tên trường mới", placeholder="Ví dụ: THCS Lê Quý Đôn", key="new_school_name")
     with col_c2:
         st.markdown("<div style='height: 28px;'></div>", unsafe_allow_html=True)
-        if st.button("➕ Tạo trường", type="primary", key="btn_create_school_direct", use_container_width=True):
+        if st.button("➕ Tạo trường", type="primary", key="btn_create_school_direct", width="stretch"):
             if new_name.strip():
                 try:
                     new_slug = create_school(new_name.strip())
@@ -310,10 +310,10 @@ def sidebar_school_switcher() -> None:
 
         col_act1, col_act2 = st.columns([1, 1])
         with col_act1:
-            if st.button("➕ Thêm trường", key="sidebar_btn_add_school_toggle", use_container_width=True):
+            if st.button("➕ Thêm trường", key="sidebar_btn_add_school_toggle", width="stretch"):
                 st.session_state["sidebar_show_add_school"] = not st.session_state.get("sidebar_show_add_school", False)
         with col_act2:
-            if st.button("🔄 Đổi trường", key="sidebar_btn_switch_school", use_container_width=True):
+            if st.button("🔄 Đổi trường", key="sidebar_btn_switch_school", width="stretch"):
                 st.session_state.pop("school_slug", None)
                 st.session_state["explicit_school_switch"] = True
                 st.rerun()
@@ -322,7 +322,7 @@ def sidebar_school_switcher() -> None:
             with st.container():
                 st.caption("Nhập tên trường học mới cần khởi tạo:")
                 new_name = st.text_input("Tên trường mới", placeholder="Ví dụ: THCS Trần Phú", key="sidebar_new_school_name")
-                if st.button("🚀 Tạo trường", type="primary", key="sidebar_btn_create_school", use_container_width=True):
+                if st.button("🚀 Tạo trường", type="primary", key="sidebar_btn_create_school", width="stretch"):
                     if new_name.strip():
                         try:
                             new_slug = create_school(new_name.strip())
@@ -368,7 +368,7 @@ def sidebar_backup_export(conn) -> None:
                 "📥 Xuất Excel (sao lưu)", data=data, file_name="TKB_sao_luu.xlsx",
                 mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
                 key="sidebar_backup_export",
-                use_container_width=True,
+                width="stretch",
             )
             if clicked:
                 repo.set_meta(conn, "last_exported_at", datetime.now().strftime("%d/%m/%Y %H:%M"))

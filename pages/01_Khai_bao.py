@@ -39,7 +39,7 @@ with tab_classes:
     df_classes = pd.DataFrame([{"class_id": c.class_id, "Tên lớp": c.name, "Thứ tự": c.sort_order} for c in classes])
     edited_classes = st.data_editor(
         df_classes, num_rows="dynamic", key="editor_classes", hide_index=True,
-        use_container_width=True,
+        width="stretch",
         column_config={"class_id": None},
     )
     if st.button("💾 Lưu danh sách lớp", type="primary", key="btn_save_classes"):
@@ -82,7 +82,7 @@ with tab_subjects:
     } for s in subjects])
     edited_subjects = st.data_editor(
         df_subjects, num_rows="dynamic", key="editor_subjects", hide_index=True,
-        use_container_width=True,
+        width="stretch",
         column_config={
             "subject_id": None,
             "Vai trò": st.column_config.SelectboxColumn(options=list(ROLE_CODE_LABELS.values())),
@@ -134,7 +134,7 @@ with tab_teachers:
     } for t in teachers])
     edited_teachers = st.data_editor(
         df_teachers, num_rows="dynamic", key="editor_teachers", hide_index=True,
-        use_container_width=True,
+        width="stretch",
         column_config={
             "teacher_id": None,
             "Chức vụ": st.column_config.TextColumn(help="Nhập chức vụ / nhiệm vụ (ví dụ: GVCN, Tổ trưởng, Thư ký, TPT...)"),

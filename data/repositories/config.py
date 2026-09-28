@@ -3,7 +3,7 @@ from __future__ import annotations
 
 import sqlite3
 from datetime import datetime, timezone
-from typing import Optional
+from typing import Optional, Any
 from core.models import SchedulingConfig
 
 
@@ -62,13 +62,45 @@ def clear_seed_history(conn: sqlite3.Connection) -> None:
     conn.commit()
 
 
-def _parse_off_cells(raw: str) -> frozenset:
+def _parse_bool(raw: Any, default: bool) -> bool:
+    if raw is None:
+        return default
+    if isinstance(raw, bool):
+        return raw
+    s = str(raw).strip().lower()
+    if not s:
+        return default
+    if s in ("1", "true", "t", "yes", "y", "on"):
+        return True
+    if s in ("0", "false", "f", "no", "n", "off"):
+        return False
+    return default
+
+
+def _parse_int(raw: Any, default: Any = None) -> Any:
+    if raw is None:
+        return default
+    if isinstance(raw, int) and not isinstance(raw, bool):
+        return raw
+    s = str(raw).strip()
+    if not s:
+        return default
+    try:
+        return int(s)
+    except (ValueError, TypeError):
+        return default
+
+
+def _parse_off_cells(raw: Any) -> frozenset:
+    if not raw:
+        return frozenset()
     cells = set()
-    for token in raw.split(","):
+    for token in str(raw).split(","):
         token = token.strip()
         if not token:
             continue
-        cells.add((int(token[:-1]), token[-1]))
+        if len(token) >= 2 and token[:-1].isdigit() and token[-1] in ("S", "C"):
+            cells.add((int(token[:-1]), token[-1]))
     return frozenset(cells)
 
 
@@ -76,26 +108,40 @@ def _format_off_cells(cells) -> str:
     return ",".join(f"{wd}{session}" for wd, session in sorted(cells))
 
 
-def _parse_weekday_tuple(raw: str) -> tuple:
-    return tuple(int(x) for x in raw.split(",") if x.strip())
+def _parse_weekday_tuple(raw: Any) -> tuple:
+    if not raw:
+        return ()
+    wds = []
+    for x in str(raw).split(","):
+        s = x.strip()
+        if s.isdigit():
+            wds.append(int(s))
+    return tuple(wds)
 
 
 def _format_weekday_tuple(weekdays) -> str:
     return ",".join(str(wd) for wd in weekdays)
 
 
-def _parse_id_set(raw: str) -> frozenset:
-    return frozenset(int(x) for x in raw.split(",") if x.strip())
+def _parse_id_set(raw: Any) -> frozenset:
+    if not raw:
+        return frozenset()
+    ids = set()
+    for x in str(raw).split(","):
+        s = x.strip()
+        if s.isdigit():
+            ids.add(int(s))
+    return frozenset(ids)
 
 
 def _format_id_set(ids) -> str:
     return ",".join(str(i) for i in sorted(ids))
 
 
-def _parse_period_tuple(raw: str) -> tuple:
+def _parse_period_tuple(raw: Any) -> tuple:
     if not raw:
         return ()
-    return tuple(int(x) for x in raw.split(",") if x.strip() and x.strip().isdigit())
+    return tuple(int(x) for x in str(raw).split(",") if x.strip().isdigit())
 
 
 def _format_period_tuple(periods) -> str:
@@ -124,7 +170,9 @@ def get_scheduling_config(conn: sqlite3.Connection) -> SchedulingConfig:
     gdtc_afternoon_raw = get_meta(conn, "sched_gdtc_afternoon_allowed_periods")
     gvcn_p2_exempt_raw = get_meta(conn, "sched_gvcn_monday_period2_exempt_class_ids")
     return SchedulingConfig(
-        gdtc_avoid_period=int(get_meta(conn, "sched_gdtc_avoid_period") or default.gdtc_avoid_period),
+        gdtc_avoid_period=_parse_int(
+            get_meta(conn, "sched_gdtc_avoid_period"), default.gdtc_avoid_period
+        ),
         gdtc_morning_allowed_periods=(
             _parse_period_tuple(gdtc_morning_raw) if gdtc_morning_raw is not None
             else default.gdtc_morning_allowed_periods
@@ -133,61 +181,63 @@ def get_scheduling_config(conn: sqlite3.Connection) -> SchedulingConfig:
             _parse_period_tuple(gdtc_afternoon_raw) if gdtc_afternoon_raw is not None
             else default.gdtc_afternoon_allowed_periods
         ),
-        chao_co_weekday=int(get_meta(conn, "sched_hdtn_p1_weekday") or get_meta(conn, "sched_chao_co_weekday") or default.chao_co_weekday),
-        chao_co_period=int(get_meta(conn, "sched_hdtn_p1_period") or get_meta(conn, "sched_chao_co_period") or default.chao_co_period),
+        chao_co_weekday=_parse_int(
+            get_meta(conn, "sched_hdtn_p1_weekday") or get_meta(conn, "sched_chao_co_weekday"),
+            default.chao_co_weekday,
+        ),
+        chao_co_period=_parse_int(
+            get_meta(conn, "sched_hdtn_p1_period") or get_meta(conn, "sched_chao_co_period"),
+            default.chao_co_period,
+        ),
         chao_co_session=str(get_meta(conn, "sched_hdtn_p1_session") or default.chao_co_session),
-        hdtn_p1_weekday=int(get_meta(conn, "sched_hdtn_p1_weekday") or get_meta(conn, "sched_chao_co_weekday") or default.hdtn_p1_weekday),
+        hdtn_p1_weekday=_parse_int(
+            get_meta(conn, "sched_hdtn_p1_weekday") or get_meta(conn, "sched_chao_co_weekday"),
+            default.hdtn_p1_weekday,
+        ),
         hdtn_p1_session=str(get_meta(conn, "sched_hdtn_p1_session") or default.hdtn_p1_session),
-        hdtn_p1_period=int(get_meta(conn, "sched_hdtn_p1_period") or get_meta(conn, "sched_chao_co_period") or default.hdtn_p1_period),
-        hdtn_p2_weekday=(
-            int(get_meta(conn, "sched_hdtn_p2_weekday"))
-            if get_meta(conn, "sched_hdtn_p2_weekday") is not None and str(get_meta(conn, "sched_hdtn_p2_weekday")).strip() != ""
-            else default.hdtn_p2_weekday
+        hdtn_p1_period=_parse_int(
+            get_meta(conn, "sched_hdtn_p1_period") or get_meta(conn, "sched_chao_co_period"),
+            default.hdtn_p1_period,
+        ),
+        hdtn_p2_weekday=_parse_int(
+            get_meta(conn, "sched_hdtn_p2_weekday"), default.hdtn_p2_weekday
         ),
         hdtn_p2_session=(
             str(get_meta(conn, "sched_hdtn_p2_session"))
             if get_meta(conn, "sched_hdtn_p2_session") is not None and str(get_meta(conn, "sched_hdtn_p2_session")).strip() != ""
             else default.hdtn_p2_session
         ),
-        hdtn_p2_period=(
-            int(get_meta(conn, "sched_hdtn_p2_period"))
-            if get_meta(conn, "sched_hdtn_p2_period") is not None and str(get_meta(conn, "sched_hdtn_p2_period")).strip() != ""
-            else default.hdtn_p2_period
+        hdtn_p2_period=_parse_int(
+            get_meta(conn, "sched_hdtn_p2_period"), default.hdtn_p2_period
         ),
-        hdtn_p3_weekday=(
-            int(get_meta(conn, "sched_hdtn_p3_weekday"))
-            if get_meta(conn, "sched_hdtn_p3_weekday") is not None and str(get_meta(conn, "sched_hdtn_p3_weekday")).strip() != ""
-            else default.hdtn_p3_weekday
+        hdtn_p3_weekday=_parse_int(
+            get_meta(conn, "sched_hdtn_p3_weekday"), default.hdtn_p3_weekday
         ),
         hdtn_p3_session=(
             str(get_meta(conn, "sched_hdtn_p3_session"))
             if get_meta(conn, "sched_hdtn_p3_session") is not None and str(get_meta(conn, "sched_hdtn_p3_session")).strip() != ""
             else default.hdtn_p3_session
         ),
-        hdtn_p3_period=(
-            int(get_meta(conn, "sched_hdtn_p3_period"))
-            if get_meta(conn, "sched_hdtn_p3_period") is not None and str(get_meta(conn, "sched_hdtn_p3_period")).strip() != ""
-            else default.hdtn_p3_period
+        hdtn_p3_period=_parse_int(
+            get_meta(conn, "sched_hdtn_p3_period"), default.hdtn_p3_period
         ),
         hdtn_mode=str(get_meta(conn, "sched_hdtn_mode") or default.hdtn_mode),
         hdtn_thematic_mode=str(get_meta(conn, "sched_hdtn_thematic_mode") or default.hdtn_thematic_mode),
-        hdtn_thematic_weekday=(
-            int(get_meta(conn, "sched_hdtn_thematic_weekday"))
-            if get_meta(conn, "sched_hdtn_thematic_weekday") is not None and str(get_meta(conn, "sched_hdtn_thematic_weekday")).strip() != ""
-            else default.hdtn_thematic_weekday
+        hdtn_thematic_weekday=_parse_int(
+            get_meta(conn, "sched_hdtn_thematic_weekday"), default.hdtn_thematic_weekday
         ),
         hdtn_thematic_session=str(get_meta(conn, "sched_hdtn_thematic_session") or default.hdtn_thematic_session),
-        hdtn_thematic_start_period=(
-            int(get_meta(conn, "sched_hdtn_thematic_start_period"))
-            if get_meta(conn, "sched_hdtn_thematic_start_period") is not None and str(get_meta(conn, "sched_hdtn_thematic_start_period")).strip() != ""
-            else default.hdtn_thematic_start_period
+        hdtn_thematic_start_period=_parse_int(
+            get_meta(conn, "sched_hdtn_thematic_start_period"), default.hdtn_thematic_start_period
         ),
-        max_heavy_consecutive=int(get_meta(conn, "sched_max_heavy_consecutive") or default.max_heavy_consecutive),
-        max_periods_per_session=int(
-            get_meta(conn, "sched_max_periods_per_session") or default.max_periods_per_session
+        max_heavy_consecutive=_parse_int(
+            get_meta(conn, "sched_max_heavy_consecutive"), default.max_heavy_consecutive
         ),
-        teacher_off_sessions_per_week=int(
-            get_meta(conn, "sched_teacher_off_sessions_per_week") or default.teacher_off_sessions_per_week
+        max_periods_per_session=_parse_int(
+            get_meta(conn, "sched_max_periods_per_session"), default.max_periods_per_session
+        ),
+        teacher_off_sessions_per_week=_parse_int(
+            get_meta(conn, "sched_teacher_off_sessions_per_week"), default.teacher_off_sessions_per_week
         ),
         teacher_off_sessions_mode=str(
             get_meta(conn, "sched_teacher_off_sessions_mode") or default.teacher_off_sessions_mode
@@ -196,23 +246,22 @@ def get_scheduling_config(conn: sqlite3.Connection) -> SchedulingConfig:
         reserved_off_weekdays_chieu=(
             _parse_weekday_tuple(reserved_raw) if reserved_raw else default.reserved_off_weekdays_chieu
         ),
-        heavy_subject_priority_periods=(
-            int(get_meta(conn, "sched_heavy_subject_priority_periods"))
-            if get_meta(conn, "sched_heavy_subject_priority_periods") is not None
-            else default.heavy_subject_priority_periods
+        heavy_subject_priority_periods=_parse_int(
+            get_meta(conn, "sched_heavy_subject_priority_periods"), default.heavy_subject_priority_periods
         ),
         afternoon_preferred_subject_ids=(
             _parse_id_set(afternoon_preferred_raw) if afternoon_preferred_raw
             else default.afternoon_preferred_subject_ids
         ),
-        heavy_subjects_morning_only=bool(int(get_meta(conn, "sched_heavy_subjects_morning_only") or 0)),
+        heavy_subjects_morning_only=_parse_bool(
+            get_meta(conn, "sched_heavy_subjects_morning_only"), default.heavy_subjects_morning_only
+        ),
         strict_morning_weekdays=(
             _parse_weekday_tuple(strict_morning_raw) if strict_morning_raw is not None
             else default.strict_morning_weekdays
         ),
-        min_weekly_periods_for_mandatory_morning=(
-            int(mand_morning_min_raw) if mand_morning_min_raw is not None
-            else default.min_weekly_periods_for_mandatory_morning
+        min_weekly_periods_for_mandatory_morning=_parse_int(
+            mand_morning_min_raw, default.min_weekly_periods_for_mandatory_morning
         ),
         lone_session_exempt_teacher_ids=(
             _parse_id_set(lone_exempt_raw) if lone_exempt_raw is not None
@@ -237,76 +286,67 @@ def get_scheduling_config(conn: sqlite3.Connection) -> SchedulingConfig:
             _parse_id_set(single_pair_raw) if single_pair_raw is not None
             else default.single_pair_subject_ids
         ),
-        avoid_teacher_gaps=(
-            bool(int(avoid_teacher_gaps_raw)) if avoid_teacher_gaps_raw is not None
-            else default.avoid_teacher_gaps
+        avoid_teacher_gaps=_parse_bool(
+            avoid_teacher_gaps_raw, default.avoid_teacher_gaps
         ),
-        avoid_teacher_lone_periods=(
-            bool(int(avoid_teacher_lone_periods_raw)) if avoid_teacher_lone_periods_raw is not None
-            else default.avoid_teacher_lone_periods
+        avoid_teacher_lone_periods=_parse_bool(
+            avoid_teacher_lone_periods_raw, default.avoid_teacher_lone_periods
         ),
-        balance_afternoon_teachers=(
-            bool(int(balance_afternoon_teachers_raw)) if balance_afternoon_teachers_raw is not None
-            else default.balance_afternoon_teachers
+        balance_afternoon_teachers=_parse_bool(
+            balance_afternoon_teachers_raw, default.balance_afternoon_teachers
         ),
         mandatory_morning_weekdays=(
             _parse_weekday_tuple(mandatory_mornings_raw) if mandatory_mornings_raw is not None
             else default.mandatory_morning_weekdays
         ),
-        avoid_gdtc_consecutive_days=(
-            bool(int(avoid_gdtc_consecutive_raw)) if avoid_gdtc_consecutive_raw is not None
-            else default.avoid_gdtc_consecutive_days
+        avoid_gdtc_consecutive_days=_parse_bool(
+            avoid_gdtc_consecutive_raw, default.avoid_gdtc_consecutive_days
         ),
-        max_teacher_periods_per_day=int(
-            get_meta(conn, "sched_max_teacher_periods_per_day") or default.max_teacher_periods_per_day
+        max_teacher_periods_per_day=_parse_int(
+            get_meta(conn, "sched_max_teacher_periods_per_day"), default.max_teacher_periods_per_day
         ),
-        max_heavy_per_session=int(
-            get_meta(conn, "sched_max_heavy_per_session") or default.max_heavy_per_session
+        max_heavy_per_session=_parse_int(
+            get_meta(conn, "sched_max_heavy_per_session"), default.max_heavy_per_session
         ),
-        hdtn_period2_afternoon=(
-            bool(int(get_meta(conn, "sched_hdtn_period2_afternoon"))) if get_meta(conn, "sched_hdtn_period2_afternoon") is not None
-            else default.hdtn_period2_afternoon
+        hdtn_period2_afternoon=_parse_bool(
+            get_meta(conn, "sched_hdtn_period2_afternoon"), default.hdtn_period2_afternoon
         ),
-        avoid_heavy_afternoon_period3=(
-            bool(int(get_meta(conn, "sched_avoid_heavy_afternoon_period3"))) if get_meta(conn, "sched_avoid_heavy_afternoon_period3") is not None
-            else default.avoid_heavy_afternoon_period3
+        avoid_heavy_afternoon_period3=_parse_bool(
+            get_meta(conn, "sched_avoid_heavy_afternoon_period3"), default.avoid_heavy_afternoon_period3
         ),
-        avoid_teacher_4_consecutive_morning=(
-            bool(int(get_meta(conn, "sched_avoid_teacher_4_consecutive_morning"))) if get_meta(conn, "sched_avoid_teacher_4_consecutive_morning") is not None
-            else default.avoid_teacher_4_consecutive_morning
+        avoid_teacher_4_consecutive_morning=_parse_bool(
+            get_meta(conn, "sched_avoid_teacher_4_consecutive_morning"), default.avoid_teacher_4_consecutive_morning
         ),
-        min_weekly_periods_for_lone_penalty=(
-            int(get_meta(conn, "sched_min_weekly_periods_for_lone_penalty"))
-            if get_meta(conn, "sched_min_weekly_periods_for_lone_penalty") is not None
-            else default.min_weekly_periods_for_lone_penalty
+        min_weekly_periods_for_lone_penalty=_parse_int(
+            get_meta(conn, "sched_min_weekly_periods_for_lone_penalty"), default.min_weekly_periods_for_lone_penalty
         ),
-        use_cpsat=(
-            bool(int(get_meta(conn, "sched_use_cpsat"))) if get_meta(conn, "sched_use_cpsat") is not None
-            else default.use_cpsat
+        use_cpsat=_parse_bool(
+            get_meta(conn, "sched_use_cpsat"), default.use_cpsat
         ),
-        cpsat_time_limit_seconds=(
-            int(get_meta(conn, "sched_cpsat_time_limit_seconds"))
-            if get_meta(conn, "sched_cpsat_time_limit_seconds") is not None
-            else default.cpsat_time_limit_seconds
+        cpsat_time_limit_seconds=_parse_int(
+            get_meta(conn, "sched_cpsat_time_limit_seconds"), default.cpsat_time_limit_seconds
         ),
-        cpsat_minimize_changes=(
-            bool(int(get_meta(conn, "sched_cpsat_minimize_changes")))
-            if get_meta(conn, "sched_cpsat_minimize_changes") is not None
-            else default.cpsat_minimize_changes
+        cpsat_minimize_changes=_parse_bool(
+            get_meta(conn, "sched_cpsat_minimize_changes"), default.cpsat_minimize_changes
         ),
-        cpsat_workers=(
-            int(get_meta(conn, "sched_cpsat_workers"))
-            if get_meta(conn, "sched_cpsat_workers") is not None
-            else default.cpsat_workers
+        cpsat_workers=_parse_int(
+            get_meta(conn, "sched_cpsat_workers"), default.cpsat_workers
         ),
-        gvcn_monday_period2_enabled=(
-            bool(int(get_meta(conn, "sched_gvcn_monday_period2_enabled")))
-            if get_meta(conn, "sched_gvcn_monday_period2_enabled") is not None
-            else default.gvcn_monday_period2_enabled
+        gvcn_monday_period2_enabled=_parse_bool(
+            get_meta(conn, "sched_gvcn_monday_period2_enabled"), default.gvcn_monday_period2_enabled
         ),
         gvcn_monday_period2_exempt_class_ids=(
             _parse_id_set(gvcn_p2_exempt_raw) if gvcn_p2_exempt_raw is not None
             else default.gvcn_monday_period2_exempt_class_ids
+        ),
+        balance_morning_academic_load=_parse_bool(
+            get_meta(conn, "sched_balance_morning_academic_load"), default.balance_morning_academic_load
+        ),
+        max_academic_per_morning=_parse_int(
+            get_meta(conn, "sched_max_academic_per_morning"), default.max_academic_per_morning
+        ),
+        min_academic_per_morning=_parse_int(
+            get_meta(conn, "sched_min_academic_per_morning"), default.min_academic_per_morning
         ),
     )
 
@@ -364,3 +404,6 @@ def set_scheduling_config(conn: sqlite3.Connection, config: SchedulingConfig) ->
     set_meta(conn, "sched_cpsat_workers", str(config.cpsat_workers))
     set_meta(conn, "sched_gvcn_monday_period2_enabled", str(int(config.gvcn_monday_period2_enabled)))
     set_meta(conn, "sched_gvcn_monday_period2_exempt_class_ids", _format_id_set(config.gvcn_monday_period2_exempt_class_ids))
+    set_meta(conn, "sched_balance_morning_academic_load", str(int(config.balance_morning_academic_load)))
+    set_meta(conn, "sched_max_academic_per_morning", str(config.max_academic_per_morning))
+    set_meta(conn, "sched_min_academic_per_morning", str(config.min_academic_per_morning))

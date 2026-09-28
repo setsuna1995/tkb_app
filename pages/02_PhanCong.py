@@ -60,7 +60,7 @@ edited = st.data_editor(
     hide_index=True,
     key="editor_phancong",
     disabled=["Môn"],
-    use_container_width=True,
+    width="stretch",
 )
 
 if st.button("💾 Lưu phân công chuyên môn", type="primary", key="btn_save_phancong"):

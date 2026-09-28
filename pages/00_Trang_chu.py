@@ -43,12 +43,12 @@ col_sch1, col_sch2, col_sch3 = st.columns([3, 1, 1])
 with col_sch1:
     st.markdown(f"🏫 **Trường đang làm việc:** `{school_name}`")
 with col_sch2:
-    if st.button("➕ Thêm trường mới", key="home_btn_add_school", use_container_width=True):
+    if st.button("➕ Thêm trường mới", key="home_btn_add_school", width="stretch"):
         st.session_state["explicit_school_switch"] = True
         st.session_state.pop("school_slug", None)
         st.rerun()
 with col_sch3:
-    if st.button("🔄 Đổi trường", key="home_btn_switch_school", use_container_width=True):
+    if st.button("🔄 Đổi trường", key="home_btn_switch_school", width="stretch"):
         st.session_state["explicit_school_switch"] = True
         st.session_state.pop("school_slug", None)
         st.rerun()
@@ -93,11 +93,11 @@ status_df = pd.DataFrame([
     {"Bước": label, "Trạng thái": "✅ Đạt chuẩn" if status.ok else "⚠️ Cần chú ý", "Ghi chú": status.detail}
     for label, status, _page in setup_steps
 ])
-st.dataframe(status_df, hide_index=True, use_container_width=True)
+st.dataframe(status_df, hide_index=True, width="stretch")
 
 link_cols = st.columns(len(setup_steps))
 for col, (label, _status, page) in zip(link_cols, setup_steps):
-    col.page_link(f"pages/{page}.py", label=f"Đi đến {label} →", use_container_width=True)
+    col.page_link(f"pages/{page}.py", label=f"Đi đến {label} →", width="stretch")
 
 if len(classes) == 0:
     render_callout(
