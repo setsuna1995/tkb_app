@@ -15,11 +15,13 @@ from ui_theme import render_callout, render_page_header
 require_auth()
 school_slug = require_school()
 conn = get_conn(school_slug)
+school_name = repo.get_meta(conn, "school_name") or school_slug
+k_pfx = f"cfg_{school_slug}_"
 
 render_page_header(
     title="Cấu Hình Ràng Buộc & Tiêu Chuẩn Sư Phạm",
-    subtitle="Hiệu chỉnh 18 tiêu chí chuyên môn, phân bổ hiện diện giáo viên & tham số bộ giải CP-SAT",
-    badge="Bộ giải CP-SAT",
+    subtitle=f"Hiệu chỉnh 18 tiêu chí chuyên môn, phân bổ hiện diện giáo viên & tham số bộ giải CP-SAT — Trường: {school_name}",
+    badge=f"Trường: {school_name}",
     icon="⚙️",
 )
 
@@ -63,7 +65,7 @@ with tab1:
             if m == "separate"
             else "🎪 Phương án 2: Dồn 3 tiết liền kề (Chuyên đề / Sinh hoạt tập trung toàn trường)"
         ),
-        key="cfg_hdtn_mode",
+        key=f"{k_pfx}hdtn_mode",
     )
 
     with st.container(border=True):
@@ -80,17 +82,17 @@ with tab1:
                 hdtn_p1_weekday = c1.selectbox(
                     "Thứ (Chào cờ)", WEEKDAYS,
                     index=WEEKDAYS.index(p1_wd_default) if p1_wd_default in WEEKDAYS else 0,
-                    format_func=lambda w: WEEKDAY_NAMES[w], key="hdtn_p1_wd"
+                    format_func=lambda w: WEEKDAY_NAMES[w], key=f"{k_pfx}hdtn_p1_wd"
                 )
                 p1_sess_default = getattr(config, "hdtn_p1_session", "S")
                 hdtn_p1_session = c2.selectbox(
                     "Buổi (Chào cờ)", ["S", "C"], index=0 if p1_sess_default == "S" else 1,
-                    format_func=lambda s: "Sáng" if s == "S" else "Chiều", key="hdtn_p1_sess"
+                    format_func=lambda s: "Sáng" if s == "S" else "Chiều", key=f"{k_pfx}hdtn_p1_sess"
                 )
                 p1_p_default = getattr(config, "hdtn_p1_period", None) or getattr(config, "chao_co_period", 1)
                 hdtn_p1_period = c3.selectbox(
                     "Tiết (Chào cờ)", list(range(1, max_p + 1)),
-                    index=(p1_p_default - 1) if 1 <= p1_p_default <= max_p else 0, key="hdtn_p1_p"
+                    index=(p1_p_default - 1) if 1 <= p1_p_default <= max_p else 0, key=f"{k_pfx}hdtn_p1_p"
                 )
 
             # ── Tiết 2: Hoạt động giáo dục theo chủ đề ──
@@ -103,7 +105,7 @@ with tab1:
                     ["auto", "fixed"],
                     index=1 if p2_is_fixed else 0,
                     format_func=lambda m: "🤖 Tự do (thuật toán tự xếp - Mặc định)" if m == "auto" else "📌 Cố định theo Thứ & Tiết",
-                    key="hdtn_p2_mode"
+                    key=f"{k_pfx}hdtn_p2_mode"
                 )
                 p2_wd_default = getattr(config, "hdtn_p2_weekday", None) or 4
                 hdtn_p2_weekday = c_p2_wd.selectbox(
@@ -111,7 +113,7 @@ with tab1:
                     index=WEEKDAYS.index(p2_wd_default) if p2_wd_default in WEEKDAYS else 2,
                     format_func=lambda w: WEEKDAY_NAMES[w],
                     disabled=(hdtn_p2_mode == "auto"),
-                    key="hdtn_p2_wd"
+                    key=f"{k_pfx}hdtn_p2_wd"
                 )
                 p2_sess_default = getattr(config, "hdtn_p2_session", "S")
                 hdtn_p2_session = c_p2_sess.selectbox(
@@ -119,21 +121,21 @@ with tab1:
                     index=0 if p2_sess_default == "S" else 1,
                     format_func=lambda s: "Sáng" if s == "S" else "Chiều",
                     disabled=(hdtn_p2_mode == "auto"),
-                    key="hdtn_p2_sess"
+                    key=f"{k_pfx}hdtn_p2_sess"
                 )
                 p2_p_default = getattr(config, "hdtn_p2_period", None) or 2
                 hdtn_p2_period = c_p2_p.selectbox(
                     "Tiết (Tiết 2)", list(range(1, max_p + 1)),
                     index=(p2_p_default - 1) if 1 <= p2_p_default <= max_p else 1,
                     disabled=(hdtn_p2_mode == "auto"),
-                    key="hdtn_p2_p"
+                    key=f"{k_pfx}hdtn_p2_p"
                 )
                 hdtn_period2_afternoon = st.checkbox(
                     "Ưu tiên xếp Tiết 2 vào buổi chiều cho các lớp có học chiều (Tiêu chuẩn Sư phạm II.6)",
                     value=getattr(config, "hdtn_period2_afternoon", True),
                     disabled=(hdtn_p2_mode == "fixed"),
                     help="Khi bật chế độ tự do, thuật toán sẽ ưu tiên đưa tiết chủ đề sang buổi chiều để giảm tải cho buổi sáng.",
-                    key="hdtn_period2_afternoon_toggle",
+                    key=f"{k_pfx}hdtn_period2_afternoon_toggle",
                 )
 
             # ── Tiết 3: Sinh hoạt lớp (SHL) ──
@@ -146,7 +148,7 @@ with tab1:
                     ["auto", "fixed"],
                     index=1 if p3_is_fixed else 0,
                     format_func=lambda m: "🤖 Tự động tiết cuối tuần (Chiều T6 hoặc Sáng T7 - Khuyên dùng)" if m == "auto" else "📌 Cố định theo Thứ & Tiết",
-                    key="hdtn_p3_mode"
+                    key=f"{k_pfx}hdtn_p3_mode"
                 )
                 p3_wd_default = getattr(config, "hdtn_p3_weekday", None) or 6
                 hdtn_p3_weekday = c_p3_wd.selectbox(
@@ -154,7 +156,7 @@ with tab1:
                     index=WEEKDAYS.index(p3_wd_default) if p3_wd_default in WEEKDAYS else 4,
                     format_func=lambda w: WEEKDAY_NAMES[w],
                     disabled=(hdtn_p3_mode == "auto"),
-                    key="hdtn_p3_wd"
+                    key=f"{k_pfx}hdtn_p3_wd"
                 )
                 p3_sess_default = getattr(config, "hdtn_p3_session", "S")
                 hdtn_p3_session = c_p3_sess.selectbox(
@@ -162,7 +164,7 @@ with tab1:
                     index=0 if p3_sess_default == "S" else 1,
                     format_func=lambda s: "Sáng" if s == "S" else "Chiều",
                     disabled=(hdtn_p3_mode == "auto"),
-                    key="hdtn_p3_sess"
+                    key=f"{k_pfx}hdtn_p3_sess"
                 )
                 p3_periods_options = [0] + list(range(1, max_p + 1))
                 p3_p_default = getattr(config, "hdtn_p3_period", None) or 0
@@ -171,7 +173,7 @@ with tab1:
                     index=p3_periods_options.index(p3_p_default) if p3_p_default in p3_periods_options else 0,
                     format_func=lambda p: "Tiết cuối buổi" if p == 0 else f"Tiết {p}",
                     disabled=(hdtn_p3_mode == "auto"),
-                    key="hdtn_p3_p"
+                    key=f"{k_pfx}hdtn_p3_p"
                 )
 
             # Đồng bộ giá trị cấu hình dồn tiết nền
@@ -193,7 +195,7 @@ with tab1:
                 ["auto", "fixed"],
                 index=0 if th_mode_default == "auto" else 1,
                 format_func=lambda m: "🤖 Tự động tìm thời điểm tối ưu" if m == "auto" else "📌 Cố định khung thời gian",
-                key="cfg_hdtn_thematic_mode",
+                key=f"{k_pfx}cfg_hdtn_thematic_mode",
             )
             with c_th_opts:
                 if hdtn_thematic_mode == "fixed":
@@ -203,21 +205,21 @@ with tab1:
                         "Thứ", WEEKDAYS,
                         index=WEEKDAYS.index(th_wd_default) if th_wd_default in WEEKDAYS else 0,
                         format_func=lambda w: WEEKDAY_NAMES[w],
-                        key="cfg_hdtn_thematic_wd",
+                        key=f"{k_pfx}cfg_hdtn_thematic_wd",
                     )
                     th_sess_default = getattr(config, "hdtn_thematic_session", "S") or "S"
                     hdtn_thematic_session = c_sess.selectbox(
                         "Buổi", ["S", "C"],
                         index=0 if th_sess_default == "S" else 1,
                         format_func=lambda s: "Sáng" if s == "S" else "Chiều",
-                        key="cfg_hdtn_thematic_sess",
+                        key=f"{k_pfx}cfg_hdtn_thematic_sess",
                     )
                     th_p_default = getattr(config, "hdtn_thematic_start_period", None) or 1
                     hdtn_thematic_start_period = c_p.selectbox(
                         "Dải 3 tiết liền kề", [1, 2, 3],
                         index=(th_p_default - 1) if 1 <= th_p_default <= 3 else 0,
                         format_func=lambda p: f"Tiết {p} → Tiết {p+2}",
-                        key="cfg_hdtn_thematic_p",
+                        key=f"{k_pfx}cfg_hdtn_thematic_p",
                     )
                 else:
                     st.success(
@@ -256,6 +258,7 @@ with tab1:
         value=getattr(config, "gvcn_monday_period2_enabled", True),
         help="Ưu tiên cao nhất: Thuật toán xếp đúng GVCN dạy môn chuyên môn của mình tại lớp mình chủ nhiệm "
              "vào tiết 2 Thứ 2 (ngay sau lễ Chào cờ) và tránh tối đa việc GVCN bị phân tán đi dạy lớp khác vào tiết này.",
+        key=f"{k_pfx}gvcn_monday_period2_enabled",
     )
     gvcn_monday_period2_exempt_selection = col_gvcn2.multiselect(
         "Lớp được MIỄN TRỪ quy định trên",
@@ -264,6 +267,7 @@ with tab1:
         format_func=lambda cid: class_names.get(cid, str(cid)),
         disabled=not gvcn_monday_period2_enabled,
         help="Mặc định: áp dụng cho TẤT CẢ các lớp. Chọn lớp ở đây để tắt riêng ưu tiên này cho lớp đó.",
+        key=f"{k_pfx}gvcn_monday_period2_exempt_selection",
     )
 
     st.markdown("---")
@@ -274,12 +278,14 @@ with tab1:
         options=list(range(1, max_p + 1)),
         default=[p for p in config.gdtc_morning_allowed_periods if p <= max_p],
         help="Mặc định: Tiết 1, 2, 3, 4 (tránh tiết 5 trưa muộn trời nắng).",
+        key=f"{k_pfx}gdtc_morning_allowed",
     )
     gdtc_afternoon_allowed = c_gdtc2.multiselect(
         "GDTC: Các tiết được phép xếp buổi Chiều",
         options=list(range(1, max_p + 1)),
         default=[p for p in config.gdtc_afternoon_allowed_periods if p <= max_p],
         help="Mặc định: Tiết 2, 3 (tránh tiết 1 đầu chiều trời nắng gắt).",
+        key=f"{k_pfx}gdtc_afternoon_allowed",
     )
 
     st.markdown("---")
@@ -290,6 +296,7 @@ with tab1:
         default=sorted(config.forbidden_off_cells),
         format_func=lambda cell: f"{WEEKDAY_NAMES[cell[0]]} {'Sáng' if cell[1] == 'S' else 'Chiều'}",
         help="Giáo viên không được phân buổi nghỉ vào các buổi này (mặc định: Sáng T2, T5, T6 và Chiều T5, T6).",
+        key=f"{k_pfx}forbidden_selection",
     )
 
     reserved_weekdays_selection = st.multiselect(
@@ -298,6 +305,7 @@ with tab1:
         default=list(config.reserved_off_weekdays_chieu),
         format_func=lambda w: WEEKDAY_NAMES[w],
         help="Mặc định: Thứ 5, Thứ 6 (toàn trường nghỉ chiều để sinh hoạt chuyên môn và bồi dưỡng học sinh).",
+        key=f"{k_pfx}reserved_weekdays_selection",
     )
 
 # ── TAB 2: HIỆN DIỆN & NGHỈ CỦA GIÁO VIÊN ──
@@ -313,6 +321,7 @@ with tab2:
         help="Mặc định: Thứ 2 (Chào cờ) và Thứ 6 (Sinh hoạt lớp/Tổng kết). "
              "Mọi giáo viên bắt buộc có tiết dạy. Ngoại lệ duy nhất: Ban Giám hiệu (Hiệu trưởng / Phó hiệu trưởng) "
              "được miễn trừ do phụ trách điều hành quản lý chung và số tiết định mức ít (2-4 tiết/tuần).",
+        key=f"{k_pfx}strict_morning_selection",
     )
 
     col_m1, col_m2 = st.columns(2)
@@ -322,11 +331,13 @@ with tab2:
         default=list(getattr(config, "mandatory_morning_weekdays", (2, 5, 6))),
         format_func=lambda w: f"{WEEKDAY_NAMES[w]} Sáng",
         help="Mặc định: Thứ 2, Thứ 5, Thứ 6. Áp dụng cho các GV có tải giảng dạy đạt ngưỡng bên phải.",
+        key=f"{k_pfx}mandatory_morning_selection",
     )
     min_weekly_periods_for_mandatory_morning = col_m2.number_input(
         "Ngưỡng tiết/tuần áp dụng cho sáng có mặt ở trên:",
         0, 30, getattr(config, "min_weekly_periods_for_mandatory_morning", 10),
         help="GV có tổng số tiết/tuần dưới ngưỡng này được miễn, không bắt buộc có mặt (mặc định 10 tiết).",
+        key=f"{k_pfx}min_weekly_periods_for_mandatory_morning",
     )
 
     col_off1, col_off2 = st.columns([1, 1])
@@ -334,6 +345,7 @@ with tab2:
         "Số buổi nghỉ cho mỗi giáo viên trong tuần (buổi):",
         0, 3, config.teacher_off_sessions_per_week,
         help="Số buổi nghỉ trọn vẹn trong tuần cho mỗi giáo viên (0 = tắt luật; 1 = 1 buổi/tuần; 2 = 2 buổi/tuần).",
+        key=f"{k_pfx}teacher_off_sessions_per_week",
     )
     off_mode_options = {
         "soft": "Ưu tiên cao (Mềm - phạt nặng nếu thiếu, không gây vô nghiệm)",
@@ -349,6 +361,7 @@ with tab2:
         format_func=lambda k: off_mode_options[k],
         help="Bắt buộc tuyệt đối: Ép cứng số buổi nghỉ cho các GV có đủ điều kiện số tiết (tự động chuyển mềm cho GV quá tải tiết). "
              "Ưu tiên cao: Dồn tiết để xếp buổi nghỉ trước (phạt 1.000 điểm/buổi thiếu và phạt thêm 2.500 điểm nếu hoàn toàn không được nghỉ buổi nào).",
+        key=f"{k_pfx}teacher_off_sessions_mode",
     )
 
     st.markdown("---")
@@ -360,6 +373,7 @@ with tab2:
         format_func=lambda t: teacher_names.get(t, str(t)),
         help="Dành cho giáo viên đã có mặt thường xuyên ở trường (phụ trách thiết bị, phòng máy, thư viện...). "
              "Những GV này dạy 1 tiết/buổi không bị coi là vi phạm.",
+        key=f"{k_pfx}lone_exempt_selection",
     )
 
     compact_sched_selection = st.multiselect(
@@ -368,6 +382,7 @@ with tab2:
         default=[t for t in getattr(config, "compact_schedule_teacher_ids", frozenset()) if t in teacher_names],
         format_func=lambda t: teacher_names.get(t, str(t)),
         help="Thuật toán sẽ ưu tiên dồn tiết của những giáo viên này vào ít buổi nhất để họ được nghỉ trọn nhiều buổi (ví dụ: GV Thể dục).",
+        key=f"{k_pfx}compact_sched_selection",
     )
 
 # ── TAB 3: ĐỊNH MỨC & PHÂN BỔ MÔN HỌC ──
@@ -379,28 +394,33 @@ with tab3:
     max_periods_per_session = col_ld1.number_input(
         "Mỗi giáo viên: tối đa mấy tiết/buổi", 1, max_p, config.max_periods_per_session,
         help="Mặc định: 4 tiết/buổi.",
+        key=f"{k_pfx}max_periods_per_session",
     )
     max_teacher_periods_per_day = col_ld2.number_input(
         "Mỗi giáo viên: tối đa mấy tiết/ngày (cả ngày sáng+chiều)", 1, 10,
         getattr(config, "max_teacher_periods_per_day", 5),
         help="Tiêu chí II.2: Đảm bảo không quá 5 tiết/ngày cho mỗi giáo viên.",
+        key=f"{k_pfx}max_teacher_periods_per_day",
     )
 
     col_hv1, col_hv2 = st.columns(2)
     max_heavy_consecutive = col_hv1.number_input(
         "Môn nặng: tối đa mấy tiết liên tiếp trong buổi", 1, max_p, config.max_heavy_consecutive,
         help="Toán, Văn, KHTN... không được xếp quá số tiết này liên tiếp cho 1 lớp (mặc định 3).",
+        key=f"{k_pfx}max_heavy_consecutive",
     )
     max_heavy_per_session = col_hv2.number_input(
         "Tối đa mấy tiết môn Nặng/buổi cho 1 lớp", 1, max_p,
         getattr(config, "max_heavy_per_session", 3),
         help="Tiêu chí II.13: Tránh quá tải các môn nặng trong cùng một buổi học (mặc định 3).",
+        key=f"{k_pfx}max_heavy_per_session",
     )
 
     heavy_subject_priority_periods = st.number_input(
         "Môn Nặng: ưu tiên mấy tiết đầu buổi sáng (0 = tắt)", 0, max_p,
         config.heavy_subject_priority_periods,
         help="Tiêu chí II.5: Ưu tiên xếp môn nặng vào 4 tiết đầu buổi sáng khi học sinh minh mẫn nhất.",
+        key=f"{k_pfx}heavy_subject_priority_periods",
     )
 
     st.markdown("---")
@@ -409,6 +429,7 @@ with tab3:
         "Môn Nặng: bắt buộc xếp buổi sáng (cấm xếp buổi chiều)",
         config.heavy_subjects_morning_only,
         help="Ràng buộc CỨNG: Các môn vai trò Nặng (Toán, KHTN...) chỉ được xếp buổi sáng.",
+        key=f"{k_pfx}heavy_subjects_morning_only",
     )
 
     saved_morning_only_ids = getattr(config, "morning_only_subject_ids", frozenset())
@@ -418,6 +439,7 @@ with tab3:
         default=[sid for sid in saved_morning_only_ids if sid in subject_names],
         format_func=lambda sid: subject_names.get(sid, str(sid)),
         help="Các môn được chọn ở đây sẽ không bao giờ bị xếp vào buổi chiều.",
+        key=f"{k_pfx}morning_only_selection",
     )
 
     afternoon_preferred_selection = st.multiselect(
@@ -426,6 +448,7 @@ with tab3:
         default=[sid for sid in config.afternoon_preferred_subject_ids if sid in subject_names],
         format_func=lambda sid: subject_names.get(sid, str(sid)),
         help="Gợi ý mềm xếp các môn thực hành, nghệ thuật, thể chất vào buổi chiều.",
+        key=f"{k_pfx}afternoon_preferred_selection",
     )
 
     st.markdown("---")
@@ -441,6 +464,7 @@ with tab3:
         default=default_non_consec,
         format_func=lambda sid: subject_names.get(sid, str(sid)),
         help="Ví dụ: Thể dục (GDTC) không xếp vào 2 ngày liên tiếp cho cùng 1 lớp.",
+        key=f"{k_pfx}non_consecutive_selection",
     )
 
     single_pair_selection = st.multiselect(
@@ -449,6 +473,7 @@ with tab3:
         default=[sid for sid in config.single_pair_subject_ids if sid in subject_names],
         format_func=lambda sid: subject_names.get(sid, str(sid)),
         help="Thường áp dụng cho môn Ngữ văn: có đúng 1 cặp 2 tiết liền nhau trong tuần, các tiết còn lại xếp đơn lẻ.",
+        key=f"{k_pfx}single_pair_selection",
     )
 
 # ── TAB 4: TIÊU CHUẨN SƯ PHẠM ──
@@ -461,11 +486,13 @@ with tab4:
         "Tránh tiết trống / lủng của GV trong buổi",
         value=getattr(config, "avoid_teacher_gaps", True),
         help="Tránh việc GV dạy tiết 1, nghỉ tiết 2-3 rồi mới dạy tiết 4. Các tiết trong buổi được xếp liền mạch.",
+        key=f"{k_pfx}avoid_teacher_gaps",
     )
     avoid_teacher_lone_periods = col_sp2.checkbox(
         "Tránh GV đi dạy chỉ 1 tiết/ngày hoặc sáng 1 + chiều 1",
         value=getattr(config, "avoid_teacher_lone_periods", True),
         help="Hạn chế việc GV đến trường chỉ dạy đúng 1 tiết đơn lẻ hoặc phân tán 1 tiết sáng + 1 tiết chiều.",
+        key=f"{k_pfx}avoid_teacher_lone_periods",
     )
 
     col_sp3, col_sp4 = st.columns(2)
@@ -473,11 +500,13 @@ with tab4:
         "Cân đối tiết buổi chiều cho GV",
         value=getattr(config, "balance_afternoon_teachers", True),
         help="Phân bổ tiết chiều hợp lý cho GV dạy các lớp có học chiều, tránh để GV nghỉ toàn bộ chiều.",
+        key=f"{k_pfx}balance_afternoon_teachers",
     )
     avoid_gdtc_consecutive = col_sp4.checkbox(
         "GDTC (Thể dục) không xếp vào 2 ngày liên tiếp",
         value=getattr(config, "avoid_gdtc_consecutive_days", True),
         help="Đảm bảo học sinh có thời gian hồi phục thể lực, không học thể dục 2 ngày liền.",
+        key=f"{k_pfx}avoid_gdtc_consecutive",
     )
 
     col_sp5, col_sp6 = st.columns(2)
@@ -487,6 +516,7 @@ with tab4:
         "Hạn chế môn Nặng vào tiết 3 buổi chiều",
         value=getattr(config, "avoid_heavy_afternoon_period3", True),
         help="Tiêu chí II.15: Tiết cuối chiều học sinh mệt mỏi, hạn chế các môn tư duy trừu tượng cao.",
+        key=f"{k_pfx}avoid_heavy_afternoon_period3",
     )
 
     col_sp7, col_sp8 = st.columns(2)
@@ -494,11 +524,13 @@ with tab4:
         "Hạn chế GV dạy 4 tiết sáng liên tục (nếu tải <= 20)",
         value=getattr(config, "avoid_teacher_4_consecutive_morning", True),
         help="Tiêu chí II.14: Giảm tải áp lực cho giáo viên giảng dạy.",
+        key=f"{k_pfx}avoid_teacher_4_consecutive_morning",
     )
     min_weekly_periods_for_lone_penalty = col_sp8.number_input(
         "Ngưỡng tiết/tuần phạt lẻ tiết GV (miễn trừ GV ít tiết):",
         0, 30, getattr(config, "min_weekly_periods_for_lone_penalty", 8),
         help="Tiêu chí II.4: GV có tổng tải dưới ngưỡng này (mặc định 8) được miễn trừ phạt tiết đơn lẻ.",
+        key=f"{k_pfx}min_weekly_periods_for_lone_penalty",
     )
 
 # ── TAB 5: BỘ GIẢI CP-SAT ──
@@ -517,12 +549,14 @@ with tab5:
         min_value=5, max_value=300,
         value=int(getattr(config, "cpsat_time_limit_seconds", 45)),
         help="Thời gian tối đa bộ giải được phép chạy (mặc định 45s). Thường bộ giải tìm ra nghiệm tối ưu chỉ sau 15-25 giây.",
+        key=f"{k_pfx}cpsat_time_limit_seconds",
     )
 
     cpsat_minimize_changes = col_cp2.checkbox(
         "Ưu tiên giữ nguyên tối đa ô TKB cũ",
         value=getattr(config, "cpsat_minimize_changes", False),
         help="Khi bật, bộ giải sẽ cố gắng giữ nguyên tối đa các tiết của TKB hiện có, hạn chế tối đa xáo trộn thời khóa biểu cũ khi xếp tuần mới.",
+        key=f"{k_pfx}cpsat_minimize_changes",
     )
 
     col_cp3, col_cp4 = st.columns(2)
@@ -542,6 +576,7 @@ with tab5:
         index=worker_idx,
         format_func=lambda k: worker_options[k],
         help="Tự động nhận diện: Khi chạy trên Streamlit Cloud giới hạn tài nguyên sẽ dùng 2 luồng nhẹ nhàng; trên PC cục bộ dùng 4 luồng mượt mà.",
+        key=f"{k_pfx}chosen_workers",
     )
 
 st.write("---")
@@ -556,7 +591,7 @@ if conflict_afternoon_morning:
     c_names = [subject_names.get(sid, str(sid)) for sid in conflict_afternoon_morning]
     st.warning(f"⚠️ **Xung đột cấu hình:** Môn **{', '.join(c_names)}** vừa được đặt \"Bắt buộc sáng (cấm chiều)\" vừa được chọn \"Ưu tiên buổi chiều\". Hãy bỏ chọn ở một trong hai mục.")
 
-if st.button("💾 Lưu toàn bộ cấu hình xếp lịch", type="primary"):
+if st.button("💾 Lưu toàn bộ cấu hình xếp lịch", type="primary", key=f"{k_pfx}btn_save_all_cfg"):
     cfg_kwargs = dict(
         gdtc_avoid_period=int(gdtc_avoid_period),
         gdtc_morning_allowed_periods=tuple(sorted(gdtc_morning_allowed)),
@@ -629,19 +664,22 @@ with st.expander("📋 Ràng buộc môn / lớp theo buổi cụ thể (tuỳ c
     if not rule_subjects or not all_classes:
         st.info("Cần khai báo ít nhất 1 môn (khác HDTN) và 1 lớp trước khi tạo luật.")
     else:
-        with st.form("add_subject_class_rule", clear_on_submit=True):
+        with st.form(f"{k_pfx}add_subject_class_rule", clear_on_submit=True):
             rule_subject_id = st.selectbox(
                 "Môn", options=[s.subject_id for s in rule_subjects],
                 format_func=lambda sid: next(s.name for s in rule_subjects if s.subject_id == sid),
+                key=f"{k_pfx}rule_subject_id",
             )
             rule_class_ids = st.multiselect(
                 "Lớp áp dụng", options=[c.class_id for c in all_classes],
                 format_func=lambda cid: next(c.name for c in all_classes if c.class_id == cid),
+                key=f"{k_pfx}rule_class_ids",
             )
             rule_cells = st.multiselect(
                 "Chỉ được xếp vào các (Thứ, Buổi) này",
                 options=[(wd, s) for wd in WEEKDAYS for s in ("S", "C")],
                 format_func=lambda cell: f"{WEEKDAY_NAMES[cell[0]]} {'Sáng' if cell[1] == 'S' else 'Chiều'}",
+                key=f"{k_pfx}rule_cells",
             )
             if st.form_submit_button("➕ Thêm luật"):
                 is_morning_only = rule_subject_id in getattr(config, "morning_only_subject_ids", frozenset())
@@ -669,7 +707,7 @@ with st.expander("📋 Ràng buộc môn / lớp theo buổi cụ thể (tuỳ c
             )
             col1, col2 = st.columns([5, 1])
             col1.markdown(f"- **{subj_name}** ({cls_names}) chỉ xếp vào: {cell_names}")
-            if col2.button("🗑️", key=f"del_rule_{rule['rule_id']}"):
+            if col2.button("🗑️", key=f"{k_pfx}del_rule_{rule['rule_id']}"):
                 repo.delete_subject_class_rule(conn, rule["rule_id"])
                 st.rerun()
 

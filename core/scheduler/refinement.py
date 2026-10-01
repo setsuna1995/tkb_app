@@ -10,12 +10,7 @@ from collections import defaultdict
 from typing import Optional, Tuple
 
 from core.models import SchedulingInput, ScheduleResult
-from core.rules.detectors import run_detectors
-from core.rules.params import resolve_effective_params
-from core.rules.view import build_schedule_view
-from core.rules.violations import BREACH, SHORTFALL, classify
 from core.scheduler.placement import _build_effective_assigned_teacher
-from core.validation import compute_tkb_health_score
 
 
 def compute_candidate_metrics(inp: SchedulingInput, result: ScheduleResult) -> dict:
@@ -29,6 +24,12 @@ def compute_candidate_metrics(inp: SchedulingInput, result: ScheduleResult) -> d
     - breaches_count: Số vi phạm nghiêm trọng
     - is_valid: True nếu đạt 100% ràng buộc cứng
     """
+    from core.rules.detectors import run_detectors
+    from core.rules.params import resolve_effective_params
+    from core.rules.view import build_schedule_view
+    from core.rules.violations import BREACH, SHORTFALL, classify
+    from core.validation import compute_tkb_health_score
+
     if not result or not result.success:
         return {
             "health_score": 0,

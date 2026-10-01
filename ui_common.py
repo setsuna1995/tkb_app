@@ -153,6 +153,8 @@ def _seed_sample_school_if_empty() -> None:
     """Ensure bundled sample schools exist so users have standard ready-to-use environments.
     Seeds both 1-shift (truong-thcs) and 2-shift (truong-thcs-2-buoi) default schools if missing."""
     SCHOOLS_DIR.mkdir(exist_ok=True)
+    if any(SCHOOLS_DIR.glob("*.db")):
+        return
     if TEMPLATE_DB_PATH.exists():
         dest = SCHOOLS_DIR / "truong-thcs.db"
         if not dest.exists():
@@ -208,6 +210,28 @@ def create_school(name: str) -> str:
     return slug
 
 
+def reset_school_session_state(new_slug: str | None = None) -> None:
+    """Clear all school-dependent session state (form inputs, widget states, data editors)
+    when switching schools to prevent cross-school contamination of rules and configs."""
+    preserved = {
+        "authenticated",
+        "_theme_injected",
+        "school_slug",
+        "_active_school_slug",
+        "sidebar_school_select_box",
+        "explicit_school_switch",
+    }
+    for k in list(st.session_state.keys()):
+        if k not in preserved and not k.startswith("db_conn_"):
+            try:
+                del st.session_state[k]
+            except Exception:
+                pass
+    if new_slug:
+        st.session_state["school_slug"] = new_slug
+        st.session_state["_active_school_slug"] = new_slug
+
+
 def get_conn(school_slug: str):
     SCHOOLS_DIR.mkdir(exist_ok=True)
     conn_key = f"db_conn_{school_slug}"
@@ -237,14 +261,18 @@ def require_school() -> str:
     sidebar_branding()
     slug = st.session_state.get("school_slug")
     if slug and (SCHOOLS_DIR / f"{slug}.db").exists():
+        active = st.session_state.get("_active_school_slug")
+        if active != slug:
+            reset_school_session_state(slug)
         return slug
     st.session_state.pop("school_slug", None)
+    st.session_state.pop("_active_school_slug", None)
 
     schools = list_schools()
     if schools and not st.session_state.get("explicit_school_switch"):
         # Tự động chọn trường THCS (2026-2027) làm trường mẫu mặc định
         default_school = next((s for s in schools if s["slug"] == "truong-thcs"), schools[0])
-        st.session_state["school_slug"] = default_school["slug"]
+        reset_school_session_state(default_school["slug"])
         return default_school["slug"]
 
     st.title("🏫 Quản Lý & Chọn Trường Học")
@@ -255,7 +283,7 @@ def require_school() -> str:
         with col_s2:
             st.markdown("<div style='height: 28px;'></div>", unsafe_allow_html=True)
             if st.button("Vào trường này", type="primary", width="stretch"):
-                st.session_state["school_slug"] = pick["slug"]
+                reset_school_session_state(pick["slug"])
                 st.session_state.pop("explicit_school_switch", None)
                 st.rerun()
 
@@ -271,7 +299,7 @@ def require_school() -> str:
             if new_name.strip():
                 try:
                     new_slug = create_school(new_name.strip())
-                    st.session_state["school_slug"] = new_slug
+                    reset_school_session_state(new_slug)
                     st.session_state.pop("explicit_school_switch", None)
                     st.rerun()
                 except Exception as e:
@@ -304,7 +332,7 @@ def sidebar_school_switcher() -> None:
             key="sidebar_school_select_box",
         )
         if selected_slug != current_slug:
-            st.session_state["school_slug"] = selected_slug
+            reset_school_session_state(selected_slug)
             st.session_state.pop("explicit_school_switch", None)
             st.rerun()
 
@@ -314,6 +342,7 @@ def sidebar_school_switcher() -> None:
                 st.session_state["sidebar_show_add_school"] = not st.session_state.get("sidebar_show_add_school", False)
         with col_act2:
             if st.button("🔄 Đổi trường", key="sidebar_btn_switch_school", width="stretch"):
+                reset_school_session_state(None)
                 st.session_state.pop("school_slug", None)
                 st.session_state["explicit_school_switch"] = True
                 st.rerun()
@@ -326,7 +355,7 @@ def sidebar_school_switcher() -> None:
                     if new_name.strip():
                         try:
                             new_slug = create_school(new_name.strip())
-                            st.session_state["school_slug"] = new_slug
+                            reset_school_session_state(new_slug)
                             st.session_state.pop("explicit_school_switch", None)
                             st.session_state["sidebar_show_add_school"] = False
                             st.success(f"Đã tạo trường '{new_name.strip()}'!")
