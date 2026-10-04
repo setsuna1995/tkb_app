@@ -20,8 +20,9 @@ from core.rules.violations import Violation
 
 SESSION_NAMES = {"S": "Sáng", "C": "Chiều"}
 MIN_FREE_MORNING_PERIODS = 2      # fewer free periods than this = cannot avoid a lone session (II.4)
-LONG_MORNING_RUN = 4              # II.14
+LONG_MORNING_RUN = 5              # II.14: Chỉ cảnh báo khi GV dạy 5 tiết sáng liên tục
 MIN_PERIODS_FOR_GAP = 2
+MIN_CONSECUTIVE_GAP_FOR_VIOLATION = 2  # II.7: Chỉ cảnh báo khi lủng >= 2 tiết liên tiếp
 PAIR_SIZE = 2
 AFTERNOON_HEAVY_FORBIDDEN_PERIOD = 3   # II.15
 MIN_MORNING_PERIODS_FOR_ACADEMIC_FLOOR = 3
@@ -81,7 +82,15 @@ def detect_teacher_day_cap(view: ScheduleView, params: EffectiveParams) -> list:
     ]
 
 
+def _has_consecutive_gaps(ps: list[int], min_consecutive: int = MIN_CONSECUTIVE_GAP_FOR_VIOLATION) -> bool:
+    if len(ps) < 2:
+        return False
+    sorted_p = sorted(ps)
+    return any(sorted_p[i + 1] - sorted_p[i] - 1 >= min_consecutive for i in range(len(sorted_p) - 1))
+
+
 # II.7 -- mirrors objectives.py section 3 (penalty_terms["II.7"])
+# Chỉ cảnh báo khi bị lủng từ 2 tiết liên tiếp trở lên (ví dụ dạy tiết 1, nghỉ tiết 2-3, dạy lại tiết 4)
 def detect_teacher_gaps(view: ScheduleView, params: EffectiveParams) -> list:
     periods = defaultdict(list)
     for slot, _subject_id, teacher_id in view.placed():
@@ -89,14 +98,43 @@ def detect_teacher_gaps(view: ScheduleView, params: EffectiveParams) -> list:
             periods[teacher_id, slot.ts.weekday, slot.ts.session].append(slot.ts.period)
     return [
         Violation("II.7", teacher_id=tid, weekday=wd, session=sess,
-                  detail=f"{view.teacher_name(tid)}: bị trống tiết {_day(wd)} {_session(sess)} "
+                  detail=f"{view.teacher_name(tid)}: bị lủng ≥2 tiết liên tiếp {_day(wd)} {_session(sess)} "
                          f"(tiết dạy: {', '.join(str(p) for p in sorted(ps))})")
         for (tid, wd, sess), ps in periods.items()
-        if len(ps) >= MIN_PERIODS_FOR_GAP and max(ps) - min(ps) + 1 > len(ps)
+        if len(ps) >= MIN_PERIODS_FOR_GAP and _has_consecutive_gaps(ps)
     ]
 
 
+def find_teacher_single_gaps(view: ScheduleView) -> list[dict]:
+    """Tìm tất cả các lượt nghỉ giải lao 1 tiết lẻ giữa buổi của giáo viên (không tính là lỗi vi phạm)."""
+    periods = defaultdict(list)
+    for slot, _subject_id, teacher_id in view.placed():
+        if teacher_id is not None:
+            periods[teacher_id, slot.ts.weekday, slot.ts.session].append(slot.ts.period)
+    single_gaps = []
+    for (tid, wd, sess), ps in sorted(periods.items(), key=lambda x: (x[0][1], x[0][2], x[0][0])):
+        if len(ps) < 2:
+            continue
+        sorted_p = sorted(ps)
+        for i in range(len(sorted_p) - 1):
+            if sorted_p[i + 1] - sorted_p[i] - 1 == 1:
+                gap_p = sorted_p[i] + 1
+                single_gaps.append({
+                    "teacher_id": tid,
+                    "teacher_name": view.teacher_name(tid),
+                    "weekday": wd,
+                    "session": sess,
+                    "day_name": _day(wd),
+                    "session_name": _session(sess),
+                    "gap_period": gap_p,
+                    "taught_periods": sorted_p,
+                    "detail": f"{view.teacher_name(tid)}: nghỉ giải lao tiết {gap_p} ({_day(wd)} {_session(sess)}, dạy tiết {', '.join(str(p) for p in sorted_p)})",
+                })
+    return single_gaps
+
+
 # II.14 -- mirrors objectives.py section 4 (penalty_terms["II.14"])
+# Chỉ cảnh báo khi GV dạy 5 tiết liên tục buổi sáng (dạy 4 tiết là bình thường)
 def detect_teacher_4_consecutive_mornings(view: ScheduleView, params: EffectiveParams) -> list:
     totals = _teacher_totals(view)
     mornings = Counter((t, slot.ts.weekday) for slot, _subject, t in view.placed()
@@ -107,6 +145,9 @@ def detect_teacher_4_consecutive_mornings(view: ScheduleView, params: EffectiveP
         for (tid, wd), n in mornings.items()
         if n >= LONG_MORNING_RUN and totals[tid] <= params.max_load_for_4consec_penalty
     ]
+
+# Alias for clarity
+detect_teacher_5_consecutive_mornings = detect_teacher_4_consecutive_mornings
 
 
 # II.4 (buổi lẻ) -- mirrors objectives.py section 1, lone[t, wd, sess] in penalty_terms["II.4"]

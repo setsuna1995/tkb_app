@@ -66,6 +66,8 @@ def compute_candidate_metrics(inp: SchedulingInput, result: ScheduleResult) -> d
     hole_periods = 0
     over_4_periods = 0
     raw_lone_sessions = 0
+    long_gaps_count = 0  # Lủng >= 2 tiết liên tiếp
+    single_gaps_count = 0  # Trống 1 tiết xen kẽ
     for tid, sess_map in t_periods.items():
         for (wd, sess), per_list in sess_map.items():
             if len(per_list) == 1:
@@ -74,6 +76,12 @@ def compute_candidate_metrics(inp: SchedulingInput, result: ScheduleResult) -> d
                 over_4_periods += 1
             if len(per_list) >= 2:
                 sorted_p = sorted(per_list)
+                for i in range(len(sorted_p) - 1):
+                    diff = sorted_p[i + 1] - sorted_p[i] - 1
+                    if diff >= 2:
+                        long_gaps_count += 1
+                    elif diff == 1:
+                        single_gaps_count += 1
                 # Khoảng cách từ tiết đầu đến tiết cuối trừ đi số tiết thực dạy
                 span = sorted_p[-1] - sorted_p[0] + 1
                 hole_periods += max(0, span - len(sorted_p))
@@ -97,6 +105,8 @@ def compute_candidate_metrics(inp: SchedulingInput, result: ScheduleResult) -> d
     return {
         "health_score": health_score,
         "hole_periods": hole_periods,
+        "long_gaps_count": long_gaps_count,
+        "single_gaps_count": single_gaps_count,
         "over_4_periods": over_4_periods,
         "lone_sessions": lone_sessions,
         "raw_lone_sessions": raw_lone_sessions,

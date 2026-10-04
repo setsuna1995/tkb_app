@@ -6,7 +6,7 @@ import streamlit as st
 from core import scheduler as sched
 from core.models import ROLE_HDTN, ROLE_KEP, WEEKDAY_NAMES, WEEKDAYS
 from core.rules import RULES
-from core.rules.detectors import run_detectors
+from core.rules.detectors import find_teacher_single_gaps, run_detectors
 from core.rules.params import resolve_effective_params
 from core.rules.view import build_schedule_view
 from core.rules.violations import BREACH, FORCED, SHORTFALL, classify, group_by_rule
@@ -30,7 +30,7 @@ def _write_details(violations: list) -> None:
         st.write(f"- {violation.detail}")
 
 
-def _render_rule_violations(violations: list, save_override_key: str, week_label: str = "") -> bool:
+def _render_rule_violations(violations: list, save_override_key: str, week_label: str = "", single_gaps: list = None) -> bool:
     """Show violations grouped by level. Returns True when saving is allowed."""
     blocking = group_by_rule(v for v in violations if v.level == BREACH and RULES[v.rule_id].blocks_save)
     other_breaches = group_by_rule(v for v in violations if v.level == BREACH and not RULES[v.rule_id].blocks_save)
@@ -61,6 +61,19 @@ def _render_rule_violations(violations: list, save_override_key: str, week_label
             for rule_id, items in shortfalls.items():
                 st.write(f"**{RULES[rule_id].title_vi}** ({len(items)} trường hợp)")
                 _write_details(items)
+
+    # Mục riêng: Thống kê tiết trống lẻ 1 tiết (giải lao giữa buổi)
+    if single_gaps:
+        with st.expander(f"☕ Mục riêng: Thống kê {len(single_gaps)} lượt nghỉ giải lao 1 tiết lẻ giữa buổi (Hợp lý sư phạm, không phải lỗi vi phạm){week_label}", expanded=False):
+            st.markdown(
+                "<div style='font-size: 13px; color: #475569; margin-bottom: 8px;'>"
+                "💡 <i>Nghỉ 1 tiết đơn lẻ giữa buổi (ví dụ dạy tiết 1, nghỉ giải lao tiết 2, dạy tiết 3) giúp giáo viên có thời gian "
+                "nghỉ ngơi, chuẩn bị bài giảng và hoàn toàn hợp lệ trong phân công chuyên môn.</i>"
+                "</div>",
+                unsafe_allow_html=True
+            )
+            for sg in single_gaps:
+                st.write(f"- {sg['detail']}")
 
     if not blocking:
         return True
@@ -929,6 +942,8 @@ with tab_schedule:
                     rating = m["health_score"]["rating"]
                     lone = m.get("lone_sessions", 0)
                     holes = m.get("hole_periods", 0)
+                    long_gaps = m.get("long_gaps_count", 0)
+                    single_gaps = m.get("single_gaps_count", 0)
                     morn = m.get("missing_mornings", 0)
                     aft_status = m.get("afternoon_off_status", {})
 
@@ -939,7 +954,18 @@ with tab_schedule:
                     score_color = "#10B981" if h_score >= 85 else "#2563EB" if h_score >= 75 else "#F59E0B"
 
                     lone_badge = "<span style='color: #10B981; font-weight: 700;'>0 buổi (Tuyệt đối) ✅</span>" if lone == 0 else f"<span style='color: #F59E0B; font-weight: 700;'>{lone} buổi ⚠️</span>"
-                    hole_badge = "<span style='color: #10B981; font-weight: 700;'>0 tiết (Kín) ✅</span>" if holes == 0 else f"<span style='color: #3B82F6; font-weight: 600;'>{holes} tiết trống</span>"
+                    if long_gaps == 0:
+                        gap_badge = "<span style='color: #10B981; font-weight: 700;'>0 (Không lủng dài) ✅</span>"
+                    else:
+                        gap_badge = f"<span style='color: #EF4444; font-weight: 700;'>{long_gaps} buổi lủng ≥2 tiết ⚠️</span>"
+
+                    if holes == 0:
+                        sub_gap_text = "Lịch kín 100%"
+                    elif single_gaps > 0 and long_gaps == 0:
+                        sub_gap_text = f"{single_gaps} lượt nghỉ 1 tiết lẻ"
+                    else:
+                        sub_gap_text = f"{holes} tiết trống"
+
                     morn_badge = "<span style='color: #10B981; font-weight: 700;'>100% đủ mặt ✅</span>" if morn == 0 else f"<span style='color: #EF4444; font-weight: 600;'>Thiếu {morn} lượt</span>"
 
                     aft_lines = []
@@ -963,7 +989,7 @@ with tab_schedule:
                                 </div>
                                 <div style="font-size: 12.5px; line-height: 1.8; color: #334155; border-top: 1px solid #E2E8F0; padding-top: 8px;">
                                     <div>🎯 <b>Buổi lẻ GV:</b> {lone_badge}</div>
-                                    <div>⏱️ <b>Tiết trống GV:</b> {hole_badge}</div>
+                                    <div>⏱️ <b>Lủng ≥2 tiết:</b> {gap_badge} <span style="font-size: 11px; color: #64748B;">({sub_gap_text})</span></div>
                                     <div>🌅 <b>Sáng T2 có mặt:</b> {morn_badge}</div>
                                     <div>🏖️ <b>Nghỉ chiều:</b> {aft_text}</div>
                                 </div>
@@ -1263,8 +1289,11 @@ with tab_schedule:
                 title="Studio Khảo Sát Chi Tiết Phương Án Vừa Xếp",
             )
 
+            view_curr = build_schedule_view(inp, result.assignment)
+            single_gaps_curr = find_teacher_single_gaps(view_curr)
             proceed_with_hard_violations = _render_rule_violations(
                 _schedule_violations(inp, result), "proceed_with_hard_violations",
+                single_gaps=single_gaps_curr,
             )
 
             # ── Kiểm tra định mức số tiết (Progressive Disclosure) ──
@@ -1675,9 +1704,12 @@ with tab_schedule:
                                 rows.append(row)
                             st.dataframe(pd.DataFrame(rows), hide_index=True, width="stretch")
 
+                    b_view = build_schedule_view(b_inp, b_result.assignment)
+                    b_single_gaps = find_teacher_single_gaps(b_view)
                     b_proceed_with_hard_violations = _render_rule_violations(
                         _schedule_violations(b_inp, b_result), f"batch_proceed_with_hard_violations_{wn}",
                         f" cho Tuần {wn}",
+                        single_gaps=b_single_gaps,
                     )
 
                     st.caption(f"Kiểm tra định mức Tuần {wn} (thực tế − định mức tuần {wn}, kỳ vọng 0)")

@@ -353,9 +353,9 @@ def test_shift_adaptive_rules_single_vs_two_shift():
     ts_twoshift = []
     slots_twoshift = []
     sid = 1
-    # 9A: ca sáng (Thứ 2..5, 4 tiết)
+    # 9A: ca sáng (Thứ 2..5, 5 tiết)
     for wd in (2, 3, 4, 5):
-        for p in (1, 2, 3, 4):
+        for p in (1, 2, 3, 4, 5):
             t = TimeSlot(sid, wd, "S", p)
             s = Slot(sid, 101, t)
             ts_twoshift.append(t)
@@ -381,7 +381,7 @@ def test_shift_adaptive_rules_single_vs_two_shift():
             Teacher(20, "GV Van 6"),    # Thuần chiều
             Teacher(30, "GV Anh"),      # Dạy cả 2 ca
         ],
-        need={(1, 101): 8, (2, 102): 8, (3, 101): 8, (3, 102): 8},
+        need={(1, 101): 10, (2, 102): 8, (3, 101): 10, (3, 102): 8},
         assigned_teacher={(1, 101): 10, (2, 102): 20, (3, 101): 30, (3, 102): 30},
         ban_busy=set(),
         slots=slots_twoshift,
@@ -392,7 +392,7 @@ def test_shift_adaptive_rules_single_vs_two_shift():
         ),
     )
     built_twoshift = build_model(inp_twoshift)
-    # Trường chia 2 ca: Có áp dụng II.14 để bảo vệ GV
+    # Trường có ca sáng 5 tiết: Có áp dụng II.14 để bảo vệ GV khi dạy 5 tiết liên tục
     assert "II.14" in built_twoshift.penalty_terms and len(built_twoshift.penalty_terms["II.14"]) > 0
 
 

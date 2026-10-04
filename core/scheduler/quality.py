@@ -128,11 +128,11 @@ def _count_teacher_4_consecutive_mornings(slots: list[Slot], assigned: dict, slo
                 teacher_totals[tid] += 1
                 if slot.ts.session == "S":
                     t_morn_periods[(tid, slot.ts.weekday)].append(slot.ts.period)
-    count_4 = 0
+    count_5 = 0
     for (tid, wd), periods in t_morn_periods.items():
-        if len(periods) >= 4 and teacher_totals[tid] <= max_load_for_penalty:
-            count_4 += 1
-    return count_4
+        if len(periods) >= 5 and teacher_totals[tid] <= max_load_for_penalty:
+            count_5 += 1
+    return count_5
 
 
 def _is_teacher_busy_on_morning_quality(teacher_id: int, wd: int, slots: list[Slot], slot_teacher: dict, ban_busy: set) -> bool:
@@ -316,10 +316,9 @@ def _teacher_quality_penalty(slots: list[Slot], assigned: dict, slot_teacher: di
         penalty += _count_teacher_concentrated_lone_sessions(
             slots, assigned, slot_teacher, min_weekly_periods=min_lone_load, exempt_teacher_ids=lone_exempt
         ) * TEACHER_LONE_SESSION_SPREAD_PENALTY
-    has_afternoon = any(s.ts.session == "C" for s in slots)
-    max_morning_p = max((s.ts.period for s in slots if s.ts.session == "S"), default=4)
-    is_morning_only_4p = (not has_afternoon and max_morning_p <= 4)
-    if getattr(config, "avoid_teacher_4_consecutive_morning", True) and not is_morning_only_4p:
+    morning_periods = {s.ts.period for s in slots if s.ts.session == "S"}
+    max_morning_p = max(morning_periods, default=4)
+    if getattr(config, "avoid_teacher_4_consecutive_morning", True) and max_morning_p >= 5:
         penalty += _count_teacher_4_consecutive_mornings(slots, assigned, slot_teacher, max_load_for_penalty=20) * TEACHER_4CONSEC_MORNING_PENALTY
     penalty += _count_teacher_missing_mandatory_mornings(
         slots, assigned, slot_teacher, mand_morns,

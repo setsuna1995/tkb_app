@@ -135,39 +135,53 @@ def test_teacher_lone_period_penalty_exempts_low_workload():
 
 
 def test_teacher_4_consecutive_mornings_penalty():
-    """Tiêu chí II.14: Hạn chế xếp cho GV 4 tiết liên tục vào buổi sáng trừ GV > 20 tiết/tuần."""
+    """Tiêu chí II.14: Hạn chế xếp cho GV 5 tiết liên tục vào buổi sáng trừ GV > 20 tiết/tuần."""
     from core.models import Slot, TimeSlot
     from core.scheduler.quality import _count_teacher_4_consecutive_mornings
 
-    # Teacher 1 (workload 16 <= 20) has 4 periods on Monday morning
-    # Teacher 2 (workload 24 > 20) has 4 periods on Tuesday morning
+    # Teacher 1 (workload 20 <= 20) has 5 periods on Mon-Thu mornings
+    # Teacher 2 (workload 25 > 20) has 5 periods on Mon-Fri mornings
     slots = []
     slot_teacher = {}
     assigned = {}
 
-    # Teacher 1: Mon morning 4 periods + Tue morning 4 + Wed morning 4 + Thu morning 4 = 16 total
+    # Teacher 1: Mon-Thu mornings, 5 periods each = 20 total
     sid = 1
     for wd in (2, 3, 4, 5):
-        for p in range(1, 5):
+        for p in range(1, 6):
             s = Slot(sid, 101, TimeSlot(sid, wd, "S", p))
             slots.append(s)
             assigned[sid] = 1
             slot_teacher[sid] = 1
             sid += 1
 
-    # Teacher 2: 24 total periods
-    for wd in (2, 3, 4, 5, 6, 7):
-        for p in range(1, 5):
+    # Teacher 2: 25 total periods (5 periods x 5 mornings)
+    for wd in (2, 3, 4, 5, 6):
+        for p in range(1, 6):
             s = Slot(sid, 102, TimeSlot(sid, wd, "S", p))
             slots.append(s)
             assigned[sid] = 2
             slot_teacher[sid] = 2
             sid += 1
 
-    # Teacher 1 has load 16 (<=20) -> all 4 morning sessions are counted as violations (4)
-    # Teacher 2 has load 24 (>20) -> exempt (0)
-    count_4 = _count_teacher_4_consecutive_mornings(slots, assigned, slot_teacher, max_load_for_penalty=20)
-    assert count_4 == 4
+    # Teacher 1 has load 20 (<=20) -> all 4 morning sessions with 5 periods are counted as violations (4)
+    # Teacher 2 has load 25 (>20) -> exempt (0)
+    count_5 = _count_teacher_4_consecutive_mornings(slots, assigned, slot_teacher, max_load_for_penalty=20)
+    assert count_5 == 4
+
+    # 4 periods in morning is NOT penalized
+    slots_4 = []
+    assigned_4 = {}
+    slot_teacher_4 = {}
+    sid = 1
+    for wd in (2, 3, 4, 5):
+        for p in range(1, 5):
+            s = Slot(sid, 101, TimeSlot(sid, wd, "S", p))
+            slots_4.append(s)
+            assigned_4[sid] = 1
+            slot_teacher_4[sid] = 1
+            sid += 1
+    assert _count_teacher_4_consecutive_mornings(slots_4, assigned_4, slot_teacher_4, max_load_for_penalty=20) == 0
 
 
 def test_hdtn_period2_afternoon_heuristic_scoring():

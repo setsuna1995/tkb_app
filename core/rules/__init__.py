@@ -54,7 +54,7 @@ RULES: dict[str, RuleSpec] = {
     ),
     "II.7": RuleSpec(
         id="II.7",
-        title_vi="Hạn chế GV dạy tiết 1, nghỉ tiết 2-3, rồi dạy lại tiết 4",
+        title_vi="Hạn chế GV bị lủng từ 2 tiết liên tiếp giữa buổi (ví dụ dạy tiết 1, nghỉ tiết 2-3, rồi dạy lại tiết 4)",
         tier=RuleTier.SOFT,
         config_flag="avoid_teacher_gaps",
     ),
@@ -73,7 +73,7 @@ RULES: dict[str, RuleSpec] = {
     ),
     "II.14": RuleSpec(
         id="II.14",
-        title_vi="Hạn chế GV dạy 4 tiết liên tục buổi sáng (trừ GV >20 tiết/tuần)",
+        title_vi="Hạn chế GV dạy 5 tiết liên tục buổi sáng (trừ GV >20 tiết/tuần)",
         tier=RuleTier.SOFT,
         config_flag="avoid_teacher_4_consecutive_morning",
     ),

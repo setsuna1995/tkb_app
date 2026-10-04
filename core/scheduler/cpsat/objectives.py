@@ -273,25 +273,21 @@ def _add_objective(built: CpSatModel) -> None:
                 m.Add(eg2 >= 0)
                 excess_gap_terms_3rd.append(eg2)
 
-    # 4. II.14 >= 4 tiết sáng liên tiếp
+    # 4. II.14 >= 5 tiết sáng liên tiếp (dạy 4 tiết sáng là bình thường, chỉ phạt khi dạy trọn 5 tiết)
     # Tự động thích ứng theo cơ cấu ca học:
-    # - Trường toàn sáng 4 tiết (không có ca chiều): 4 tiết sáng là trọn vẹn 1 buổi học chuẩn (tiết 1-4).
-    #   GV cần gom tiết vào 4 buổi để có 1 buổi sáng nghỉ trong tuần. Do đó KHÔNG phạt II.14 để tránh đục lỗ (gap)
-    #   hoặc xé lẻ lịch làm mất ngày nghỉ.
-    # - Trường chia 2 ca (có ca chiều) hoặc sáng 5 tiết: Áp dụng phạt mềm (80 điểm, thấp hơn gap 350+).
-    has_afternoon = any(s.ts.session == "C" for s in inp.slots)
+    # - Trường toàn sáng 4 tiết (không có ca chiều hoặc sáng chỉ có 4 tiết): Không bao giờ có 5 tiết sáng.
+    # - Trường có ca sáng 5 tiết: Áp dụng phạt mềm (80 điểm) khi GV dạy 5 tiết liên tục buổi sáng để giảm tải.
     morning_periods = {s.ts.period for s in inp.slots if s.ts.session == "S"}
     max_morning_p = max(morning_periods, default=4)
-    is_morning_only_4p = (not has_afternoon and max_morning_p <= 4)
 
-    if params.flags["avoid_teacher_4_consecutive_morning"] and not is_morning_only_4p:
+    if params.flags["avoid_teacher_4_consecutive_morning"] and max_morning_p >= 5:
         for t in teachers:
             if load[t] <= params.max_load_for_4consec_penalty:
                 for wd in weekdays:
                     if (t, wd, "S") in cnt:
                         hm = m.NewBoolVar(f"hm_t{t}_wd{wd}")
-                        m.Add(cnt[t, wd, "S"] >= 4).OnlyEnforceIf(hm)
-                        m.Add(cnt[t, wd, "S"] <= 3).OnlyEnforceIf(hm.Not())
+                        m.Add(cnt[t, wd, "S"] >= 5).OnlyEnforceIf(hm)
+                        m.Add(cnt[t, wd, "S"] <= 4).OnlyEnforceIf(hm.Not())
                         penalty_terms["II.14"].append(hm)
 
     # 5. II.9 Nghỉ trọn chiều

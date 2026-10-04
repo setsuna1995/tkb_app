@@ -179,16 +179,14 @@ def compute_tkb_health_score(inp: SchedulingInput, assignment: dict) -> dict:
     recommendations += _recommendations(day_cap_violations, "error", "Giáo viên")
     teacher_penalty += len(day_cap_violations) * 15.0
 
-    # 2.4 Dạy 4 tiết sáng liên tiếp
-    # Tự động thích ứng theo cơ cấu ca học:
-    # - Trường toàn sáng 4 tiết: Dạy 4 tiết là trọn vẹn 1 buổi học chuẩn (tiết 1-4), không trừ điểm.
-    # - Trường 2 ca hoặc sáng 5 tiết: Khuyến nghị mức info, trừ điểm nhẹ tối đa 15 điểm.
-    has_afternoon = any(s.ts.session == "C" for s in inp.slots)
-    max_morning_p = max((s.ts.period for s in inp.slots if s.ts.session == "S"), default=4)
-    is_morning_only_4p = (not has_afternoon and max_morning_p <= 4)
+    # 2.4 Dạy 5 tiết sáng liên tiếp
+    # Dạy 4 tiết sáng là bình thường (khối 6-7 có 4 tiết hoặc gom tiết để nghỉ), không trừ điểm.
+    # Chỉ khi trường có ca sáng 5 tiết và GV dạy trọn 5 tiết liên tục mới khuyến nghị mức info.
+    morning_periods = {s.ts.period for s in inp.slots if s.ts.session == "S"}
+    max_morning_p = max(morning_periods, default=4)
 
     consec_morning_violations = found.get("II.14", [])
-    if not is_morning_only_4p:
+    if max_morning_p >= 5:
         recommendations += _recommendations(consec_morning_violations, "info", "Giáo viên")
         teacher_penalty += min(15.0, len(consec_morning_violations) * 3.0)
 

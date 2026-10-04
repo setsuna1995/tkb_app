@@ -14,7 +14,7 @@ from core.rules.params import RULE_FLAG_NAMES
 from tests.rule_helpers import pick, view_and_params
 
 NO_LONE_THRESHOLD = SchedulingConfig(min_weekly_periods_for_lone_penalty=0)
-TWELVE_PERIODS_MISSING_THURSDAY = [(2, p) for p in range(1, 5)] + [(4, p) for p in range(1, 5)] + [(6, p) for p in range(1, 5)]
+TWELVE_PERIODS_MISSING_MONDAY = [(3, p) for p in range(1, 5)] + [(4, p) for p in range(1, 5)] + [(5, p) for p in range(1, 5)]
 
 
 def _slot(slot_id, weekday, session, period, class_id=101):
@@ -38,22 +38,22 @@ def _teacher_1(slots, config=None, **input_kwargs):
 # --- II.3 ---
 
 def test_missing_mandatory_morning():
-    view, params = _teacher_1(_morning_slots(TWELVE_PERIODS_MISSING_THURSDAY))
-    assert (1, 5) in pick(detect_teacher_missing_mandatory_mornings(view, params), "teacher_id", "weekday")
+    view, params = _teacher_1(_morning_slots(TWELVE_PERIODS_MISSING_MONDAY))
+    assert (1, 2) in pick(detect_teacher_missing_mandatory_mornings(view, params), "teacher_id", "weekday")
 
 
 def test_missing_mandatory_morning_honours_pinned_full_day_off():
-    view, params = _teacher_1(_morning_slots(TWELVE_PERIODS_MISSING_THURSDAY),
-                              teachers=[Teacher(1, "GV 1", pinned_full_day_off=5)])
-    assert (1, 5) not in pick(detect_teacher_missing_mandatory_mornings(view, params), "teacher_id", "weekday")
+    view, params = _teacher_1(_morning_slots(TWELVE_PERIODS_MISSING_MONDAY),
+                              teachers=[Teacher(1, "GV 1", pinned_full_day_off=2)])
+    assert (1, 2) not in pick(detect_teacher_missing_mandatory_mornings(view, params), "teacher_id", "weekday")
 
 
 def test_missing_mandatory_morning_excuses_teacher_busy_that_morning():
-    taught = _morning_slots(TWELVE_PERIODS_MISSING_THURSDAY)
-    thursday = [_slot(101, 5, "S", 1), _slot(102, 5, "S", 2)]
-    view, params = view_and_params(taught + thursday, {s.slot_id: 1 for s in taught},
+    taught = _morning_slots(TWELVE_PERIODS_MISSING_MONDAY)
+    monday = [_slot(101, 2, "S", 1), _slot(102, 2, "S", 2)]
+    view, params = view_and_params(taught + monday, {s.slot_id: 1 for s in taught},
                                    assigned_teacher={(1, 101): 1}, ban_busy={(1, 101), (1, 102)})
-    assert (1, 5) not in pick(detect_teacher_missing_mandatory_mornings(view, params), "teacher_id", "weekday")
+    assert (1, 2) not in pick(detect_teacher_missing_mandatory_mornings(view, params), "teacher_id", "weekday")
 
 
 # --- II.4 / II.8 ---
@@ -91,16 +91,27 @@ def test_exempt_teacher_is_skipped_by_every_lone_rule():
 
 # --- II.14 / II.7 ---
 
-def test_four_period_morning_only_counts_for_lighter_teachers():
-    view, params = _teacher_1(_morning_slots([(2, p) for p in range(1, 5)]))
-    assert pick(detect_teacher_4_consecutive_mornings(view, params), "teacher_id", "weekday") == [(1, 2)]
-    assert detect_teacher_4_consecutive_mornings(view, replace(params, max_load_for_4consec_penalty=2)) == []
+def test_four_period_morning_is_allowed_five_period_only_counts_for_lighter_teachers():
+    # 4 periods continuous morning -> NO VIOLATION
+    view4, params4 = _teacher_1(_morning_slots([(2, p) for p in range(1, 5)]))
+    assert detect_teacher_4_consecutive_mornings(view4, params4) == []
+
+    # 5 periods continuous morning -> VIOLATION for lighter teachers
+    view5, params5 = _teacher_1(_morning_slots([(2, p) for p in range(1, 6)]))
+    assert pick(detect_teacher_4_consecutive_mornings(view5, params5), "teacher_id", "weekday") == [(1, 2)]
+    assert detect_teacher_4_consecutive_mornings(view5, replace(params5, max_load_for_4consec_penalty=2)) == []
 
 
 def test_teacher_gap_within_session():
-    slots = [_slot(1, 2, "S", 1), _slot(2, 2, "S", 4)]
-    view, params = view_and_params(slots, {1: 100, 2: 100}, assigned_teacher={(100, 101): 10})
-    gaps = detect_teacher_gaps(view, params)
+    # Gap of 1 period (tiết 1 và tiết 3, trống tiết 2) -> KHÔNG tính là vi phạm
+    slots_single = [_slot(1, 2, "S", 1), _slot(2, 2, "S", 3)]
+    view_s, params_s = view_and_params(slots_single, {1: 100, 2: 100}, assigned_teacher={(100, 101): 10})
+    assert detect_teacher_gaps(view_s, params_s) == []
+
+    # Gap of >= 2 periods (tiết 1 và tiết 4, lủng tiết 2-3) -> TÍNH là vi phạm II.7
+    slots_multi = [_slot(1, 2, "S", 1), _slot(2, 2, "S", 4)]
+    view_m, params_m = view_and_params(slots_multi, {1: 100, 2: 100}, assigned_teacher={(100, 101): 10})
+    gaps = detect_teacher_gaps(view_m, params_m)
     assert pick(gaps, "teacher_id", "weekday", "session") == [(10, 2, "S")]
     assert "tiết dạy: 1, 4" in gaps[0].detail
 
