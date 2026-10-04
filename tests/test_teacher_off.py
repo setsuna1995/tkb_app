@@ -22,14 +22,13 @@ def test_assign_off_slots_reports_shortfall_when_teacher_over_excluded():
         1: Teacher(teacher_id=1, name="Hieu Truong", role="Hiệu trưởng"),
     }
     rng = random.Random(42)
-    # TPT/BGH forbids ALL mornings (wd 2-7) plus the standard FORBIDDEN_OFF_CELLS
-    # (which already includes T5 chiều, T6 chiều) -- eligible afternoon cells left:
-    # T2, T3, T4, T7 chiều = 4 cells. Ask for more off-sessions than that.
-    gv_off_slots, shortfall = _assign_off_slots({1}, teachers_by_id, rng, off_slot_count=5)
+    # TPT/BGH forbids ALL mornings (wd 2-7) -- eligible afternoon cells left:
+    # 6 cells (T2..T7 chiều). Ask for more off-sessions than that (e.g. 7).
+    gv_off_slots, shortfall = _assign_off_slots({1}, teachers_by_id, rng, off_slot_count=7)
     assert 1 in shortfall
     assigned_count, required_count = shortfall[1]
-    assert required_count == 5
-    assert assigned_count < 5
+    assert required_count == 7
+    assert assigned_count < 7
     assert assigned_count == len(gv_off_slots[1])
 
 
@@ -41,6 +40,6 @@ def test_assign_off_slots_shortfall_is_deterministic_across_rng_seeds():
     seeds_shortfalls = []
     for seed in (1, 2, 3, 999):
         rng = random.Random(seed)
-        _, shortfall = _assign_off_slots({1}, teachers_by_id, rng, off_slot_count=5)
+        _, shortfall = _assign_off_slots({1}, teachers_by_id, rng, off_slot_count=7)
         seeds_shortfalls.append(shortfall[1])  # (assigned_count, required_count) tuple
     assert len(set(seeds_shortfalls)) == 1

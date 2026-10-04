@@ -100,3 +100,36 @@ def run(inp: SchedulingInput, *, max_attempts: int = SO_LAN_THU,
             failure_reason=f"Lỗi khi chạy bộ giải CP-SAT: {exc}",
             solver_name="cpsat",
         )
+
+
+def run_three_strategies(inp: SchedulingInput, progress_cb=None) -> dict[str, ScheduleResult]:
+    """Chạy đồng thời 3 chiến lược nới lỏng (Triệt tiêu buổi lẻ, Kỷ luật hiện diện, Cân bằng tối ưu)
+    cho phép người dùng lựa chọn phương án ưng ý nhất."""
+    from core.scheduler import cpsat_model
+
+    config = inp.config
+    time_limit = getattr(config, "cpsat_time_limit_seconds", 45)
+    try:
+        built = cpsat_model.build_model(inp)
+        raw_results = cpsat_model.solve_three_strategies(built, time_limit_s=time_limit, progress_cb=progress_cb)
+        results = {}
+        for strat_key, res in raw_results.items():
+            if res is not None:
+                results[strat_key] = res
+            else:
+                results[strat_key] = ScheduleResult(
+                    success=False,
+                    attempts_tried=1,
+                    successes_found=0,
+                    cells_total=len(inp.slots),
+                    failure_reason=f"Chiến lược {strat_key} không tìm được phương án thỏa mãn ràng buộc.",
+                    solver_name="cpsat",
+                )
+        return results
+    except Exception as exc:
+        logging.exception("Lỗi khi chạy 3 chiến lược: %s", exc)
+        return {
+            "anti_lone": ScheduleResult(success=False, failure_reason=str(exc)),
+            "presence": ScheduleResult(success=False, failure_reason=str(exc)),
+            "pareto": ScheduleResult(success=False, failure_reason=str(exc)),
+        }

@@ -61,6 +61,7 @@ class Teacher:
     off_sessions_override: Optional[int] = None    # None = dùng config.teacher_off_sessions_per_week chung
     pinned_full_day_off: Optional[int] = None      # thứ (2-7) ghim nghỉ TRỌN NGÀY -- ngoại lệ "không nghỉ trọn ngày"
     pinned_afternoon_off: Optional[int] = None     # thứ ghim nghỉ 1 buổi CHIỀU cố định
+    min_afternoon_off: Optional[int] = None        # số buổi CHIỀU tối thiểu muốn nghỉ trong tuần (tự do/thuận tiện)
     reduction_override: Optional[int] = None       # Số tiết giảm trừ tùy chỉnh trực tiếp cho GV (nếu có)
 
 
@@ -128,7 +129,7 @@ class SchedulingConfig:
     teacher_off_sessions_per_week: int = 1
     teacher_off_sessions_mode: str = "soft"  # "soft" (Ưu tiên cao) hoặc "hard" (Bắt buộc tuyệt đối)
     forbidden_off_cells: frozenset = field(
-        default_factory=lambda: frozenset({(2, "S"), (5, "S"), (6, "S"), (5, "C"), (6, "C")})
+        default_factory=lambda: frozenset({(2, "S")})
     )
     reserved_off_weekdays_chieu: tuple = (5, 6)
     heavy_subject_priority_periods: int = 4   # Tiêu chí II.5: 4 tiết đầu buổi sáng ưu tiên môn "Nặng"; 0 = tắt
@@ -140,7 +141,7 @@ class SchedulingConfig:
     avoid_teacher_gaps: bool = True  # Tránh tiết trống/lủng của GV trong buổi (không để dạy tiết 1 nghỉ 2-3 mới dạy 4)
     avoid_teacher_lone_periods: bool = True  # Tránh GV chỉ có 1 tiết/ngày hoặc sáng 1 tiết + chiều 1 tiết
     balance_afternoon_teachers: bool = True  # Cân đối buổi chiều, tránh GV nghỉ full chiều khi dạy lớp có tiết chiều
-    mandatory_morning_weekdays: tuple = (2, 5, 6)  # Các sáng bắt buộc toàn thể GV có mặt/đi làm
+    mandatory_morning_weekdays: tuple = (2,)  # Các sáng bắt buộc toàn thể GV có mặt/đi làm (mặc định chỉ sáng Thứ 2)
     strict_morning_weekdays: tuple = ()
     # Các sáng mà MỌI GV đều phải có tiết dạy, không xét ngưỡng tải
     # (min_weekly_periods_for_mandatory_morning không áp dụng cho các sáng này).

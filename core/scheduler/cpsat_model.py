@@ -41,6 +41,7 @@ from core.scheduler.cpsat.solver import (
     _presolve_capacity_screening,
     _diagnose_and_solve,
     solve_to_result,
+    solve_three_strategies,
     solve,
 )
 from core.scheduler.hdtn import get_hdtn_pinned_slots_for_class
@@ -181,6 +182,7 @@ __all__ = [
     "_presolve_capacity_screening",
     "_diagnose_and_solve",
     "solve_to_result",
+    "solve_three_strategies",
     "solve",
     "_add_teacher_constraints",
     "_add_off_day_constraints",

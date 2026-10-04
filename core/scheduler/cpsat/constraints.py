@@ -203,9 +203,12 @@ def _add_off_day_constraints(built: CpSatModel, vars_by_teacher_session: dict) -
             continue
 
         off_vars = []
+        aft_off_vars = []
         for (wd, sess) in eligible_sessions:
             off_var = m.NewBoolVar(f"off_t{teacher_id}_wd{wd}_{sess}")
             off_vars.append(off_var)
+            if sess == "C":
+                aft_off_vars.append(off_var)
             if (wd, sess) in pinned:
                 m.Add(off_var == 1)
             teach_vars = vars_by_teacher_session.get((teacher_id, wd, sess), [])
@@ -239,6 +242,21 @@ def _add_off_day_constraints(built: CpSatModel, vars_by_teacher_session: dict) -
             shortfall = m.NewIntVar(0, required_total, f"off_short_t{teacher_id}")
             m.Add(shortfall >= required_total - sum(off_vars))
             off_shortfalls.append(shortfall)
+
+        # Ràng buộc số buổi chiều tối thiểu muốn nghỉ (min_afternoon_off, ví dụ GV Hồng nghỉ 2 buổi chiều)
+        if teacher and teacher.min_afternoon_off is not None and teacher.min_afternoon_off > 0:
+            no_teach_afternoons = sum(
+                1 for (wd, sess) in all_wd_sess
+                if sess == "C" and not vars_by_teacher_session.get((teacher_id, wd, sess))
+            )
+            required_aft = max(0, teacher.min_afternoon_off - no_teach_afternoons)
+            if required_aft > 0 and aft_off_vars:
+                if is_feasible_hard and len(aft_off_vars) >= required_aft:
+                    m.Add(sum(aft_off_vars) >= required_aft)
+                else:
+                    aft_shortfall = m.NewIntVar(0, required_aft, f"aft_off_short_t{teacher_id}")
+                    m.Add(aft_shortfall >= required_aft - sum(aft_off_vars))
+                    off_shortfalls.append(aft_shortfall)
 
         # Phạt cực nặng cho người không được nghỉ buổi nào (sum(off_vars) == 0)
         # Chỉ phạt nếu GV về mặt toán học có khả năng nghỉ ít nhất 1 buổi

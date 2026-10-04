@@ -82,10 +82,8 @@ GVCN_MONDAY_PERIOD2_MISS_PENALTY = 50000  # Phạt nặng khi GVCN không dạy 
                                     # GVCN khả dụng ở đúng ô này để thuật toán chọn).
 
 
-# Buổi không được chọn làm buổi nghỉ của GV: sáng Thứ 2/5/6 (hoạt động cố định
-# buổi sáng những ngày này), và chiều Thứ 5/6 (đã bị khoá hẳn khỏi TKB ở
-# core/frame.py, dành cho ôn bồi dưỡng -- không phải "buổi nghỉ" GV được chọn).
-FORBIDDEN_OFF_CELLS = {(2, "S"), (5, "S"), (6, "S"), (5, "C"), (6, "C")}
+# Buổi không được chọn làm buổi nghỉ của GV: Mặc định chỉ cấm sáng Thứ 2 (chào cờ & họp đầu tuần)
+FORBIDDEN_OFF_CELLS = {(2, "S")}
 
 FAILURE_MESSAGE = (
     "Không xếp được sau {attempts} lần thử. Nguyên nhân hay gặp:\n"

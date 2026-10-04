@@ -114,6 +114,14 @@ with tab_grid:
                 st.rerun()
 
         with pcol3:
+            if st.button("🎵 Chỉ dạy Tiết 2-3 (Thứ 3 & 4)", width="stretch", help="Ví dụ: GV Hà (Âm nhạc) - Bận hết tuần chỉ dạy sáng T3 & T4 tiết 2-3"):
+                all_cells = {(w, s, p) for w in range(2, 8) for s in ("S", "C") for p in range(1, 6)}
+                open_cells = {(3, "S", 2), (3, "S", 3), (4, "S", 2), (4, "S", 3)}
+                new_cells = all_cells - open_cells
+                repo.set_teacher_busy_cells(conn, sel_tid, new_cells)
+                st.success(f"Đã cập nhật: {selected_teacher_name} bận cả tuần, chỉ mở tiết 2 và 3 sáng Thứ 3 & Thứ 4!")
+                st.rerun()
+
             if st.button("⛔ Bận S4 & C1 cả tuần", width="stretch", help="Ví dụ: Thầy Hồng (GDTC)"):
                 new_cells = set(busy_cells)
                 for w in range(2, 8):

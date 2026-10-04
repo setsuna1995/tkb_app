@@ -271,9 +271,20 @@ def _presolve_capacity_screening(built: CpSatModel) -> set[str]:
     return set()
 
 
-def _select_fallback_relaxations(hard_rids: Sequence[str]) -> set[str]:
-    """Lựa chọn quy tắc nới lỏng dự phòng theo thứ tự ưu tiên: II.4 -> II.8 -> II.3."""
-    for candidate in ("II.4", "II.8", "II.3"):
+def _select_fallback_relaxations(hard_rids: Sequence[str], strategy: str = "default") -> set[str]:
+    """Lựa chọn quy tắc nới lỏng dự phòng theo chiến lược cấu hình:
+    - 'anti_lone': Ưu tiên cao nhất cho II.4 (không buổi lẻ), nới lỏng II.3 -> II.8 trước.
+    - 'presence':  Ưu tiên cao nhất cho II.3 (sáng có mặt), nới lỏng II.4 -> II.8 trước.
+    - 'pareto'/'default': Cân bằng đa mục tiêu, nới lỏng II.8 -> II.4 -> II.3.
+    """
+    if strategy == "anti_lone":
+        order = ("II.3", "II.8", "II.4")
+    elif strategy == "presence":
+        order = ("II.4", "II.8", "II.3")
+    else:
+        order = ("II.8", "II.4", "II.3")
+
+    for candidate in order:
         if candidate in hard_rids:
             return {candidate}
     return set(hard_rids)
@@ -299,7 +310,8 @@ def _create_solver(built: CpSatModel, workers: Optional[int] = None) -> cp_model
 
 
 def _diagnose_and_solve(built: CpSatModel, solver: cp_model.CpSolver, time_limit_s: float,
-                        progress_cb: Optional[Callable[[dict], None]] = None) -> dict:
+                        progress_cb: Optional[Callable[[dict], None]] = None,
+                        strategy: str = "default") -> dict:
     """Chẩn đoán và giải tối ưu hóa toàn cục:
     Ưu tiên tuyệt đối các tiêu chí cốt lõi của nhà trường (II.4: không buổi lẻ, II.8: không chia lẻ).
     Sử dụng ràng buộc trực tiếp ở pass chính để CP-SAT presolver suy biến miền giá trị term == 0 ngay từ đầu,
@@ -397,7 +409,9 @@ def _diagnose_and_solve(built: CpSatModel, solver: cp_model.CpSolver, time_limit
             if diag["passes_run"] == 1:
                 diag["unsat_core"] = sorted(offending)
             if not offending:
-                offending = _select_fallback_relaxations(hard_rids)
+                offending = _select_fallback_relaxations(hard_rids, strategy=strategy)
+            elif len(offending) > 1:
+                offending = _select_fallback_relaxations(list(offending), strategy=strategy)
 
             relaxed |= offending
             diag["relaxed_by_diagnosis"] = sorted(relaxed)
@@ -405,24 +419,53 @@ def _diagnose_and_solve(built: CpSatModel, solver: cp_model.CpSolver, time_limit
 
         # Nếu UNKNOWN (timeout): Nới lỏng quy tắc dự phòng theo thứ tự ưu tiên
         if status == cp_model.UNKNOWN:
-            relaxed |= _select_fallback_relaxations(hard_rids)
+            relaxed |= _select_fallback_relaxations(hard_rids, strategy=strategy)
             diag["relaxed_by_diagnosis"] = sorted(relaxed)
             continue
 
 
 def solve_to_result(built: CpSatModel, time_limit_s: float = 30.0,
                     workers: Optional[int] = None,
-                    progress_cb: Optional[Callable[[dict], None]] = None) -> Optional[ScheduleResult]:
+                    progress_cb: Optional[Callable[[dict], None]] = None,
+                    strategy: str = "default") -> Optional[ScheduleResult]:
     """Giải mô hình và trả về ScheduleResult hoàn chỉnh, hoặc None nếu không giải được."""
     if not _HAS_ORTOOLS or cp_model is None:
         raise CpSatUnavailable("ortools chưa được cài")
 
     solver = _create_solver(built, workers=workers)
-    diag = _diagnose_and_solve(built, solver, float(time_limit_s), progress_cb=progress_cb)
+    diag = _diagnose_and_solve(built, solver, float(time_limit_s), progress_cb=progress_cb, strategy=strategy)
     if diag["status"] not in (cp_model.OPTIMAL, cp_model.FEASIBLE):
         return None
 
     return build_result(built, solver, diagnostics=diag)
+
+
+def solve_three_strategies(built: CpSatModel, time_limit_s: float = 30.0,
+                           workers: Optional[int] = None,
+                           progress_cb: Optional[Callable[[dict], None]] = None) -> dict[str, Optional[ScheduleResult]]:
+    """Giải đồng thời 3 chiến lược nới lỏng để người dùng chọn:
+    - 'anti_lone': Ưu tiên triệt tiêu buổi lẻ (phạt nặng II.4, sẵn sàng nới lỏng II.3/II.8 nếu kẹt)
+    - 'presence':  Ưu tiên kỷ luật hiện diện (giữ vững II.3 sáng Thứ 2 bắt buộc, nới lỏng II.4 nếu kẹt)
+    - 'pareto':    Cân bằng đa mục tiêu Pareto (hài hòa giữa số buổi lẻ và phân bố các ngày)
+    """
+    strategies = [
+        ("anti_lone", "PA1: Triệt tiêu buổi lẻ"),
+        ("presence", "PA2: Kỷ luật hiện diện"),
+        ("pareto", "PA3: Cân bằng tối ưu"),
+    ]
+    results = {}
+    per_strat_tl = max(6.0, min(float(time_limit_s) / 2.0, 15.0))
+    for strat_key, strat_label in strategies:
+        if progress_cb:
+            progress_cb({
+                "event": "strategy_start",
+                "strategy": strat_key,
+                "strategy_label": strat_label,
+            })
+        res = solve_to_result(built, time_limit_s=per_strat_tl, workers=workers,
+                              progress_cb=progress_cb, strategy=strat_key)
+        results[strat_key] = res
+    return results
 
 
 def solve(built: CpSatModel, time_limit_s: float = 10.0,

@@ -43,10 +43,11 @@ from core.scheduler.quality import (
 from core.scheduler.refinement import (
     compute_candidate_metrics, validate_and_swap_slots,
 )
-from core.scheduler.engine import run
+from core.scheduler.engine import run, run_three_strategies
 
 __all__ = [
     "run",
+    "run_three_strategies",
     "compute_candidate_metrics",
     "validate_and_swap_slots",
     "_State",

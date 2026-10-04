@@ -75,9 +75,15 @@ def delete_subject(conn: sqlite3.Connection, subject_id: int) -> None:
 def list_teachers(conn: sqlite3.Connection) -> list[Teacher]:
     cols = {row["name"] for row in conn.execute("PRAGMA table_info(teachers)")}
     has_reduction = "reduction_override" in cols
+    has_min_afternoon = "min_afternoon_off" in cols
+    extra_cols = ""
+    if has_reduction:
+        extra_cols += ", reduction_override"
+    if has_min_afternoon:
+        extra_cols += ", min_afternoon_off"
     rows = conn.execute(
         "SELECT teacher_id, name, role, must_monday, is_gvcn, "
-        f"off_sessions_override, pinned_full_day_off, pinned_afternoon_off{', reduction_override' if has_reduction else ''} "
+        f"off_sessions_override, pinned_full_day_off, pinned_afternoon_off{extra_cols} "
         "FROM teachers ORDER BY name"
     ).fetchall()
     return [Teacher(
@@ -85,6 +91,7 @@ def list_teachers(conn: sqlite3.Connection) -> list[Teacher]:
         off_sessions_override=r["off_sessions_override"],
         pinned_full_day_off=r["pinned_full_day_off"],
         pinned_afternoon_off=r["pinned_afternoon_off"],
+        min_afternoon_off=r["min_afternoon_off"] if has_min_afternoon else None,
         reduction_override=r["reduction_override"] if has_reduction else None,
     ) for r in rows]
 
@@ -97,13 +104,16 @@ def get_teacher_by_name(conn: sqlite3.Connection, name: str) -> Optional[int]:
 def upsert_teacher(conn: sqlite3.Connection, name: str, role: str = "", must_monday: bool = False,
                     is_gvcn: bool = False, teacher_id: Optional[int] = None,
                     off_sessions_override=_KEEP, pinned_full_day_off=_KEEP, pinned_afternoon_off=_KEEP,
-                    reduction_override=_KEEP) -> int:
+                    min_afternoon_off=_KEEP, reduction_override=_KEEP) -> int:
     name = name.strip()
     if teacher_id is None:
         teacher_id = get_teacher_by_name(conn, name)
     cols = {row["name"] for row in conn.execute("PRAGMA table_info(teachers)")}
     if "reduction_override" not in cols:
         conn.execute("ALTER TABLE teachers ADD COLUMN reduction_override INTEGER")
+        conn.commit()
+    if "min_afternoon_off" not in cols:
+        conn.execute("ALTER TABLE teachers ADD COLUMN min_afternoon_off INTEGER")
         conn.commit()
 
     if teacher_id is not None:
@@ -113,6 +123,7 @@ def upsert_teacher(conn: sqlite3.Connection, name: str, role: str = "", must_mon
             ("off_sessions_override", off_sessions_override),
             ("pinned_full_day_off", pinned_full_day_off),
             ("pinned_afternoon_off", pinned_afternoon_off),
+            ("min_afternoon_off", min_afternoon_off),
             ("reduction_override", reduction_override),
         ):
             if val is not _KEEP:
@@ -124,11 +135,12 @@ def upsert_teacher(conn: sqlite3.Connection, name: str, role: str = "", must_mon
         return teacher_id
     cur = conn.execute(
         "INSERT INTO teachers (name, role, must_monday, is_gvcn, "
-        "off_sessions_override, pinned_full_day_off, pinned_afternoon_off, reduction_override) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+        "off_sessions_override, pinned_full_day_off, pinned_afternoon_off, min_afternoon_off, reduction_override) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
         (name, role, int(must_monday), int(is_gvcn),
          None if off_sessions_override is _KEEP else off_sessions_override,
          None if pinned_full_day_off is _KEEP else pinned_full_day_off,
          None if pinned_afternoon_off is _KEEP else pinned_afternoon_off,
+         None if min_afternoon_off is _KEEP else min_afternoon_off,
          None if reduction_override is _KEEP else reduction_override),
     )
     conn.commit()

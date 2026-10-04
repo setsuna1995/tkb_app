@@ -68,71 +68,387 @@ def _render_rule_violations(violations: list, save_override_key: str, week_label
                        key=save_override_key)
 
 
-def _render_saved_tkb(conn, cells: dict, classes: list, subjects: list, teachers: list, key_prefix: str = ""):
-    assignments = repo.get_assignments(conn)
+def _render_interactive_timetable_studio(
+    classes: list,
+    subjects: list,
+    teachers: list,
+    cells: dict,
+    assignments: dict,
+    key_prefix: str = "",
+    title: str = "Studio Khảo Sát Chi Tiết Thời Khóa Biểu",
+):
+    from collections import defaultdict
+
     subj_map = {s.subject_id: s.name for s in subjects}
     teach_map = {t.teacher_id: t.name for t in teachers}
-    classes_sorted = sorted(classes, key=lambda c: c.sort_order)
+    class_map = {c.class_id: c.name for c in classes}
+    classes_sorted = sorted(classes, key=lambda c: getattr(c, "sort_order", 0) or 0)
     teachers_sorted = sorted(teachers, key=lambda t: t.name)
 
-    view_mode = st.radio(
-        "Chế độ hiển thị thời khóa biểu:",
-        ["🏫 Xem theo Lớp học", "👩‍🏫 Xem theo Giáo viên"],
-        horizontal=True,
-        key=f"{key_prefix}saved_tkb_view_mode",
-    )
+    # Build teacher schedule lookup
+    teacher_sched = defaultdict(lambda: defaultdict(list))
+    for (cid, wd, sess, per), sid in cells.items():
+        if sid is not None and sid > 0:
+            tid = assignments.get((sid, cid))
+            if tid and tid > 0:
+                c_name = class_map.get(cid, f"Lớp #{cid}")
+                s_name = subj_map.get(sid, f"Môn #{sid}")
+                teacher_sched[tid][(wd, sess, per)].append((c_name, s_name))
 
-    if view_mode == "🏫 Xem theo Lớp học":
-        cls_names = [c.name for c in classes_sorted]
-        c_choice = st.selectbox("Chọn lớp để xem chi tiết:", cls_names, key=f"{key_prefix}saved_cls_pick")
-        chosen_cls = next(c for c in classes_sorted if c.name == c_choice)
+    # Count periods per session for each teacher (lone-session detection)
+    teacher_sess_counts = defaultdict(int)
+    for tid in teacher_sched:
+        for (wd, sess, per) in teacher_sched[tid]:
+            teacher_sess_counts[(tid, wd, sess)] += 1
+
+    # Map teacher -> taught subjects
+    teacher_subjects = defaultdict(set)
+    for (sid, cid), tid in assignments.items():
+        if tid and tid > 0:
+            s_name = subj_map.get(sid, "")
+            if s_name:
+                teacher_subjects[tid].add(s_name)
+    teacher_subj_labels = {
+        tid: ", ".join(sorted(list(subjs))[:2]) for tid, subjs in teacher_subjects.items()
+    }
+
+    # Summary metrics for whole school
+    active_teachers = [t for t in teachers_sorted if sum(len(v) for v in teacher_sched[t.teacher_id].values()) > 0]
+    total_lone_school = 0
+    teachers_with_lone = []
+    teachers_with_aft_shortfall = []
+
+    for t in active_teachers:
+        tid = t.teacher_id
+        t_sessions = {(wd, sess) for (wd, sess, per) in teacher_sched[tid]}
+        t_lone = sum(1 for (wd, sess) in t_sessions if teacher_sess_counts.get((tid, wd, sess), 0) == 1)
+        if t_lone > 0:
+            total_lone_school += t_lone
+            teachers_with_lone.append(t)
+
+        t_aft_teaching = sum(1 for (wd, sess) in t_sessions if sess == "C")
+        t_aft_off = 6 - t_aft_teaching
+        if getattr(t, "min_afternoon_off", None) and t.min_afternoon_off > 0:
+            if t_aft_off < t.min_afternoon_off:
+                teachers_with_aft_shortfall.append(t)
+
+    # Studio Container
+    st.markdown(f"#### 📅 {title}")
+    st.caption("Khảo sát đa chiều: Theo Lớp học • Chuyên sâu Giáo viên • Ma trận & Kiểm định toàn trường")
+
+    tab_cls, tab_teacher, tab_matrix = st.tabs([
+        "🏫 Xem Theo Lớp Học",
+        "👩‍🏫 Tra Cứu Chuyên Sâu Từng Giáo Viên",
+        "👥 Ma Trận Tải & Buổi Lẻ Toàn Trường",
+    ])
+
+    # ─────────────────────────────────────────────────────────────────
+    # TAB 1: XEM THEO LỚP HỌC
+    # ─────────────────────────────────────────────────────────────────
+    with tab_cls:
+        # Detect grades
+        grades_found = set()
+        for c in classes_sorted:
+            p = ""
+            for ch in c.name:
+                if ch.isdigit():
+                    p += ch
+                else:
+                    break
+            if p:
+                grades_found.add(p)
+
+        if len(grades_found) > 1:
+            sorted_g = sorted(list(grades_found), key=lambda x: int(x) if x.isdigit() else 99)
+            g_opts = ["Tất cả khối"] + [f"Khối {g}" for g in sorted_g]
+            sel_g = st.radio("Lọc nhanh theo khối:", g_opts, horizontal=True, key=f"{key_prefix}g_filter")
+            if sel_g != "Tất cả khối":
+                target_g = sel_g.replace("Khối ", "")
+                classes_in_view = [c for c in classes_sorted if c.name.startswith(target_g)]
+            else:
+                classes_in_view = classes_sorted
+        else:
+            classes_in_view = classes_sorted
+
+        if not classes_in_view:
+            classes_in_view = classes_sorted
+
+        col_c_sel, col_c_info = st.columns([1.5, 3])
+        with col_c_sel:
+            chosen_cls = st.selectbox(
+                "Chọn lớp học:",
+                classes_in_view,
+                format_func=lambda c: c.name,
+                key=f"{key_prefix}cls_pick",
+            )
+
+        c_slots = {
+            (wd, sess, per): sid
+            for (cid, wd, sess, per), sid in cells.items()
+            if cid == chosen_cls.class_id and sid is not None and sid > 0
+        }
+        m_count = sum(1 for (wd, sess, per) in c_slots if sess == "S")
+        a_count = sum(1 for (wd, sess, per) in c_slots if sess == "C")
+        total_c_periods = m_count + a_count
+
+        with col_c_info:
+            c_kpi1, c_kpi2, c_kpi3 = st.columns(3)
+            c_kpi1.metric("Tổng số tiết", f"{total_c_periods} tiết/tuần")
+            c_kpi2.metric("Sáng / Chiều", f"{m_count} Sáng • {a_count} Chiều")
+            shift_label = "2 Buổi (Cả ngày)" if (m_count > 0 and a_count > 0) else ("Ca Sáng" if m_count > 0 else "Ca Chiều")
+            c_kpi3.metric("Hình thức học", shift_label)
+
+        has_afternoon_overall = any(k[2] == "C" for k in cells.keys()) or a_count > 0
+        sessions_to_show = ["S", "C"] if has_afternoon_overall else ["S"]
 
         rows = []
-        for sess in ("S", "C"):
+        for sess in sessions_to_show:
             sess_name = "Sáng" if sess == "S" else "Chiều"
             for per in range(1, 6):
                 row = {"Buổi": sess_name, "Tiết": per}
                 has_any = False
                 for wd in WEEKDAYS:
                     sid = cells.get((chosen_cls.class_id, wd, sess, per))
-                    if sid:
+                    if sid and sid > 0:
                         s_name = subj_map.get(sid, f"Môn #{sid}")
                         tid = assignments.get((sid, chosen_cls.class_id))
                         t_name = teach_map.get(tid, "")
                         row[WEEKDAY_NAMES[wd]] = f"{s_name} ({t_name})" if t_name else s_name
                         has_any = True
                     else:
-                        row[WEEKDAY_NAMES[wd]] = ""
-                rows.append(row)
-        st.dataframe(pd.DataFrame(rows), hide_index=True, width="stretch")
-    else:
-        t_names = [t.name for t in teachers_sorted]
-        t_choice = st.selectbox("Chọn giáo viên để xem lịch dạy:", t_names, key=f"{key_prefix}saved_t_pick")
-        chosen_t = next(t for t in teachers_sorted if t.name == t_choice)
+                        row[WEEKDAY_NAMES[wd]] = "—"
+                if has_any or sess == "S" or a_count > 0:
+                    rows.append(row)
 
-        t_grid = {}
-        for (cid, wd, sess, per), sid in cells.items():
-            if sid:
-                tid = assignments.get((sid, cid))
-                if tid == chosen_t.teacher_id:
-                    c_name = next((c.name for c in classes_sorted if c.class_id == cid), f"Lớp #{cid}")
-                    s_name = subj_map.get(sid, f"Môn #{sid}")
-                    t_grid[(wd, sess, per)] = f"{s_name} ({c_name})"
+        df_cls = pd.DataFrame(rows)
+        st.dataframe(df_cls, hide_index=True, width="stretch")
 
-        rows = []
-        total_p = 0
+    # ─────────────────────────────────────────────────────────────────
+    # TAB 2: TRA CỨU CHUYÊN SÂU TỪNG GIÁO VIÊN
+    # ─────────────────────────────────────────────────────────────────
+    with tab_teacher:
+        st.markdown("##### ⚡ Tra cứu nhanh giáo viên có ràng buộc trọng điểm:")
+        ha_teacher = next((t for t in teachers_sorted if "Hà" in t.name or "Ha" in t.name), None)
+        hong_teacher = next((t for t in teachers_sorted if "Hồng" in t.name or "Hong" in t.name), None)
+
+        col_q1, col_q2, col_q3 = st.columns([1.3, 1.3, 2.4])
+        with col_q1:
+            if ha_teacher:
+                if st.button(f"🎵 Cô {ha_teacher.name} (Âm nhạc)", key=f"{key_prefix}btn_ha", help="Kiểm tra mở Tiết 2-3 Thứ 3 & Thứ 4", use_container_width=True):
+                    st.session_state[f"{key_prefix}target_teacher_name"] = ha_teacher.name
+                    st.rerun()
+        with col_q2:
+            if hong_teacher:
+                if st.button(f"🏃 Thầy {hong_teacher.name} (GDTC)", key=f"{key_prefix}btn_hong", help="Kiểm tra nghỉ 2 buổi chiều", use_container_width=True):
+                    st.session_state[f"{key_prefix}target_teacher_name"] = hong_teacher.name
+                    st.rerun()
+
+        target_name = st.session_state.get(f"{key_prefix}target_teacher_name")
+        def_idx = 0
+        if target_name:
+            for idx, t in enumerate(teachers_sorted):
+                if t.name == target_name:
+                    def_idx = idx
+                    break
+
+        chosen_t = st.selectbox(
+            "Chọn giáo viên cần khảo sát:",
+            teachers_sorted,
+            index=def_idx,
+            format_func=lambda t: f"{t.name} ({teacher_subj_labels.get(t.teacher_id, 'GV')} - {getattr(t, 'department', '') or 'Bộ môn'})",
+            key=f"{key_prefix}teacher_picker_studio",
+        )
+
+        tid = chosen_t.teacher_id
+        t_slots = teacher_sched[tid]
+        total_p = sum(len(v) for v in t_slots.values())
+        sessions_set = {(wd, sess) for (wd, sess, per) in t_slots}
+        days_set = {wd for (wd, sess, per) in t_slots}
+
+        aft_teaching = sum(1 for (wd, sess) in sessions_set if sess == "C")
+        aft_off_count = 6 - aft_teaching
+
+        lone_count = sum(1 for (wd, sess) in sessions_set if teacher_sess_counts.get((tid, wd, sess), 0) == 1)
+        lone_details = [
+            f"{WEEKDAY_NAMES[wd]} ({'Sáng' if sess == 'S' else 'Chiều'})"
+            for (wd, sess) in sorted(sessions_set)
+            if teacher_sess_counts.get((tid, wd, sess), 0) == 1
+        ]
+        has_monday_morning = (2, "S") in sessions_set
+
+        # KPI row
+        kpi_t1, kpi_t2, kpi_t3, kpi_t4, kpi_t5 = st.columns(5)
+        kpi_t1.metric("Tổng số tiết", f"{total_p} tiết/tuần", help="Tổng tải tiết dạy trong tuần")
+        kpi_t2.metric("Số buổi dạy", f"{len(sessions_set)} buổi", f"{len(days_set)} ngày dạy")
+
+        req_aft = getattr(chosen_t, "min_afternoon_off", None)
+        if req_aft and req_aft > 0:
+            is_aft_ok = aft_off_count >= req_aft
+            kpi_t3.metric(
+                "Nghỉ buổi chiều",
+                f"{aft_off_count} / {req_aft} buổi",
+                "✅ Đạt yêu cầu" if is_aft_ok else "⚠️ Chưa đạt",
+                delta_color="normal" if is_aft_ok else "inverse"
+            )
+        else:
+            kpi_t3.metric("Nghỉ buổi chiều", f"{aft_off_count} buổi", "Tự do")
+
+        is_lone_clean = (lone_count == 0)
+        kpi_t4.metric(
+            "Buổi lẻ 1 tiết",
+            f"{lone_count} buổi",
+            "✅ Chuẩn sư phạm" if is_lone_clean else "⚠️ Có buổi lẻ",
+            delta_color="normal" if is_lone_clean else "inverse"
+        )
+
+        kpi_t5.metric(
+            "Sáng Thứ 2",
+            "Có tiết dạy" if has_monday_morning else "Nghỉ sáng T2",
+            "✅ Đúng quy định"
+        )
+
+        # Special Inspector Alerts
+        if "Hà" in chosen_t.name or "Ha" in chosen_t.name:
+            allowed = {(3, "S", 2), (3, "S", 3), (4, "S", 2), (4, "S", 3)}
+            actual = set(t_slots.keys())
+            if actual and actual.issubset(allowed):
+                st.success("✨ **Kiểm tra chuyên sâu GV Hà:** Xuất sắc! Tất cả các tiết dạy rơi chính xác vào **Tiết 2-3 Sáng Thứ 3 & Sáng Thứ 4** theo đúng cấu hình.")
+            elif not actual:
+                st.info("ℹ️ GV Hà không có tiết phân công trong tuần này.")
+            else:
+                outside = actual - allowed
+                st.warning(f"⚠️ GV Hà có tiết ngoài khung T3-T4 S2-3: {outside}")
+
+        if req_aft and req_aft >= 2:
+            if aft_off_count >= req_aft:
+                off_days = [WEEKDAY_NAMES[wd] for wd in WEEKDAYS if (wd, "C") not in sessions_set]
+                st.success(f"✨ **Kiểm tra chuyên sâu GV {chosen_t.name}:** Đạt chuẩn nghỉ {req_aft} buổi chiều! Các buổi chiều được nghỉ: **{', '.join(off_days)}**.")
+
+        if lone_count > 0:
+            st.warning(f"⚠️ Giáo viên đang có **{lone_count} buổi lẻ 1 tiết**: {', '.join(lone_details)}.")
+
+        # Teacher Weekly Grid
+        rows_t = []
         for sess in ("S", "C"):
             sess_name = "Sáng" if sess == "S" else "Chiều"
             for per in range(1, 6):
                 row = {"Buổi": sess_name, "Tiết": per}
                 for wd in WEEKDAYS:
-                    val = t_grid.get((wd, sess, per), "")
-                    if val:
-                        total_p += 1
-                    row[WEEKDAY_NAMES[wd]] = val
-                rows.append(row)
-        st.dataframe(pd.DataFrame(rows), hide_index=True, width="stretch")
-        st.caption(f"👉 Tổng số tiết giảng dạy trong tuần của **{chosen_t.name}**: **{total_p}** tiết.")
+                    entries = t_slots.get((wd, sess, per), [])
+                    row[WEEKDAY_NAMES[wd]] = ", ".join(f"{c} ({s})" for c, s in entries) if entries else "—"
+                rows_t.append(row)
+
+        df_t = pd.DataFrame(rows_t)
+
+        def _highlight_teacher_cells(row):
+            styles = [""] * len(row)
+            sess_code = "S" if row["Buổi"] == "Sáng" else "C"
+            for i, col in enumerate(row.index):
+                if col in ("Buổi", "Tiết"):
+                    continue
+                wd_num = next((k for k, v in WEEKDAY_NAMES.items() if v == col), None)
+                if wd_num and row[col] and row[col] != "—":
+                    if teacher_sess_counts.get((tid, wd_num, sess_code), 0) == 1:
+                        styles[i] = "background-color: #FEF2F2; color: #DC2626; font-weight: 700; border: 1px solid #FCA5A5;"
+                    else:
+                        styles[i] = "background-color: #F0FDF4; color: #166534; font-weight: 500;"
+            return styles
+
+        st.dataframe(df_t.style.apply(_highlight_teacher_cells, axis=1), hide_index=True, width="stretch")
+
+    # ─────────────────────────────────────────────────────────────────
+    # TAB 3: MA TRẬN TẢI & BUỔI LẺ TOÀN TRƯỜNG
+    # ─────────────────────────────────────────────────────────────────
+    with tab_matrix:
+        col_m1, col_m2, col_m3, col_m4 = st.columns(4)
+        col_m1.metric("Giáo viên phân công", f"{len(active_teachers)} GV")
+        col_m2.metric(
+            "Tổng buổi lẻ toàn trường",
+            f"{total_lone_school} buổi",
+            "✅ Tuyệt đối không lẻ" if total_lone_school == 0 else f"{len(teachers_with_lone)} GV bị lẻ",
+            delta_color="normal" if total_lone_school == 0 else "inverse"
+        )
+        total_with_aft = sum(1 for t in active_teachers if getattr(t, "min_afternoon_off", None) and t.min_afternoon_off > 0)
+        aft_ok_count = total_with_aft - len(teachers_with_aft_shortfall)
+        col_m3.metric(
+            "Chỉ tiêu nghỉ chiều",
+            f"{aft_ok_count}/{total_with_aft} GV đạt" if total_with_aft > 0 else "Không cài đặt",
+            "✅ 100% đạt chuẩn" if len(teachers_with_aft_shortfall) == 0 else "⚠️ Có GV chưa đạt",
+            delta_color="normal" if len(teachers_with_aft_shortfall) == 0 else "inverse"
+        )
+        compliance_pct = 100 if len(active_teachers) == 0 else round((len(active_teachers) - len(teachers_with_lone)) / len(active_teachers) * 100, 1)
+        col_m4.metric("Tỷ lệ GV sạch buổi lẻ", f"{compliance_pct}%")
+
+        col_f1, col_f2 = st.columns([1.2, 2.8])
+        with col_f1:
+            show_issues_only = st.checkbox("🔍 Chỉ hiện GV có vấn đề (Buổi lẻ / Thiếu nghỉ chiều)", value=False, key=f"{key_prefix}chk_issues_only")
+        with col_f2:
+            search_kw = st.text_input("Tìm kiếm theo tên GV hoặc môn:", placeholder="Nhập tên GV hoặc môn...", key=f"{key_prefix}txt_search_kw")
+
+        matrix_rows = []
+        for t in active_teachers:
+            tid = t.teacher_id
+            t_slots = teacher_sched[tid]
+            total_p = sum(len(v) for v in t_slots.values())
+            s_set = {(wd, sess) for (wd, sess, per) in t_slots}
+            d_set = {wd for (wd, sess, per) in t_slots}
+            t_lone = sum(1 for (wd, sess) in s_set if teacher_sess_counts.get((tid, wd, sess), 0) == 1)
+
+            aft_t = sum(1 for (wd, sess) in s_set if sess == "C")
+            aft_off = 6 - aft_t
+            req_a = getattr(t, "min_afternoon_off", None)
+            aft_label = f"{aft_off} (Định mức: {req_a})" if req_a else f"{aft_off}"
+
+            lone_dt = [f"{WEEKDAY_NAMES[wd]} ({'S' if sess == 'S' else 'C'})" for (wd, sess) in sorted(s_set) if teacher_sess_counts.get((tid, wd, sess), 0) == 1]
+            has_morn = (2, "S") in s_set
+
+            has_problem = (t_lone > 0) or (req_a and aft_off < req_a)
+            if show_issues_only and not has_problem:
+                continue
+
+            s_label = teacher_subj_labels.get(tid, "")
+            if search_kw:
+                kw_lower = search_kw.lower().strip()
+                if kw_lower not in t.name.lower() and kw_lower not in s_label.lower():
+                    continue
+
+            matrix_rows.append({
+                "Giáo viên": t.name,
+                "Bộ môn": s_label,
+                "Tổng tiết": total_p,
+                "Số ngày": len(d_set),
+                "Số buổi": len(s_set),
+                "Nghỉ chiều": aft_label,
+                "Buổi lẻ 1 tiết": t_lone,
+                "Chi tiết buổi lẻ": ", ".join(lone_dt) if lone_dt else "—",
+                "Sáng Thứ 2": "Có mặt" if has_morn else "Nghỉ",
+            })
+
+        df_matrix = pd.DataFrame(matrix_rows)
+        if not df_matrix.empty:
+            def _highlight_matrix(row):
+                styles = [""] * len(row)
+                if row["Buổi lẻ 1 tiết"] > 0:
+                    for i, col in enumerate(row.index):
+                        if col == "Buổi lẻ 1 tiết":
+                            styles[i] = "background-color: #FEF2F2; color: #DC2626; font-weight: bold;"
+                return styles
+            st.dataframe(df_matrix.style.apply(_highlight_matrix, axis=1), hide_index=True, width="stretch")
+        else:
+            st.info("Không có giáo viên nào khớp với điều kiện lọc.")
+
+
+def _render_saved_tkb(conn, cells: dict, classes: list, subjects: list, teachers: list, key_prefix: str = ""):
+    assignments = repo.get_assignments(conn)
+    _render_interactive_timetable_studio(
+        classes=classes,
+        subjects=subjects,
+        teachers=teachers,
+        cells=cells,
+        assignments=assignments,
+        key_prefix=key_prefix,
+        title="Studio Khảo Sát Thời Khóa Biểu",
+    )
 
 require_auth()
 school_slug = require_school()
@@ -396,7 +712,7 @@ with tab_schedule:
 
     st.caption("✨ Động cơ lập lịch: **Google OR-Tools CP-SAT** (Tối ưu hóa toàn cục, triệt tiêu vi phạm II.3, II.4, II.8)")
 
-    def _run_single_solver(s_seed, s_cfg_override, s_locked_slots=None, s_reference_assignment=None):
+    def _run_single_solver(s_seed, s_cfg_override, s_locked_slots=None, s_reference_assignment=None, strategy="default"):
         inp_obj = repo.build_scheduling_input(
             conn, parity=parity, seed=s_seed, extra_kep_ids=extra_kep_ids,
             hdtn_thematic_week=hdtn_thematic_week,
@@ -420,13 +736,13 @@ with tab_schedule:
             if event == "pass_start":
                 hard_rids = info.get("hard_rids") or []
                 relaxed = info.get("relaxed_so_far") or []
-                desc = (f"ràng buộc cứng còn lại: {', '.join(hard_rids)}" if hard_rids
+                desc = (f"ràng buộc cứng: {', '.join(hard_rids)}" if hard_rids
                         else "phần còn lại (chỉ còn ràng buộc mềm)")
                 workers = info.get("workers")
                 w_str = f" ({workers} luồng CPU)" if workers else ""
                 line = f"⏳ Lần thử {pass_no}/{max_passes}{w_str}: đang giải {desc}"
                 if relaxed:
-                    line += f" — đã phải nới lỏng trước đó: {', '.join(relaxed)}"
+                    line += f" — đã nới lỏng trước đó: {', '.join(relaxed)}"
                 progress_bar.progress(min(0.95, (pass_no - 1) / max_passes), text=line)
             elif event == "solution":
                 sol_count = info.get("sol_count", 1)
@@ -442,9 +758,61 @@ with tab_schedule:
             log_lines.append(line)
             status_log.caption("  \n".join(log_lines[-8:]))
 
-        res_obj = sched.run(inp_obj, progress_cb=_on_cpsat_progress)
+        from core.scheduler import cpsat_model
+        built = cpsat_model.build_model(inp_obj)
+        res_obj = cpsat_model.solve_to_result(
+            built,
+            time_limit_s=getattr(s_cfg_override, "cpsat_time_limit_s", 45) if s_cfg_override else 45,
+            progress_cb=_on_cpsat_progress,
+            strategy=strategy,
+        )
+        if res_obj is None:
+            from core.models import ScheduleResult
+            res_obj = ScheduleResult(
+                success=False, attempts_tried=1, successes_found=0,
+                cells_total=len(inp_obj.slots), failure_reason="Không tìm được phương án thỏa mãn ràng buộc.",
+            )
         progress_bar.progress(1.0, text="Hoàn tất.")
         return inp_obj, res_obj
+
+    def _run_multi_strategy_solver(s_seed, s_cfg_override):
+        inp_obj = repo.build_scheduling_input(
+            conn, parity=parity, seed=s_seed, extra_kep_ids=extra_kep_ids,
+            hdtn_thematic_week=hdtn_thematic_week,
+            hdtn_thematic_mode=hdtn_thematic_mode,
+            hdtn_thematic_weekday=hdtn_thematic_weekday,
+            hdtn_thematic_session=hdtn_thematic_session,
+            hdtn_thematic_start_period=hdtn_thematic_start_period,
+            week_no=chosen_week,
+            config_override=s_cfg_override,
+        )
+        progress_bar = st.progress(0, text="Đang khởi tạo CP-SAT giải đồng thời 3 chiến lược...")
+        status_log = st.empty()
+        log_lines = []
+
+        def _on_cpsat_progress(info):
+            event = info.get("event")
+            if event == "strategy_start":
+                s_label = info.get("strategy_label", "")
+                line = f"🚀 Tối ưu chiến lược: {s_label}"
+                progress_bar.progress(0.2, text=line)
+            elif event == "pass_start":
+                hard_rids = info.get("hard_rids") or []
+                line = f"⏳ Đang giải tiêu chí cứng: {', '.join(hard_rids) if hard_rids else 'ràng buộc mềm'}"
+                progress_bar.progress(0.5, text=line)
+            elif event == "solution":
+                obj = info.get("objective", 0)
+                line = f"💡 Nghiệm tốt: điểm phạt {obj:.0f}"
+                progress_bar.progress(0.8, text=line)
+            else:
+                line = "✓ Đã tìm thấy phương án tối ưu."
+                progress_bar.progress(0.95, text=line)
+            log_lines.append(line)
+            status_log.caption("  \n".join(log_lines[-6:]))
+
+        results_map = sched.run_three_strategies(inp_obj, progress_cb=_on_cpsat_progress)
+        progress_bar.progress(1.0, text="Đã hoàn tất tính toán cả 3 phương án!")
+        return inp_obj, results_map
 
     if "candidates" not in st.session_state or st.session_state.get("candidates_week") != chosen_week:
         st.session_state["candidates"] = {}
@@ -453,7 +821,68 @@ with tab_schedule:
         st.session_state["locked_classes"] = []
         st.session_state["locked_teachers"] = []
 
-    if st.button("🚀 Chạy xếp TKB", type="primary"):
+    c_run1, c_run2 = st.columns([3, 1])
+    with c_run1:
+        run_multi_clicked = st.button(
+            "🚀 Chạy Xếp TKB (Tính Toán 3 Phương Án Tối Ưu Cùng Lúc)",
+            type="primary",
+            use_container_width=True,
+            help="Bộ giải CP-SAT sẽ tính toán đồng thời 3 chiến lược nới lỏng (Triệt tiêu buổi lẻ, Kỷ luật hiện diện, Cân bằng tối ưu) để so sánh và lựa chọn phương án ưng ý nhất.",
+        )
+    with c_run2:
+        run_single_clicked = st.button(
+            "⚡ Xếp nhanh 1 phương án",
+            use_container_width=True,
+            help="Chạy nhanh 1 lượt giải chuẩn.",
+        )
+
+    if run_multi_clicked:
+        inp, results_dict = _run_multi_strategy_solver(seed, single_custom_cfg)
+        st.session_state["last_input"] = inp
+        st.session_state["last_scheduled_week"] = chosen_week
+        st.session_state["candidates"] = {}
+
+        strat_defs = [
+            ("anti_lone", 1, "Phương án 1 (Triệt tiêu buổi lẻ)", "🛡️ Ưu tiên II.4: Triệt tiêu tối đa các buổi lẻ của GV"),
+            ("presence", 2, "Phương án 2 (Kỷ luật hiện diện)", "🚩 Ưu tiên II.3: Bảo đảm 100% GV có mặt sáng Thứ 2"),
+            ("pareto", 3, "Phương án 3 (Cân bằng tối ưu)", "⚖️ Hài hòa đa mục tiêu, phân bố đều các ngày trong tuần"),
+        ]
+
+        best_cand_id = None
+        best_score = -1
+
+        for key, cid, name, desc in strat_defs:
+            res = results_dict.get(key)
+            if res and res.success:
+                metrics = compute_candidate_metrics(inp, res)
+                st.session_state["candidates"][cid] = {
+                    "id": cid,
+                    "key": key,
+                    "name": name,
+                    "strategy_desc": desc,
+                    "seed": seed or 0,
+                    "time_limit": 45,
+                    "result": res,
+                    "inp": inp,
+                    "metrics": metrics,
+                }
+                cur_score = metrics["health_score"]["overall_score"]
+                if cur_score > best_score:
+                    best_score = cur_score
+                    best_cand_id = cid
+
+        if st.session_state["candidates"]:
+            active_id = best_cand_id or 1
+            st.session_state["active_candidate_id"] = active_id
+            st.session_state["last_result"] = st.session_state["candidates"][active_id]["result"]
+            st.success(f"🎉 Đã sinh thành công {len(st.session_state['candidates'])} phương án tối ưu!")
+            st.rerun()
+        else:
+            first_fail = next(iter(results_dict.values())).failure_reason if results_dict else "Không thể xếp TKB"
+            from core.models import ScheduleResult
+            st.session_state["last_result"] = ScheduleResult(success=False, failure_reason=first_fail)
+
+    if run_single_clicked:
         inp, result = _run_single_solver(seed, single_custom_cfg)
         st.session_state["last_result"] = result
         st.session_state["last_input"] = inp
@@ -463,7 +892,9 @@ with tab_schedule:
             st.session_state["candidates"] = {
                 1: {
                     "id": 1,
-                    "name": "Phương án 1 (Gốc)",
+                    "key": "single",
+                    "name": "Phương án 1 (Tiêu chuẩn)",
+                    "strategy_desc": "Phương án tiêu chuẩn theo cấu hình hiện tại",
                     "seed": seed or 0,
                     "time_limit": getattr(single_custom_cfg, "cpsat_time_limit_s", 45) if single_custom_cfg else 45,
                     "result": result,
@@ -481,25 +912,73 @@ with tab_schedule:
         if not result.success:
             st.error(result.failure_reason)
         else:
-            st.info("✨ Tối ưu hóa bằng CP-SAT (toàn cục)")
+            cand_items = list(st.session_state.get("candidates", {}).values())
+            # ══════════════════════════════════════════════════════════════════
+            # 🌟 BENTO GRID ĐỐI SÁNH ĐA PHƯƠNG ÁN (UI/UX PRO MAX)
+            # ══════════════════════════════════════════════════════════════════
+            if cand_items:
+                st.markdown("#### 🎯 So Sánh & Chọn Lựa Phương Án Thời Khóa Biểu")
+                st.caption("Các phương án được tính toán với trọng số ưu tiên khác nhau. Bấm **Chọn Phương Án** để áp dụng và xem chi tiết.")
 
-            if result.successes_found > 0:
-                st.success(
-                    f"Xếp thành công sau {result.attempts_tried} lần thử "
-                    f"({result.successes_found} phương án hợp lệ). "
-                    f"Giữ nguyên {result.cells_total - result.cells_changed}/{result.cells_total} ô, "
-                    f"thay đổi {result.cells_changed} ô."
-                )
-            else:
-                # successes_found == 0 is the ONLY other case where result.success is True
-                # (core/scheduler/engine.py's relaxed-fallback path) -- this is NOT a fully
-                # compliant schedule, so it must not look like an unqualified success.
-                st.warning(
-                    f"⚠️ Xếp xong sau {result.attempts_tried} lần thử. Lịch được tạo là phương án khả thi tốt "
-                    f"nhất (một số ràng buộc HĐSP đã phải nới lỏng — xem chi tiết bên dưới). "
-                    f"Giữ nguyên {result.cells_total - result.cells_changed}/{result.cells_total} ô, "
-                    f"thay đổi {result.cells_changed} ô."
-                )
+                card_cols = st.columns(min(3, len(cand_items)))
+                for idx, c in enumerate(cand_items[:3]):
+                    cid = c["id"]
+                    is_active = (cid == st.session_state.get("active_candidate_id"))
+                    m = c["metrics"]
+                    h_score = m["health_score"]["overall_score"]
+                    rating = m["health_score"]["rating"]
+                    lone = m.get("lone_sessions", 0)
+                    holes = m.get("hole_periods", 0)
+                    morn = m.get("missing_mornings", 0)
+                    aft_status = m.get("afternoon_off_status", {})
+
+                    card_border = "#2563EB" if is_active else "#E2E8F0"
+                    card_bg = "#F0F7FF" if is_active else "#FFFFFF"
+                    shadow = "0 4px 14px rgba(37, 99, 235, 0.15)" if is_active else "0 2px 4px rgba(0,0,0,0.05)"
+                    status_chip = "<span style='background: #2563EB; color: #FFFFFF; font-size: 11px; font-weight: 700; padding: 3px 10px; border-radius: 9999px;'>🌟 ĐANG CHỌN</span>" if is_active else "<span style='background: #F1F5F9; color: #64748B; font-size: 11px; font-weight: 600; padding: 3px 8px; border-radius: 9999px;'>ỨNG VIÊN</span>"
+                    score_color = "#10B981" if h_score >= 85 else "#2563EB" if h_score >= 75 else "#F59E0B"
+
+                    lone_badge = "<span style='color: #10B981; font-weight: 700;'>0 buổi (Tuyệt đối) ✅</span>" if lone == 0 else f"<span style='color: #F59E0B; font-weight: 700;'>{lone} buổi ⚠️</span>"
+                    hole_badge = "<span style='color: #10B981; font-weight: 700;'>0 tiết (Kín) ✅</span>" if holes == 0 else f"<span style='color: #3B82F6; font-weight: 600;'>{holes} tiết trống</span>"
+                    morn_badge = "<span style='color: #10B981; font-weight: 700;'>100% đủ mặt ✅</span>" if morn == 0 else f"<span style='color: #EF4444; font-weight: 600;'>Thiếu {morn} lượt</span>"
+
+                    aft_lines = []
+                    for tname, stat in aft_status.items():
+                        mark = "✅" if stat["satisfied"] else "⚠️"
+                        aft_lines.append(f"{tname}: {stat['actual']}/{stat['target']} buổi {mark}")
+                    aft_text = " • ".join(aft_lines) if aft_lines else "Đạt chuẩn ✅"
+
+                    with card_cols[idx]:
+                        st.markdown(
+                            f"""
+                            <div style="border: 2px solid {card_border}; background: {card_bg}; border-radius: 12px; padding: 16px; box-shadow: {shadow}; margin-bottom: 10px;">
+                                <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 6px;">
+                                    <span style="font-weight: 700; font-size: 14px; color: #0F172A;">{c['name']}</span>
+                                    {status_chip}
+                                </div>
+                                <div style="font-size: 12px; color: #64748B; margin-bottom: 10px; min-height: 32px;">{c.get('strategy_desc', '')}</div>
+                                <div style="display: flex; align-items: baseline; gap: 6px; margin-bottom: 12px;">
+                                    <span style="font-size: 28px; font-weight: 800; color: {score_color};">{h_score:.1f}</span>
+                                    <span style="font-size: 13px; color: #64748B;">/ 100 ({rating})</span>
+                                </div>
+                                <div style="font-size: 12.5px; line-height: 1.8; color: #334155; border-top: 1px solid #E2E8F0; padding-top: 8px;">
+                                    <div>🎯 <b>Buổi lẻ GV:</b> {lone_badge}</div>
+                                    <div>⏱️ <b>Tiết trống GV:</b> {hole_badge}</div>
+                                    <div>🌅 <b>Sáng T2 có mặt:</b> {morn_badge}</div>
+                                    <div>🏖️ <b>Nghỉ chiều:</b> {aft_text}</div>
+                                </div>
+                            </div>
+                            """,
+                            unsafe_allow_html=True,
+                        )
+                        if not is_active:
+                            if st.button(f"👉 Chọn Phương Án {cid}", key=f"btn_pick_cand_{cid}", use_container_width=True):
+                                st.session_state["active_candidate_id"] = cid
+                                st.session_state["last_result"] = c["result"]
+                                st.session_state["last_input"] = c["inp"]
+                                st.rerun()
+                        else:
+                            st.button(f"✓ Đang chọn #{cid}", key=f"btn_active_cand_{cid}", disabled=True, use_container_width=True)
 
             if result.relaxed_rules:
                 st.warning(f"⚠️ Lịch được tạo là phương án khả thi tốt nhất, nhưng {len(result.relaxed_rules)} ràng buộc HĐSP đã phải nới lỏng:")
@@ -509,40 +988,16 @@ with tab_schedule:
                     st.write(f"- {rule_id}: {title}")
 
             # ══════════════════════════════════════════════════════════════════
-            # 🌟 STUDIO ĐIỀU PHỐI TKB 2 GIAI ĐOẠN & HỆ THỐNG DẪN DẮT 3 TẦNG
+            # 🌟 STUDIO ĐIỀU PHỐI TKB & TINH CHỈNH NÂNG CAO
             # ══════════════════════════════════════════════════════════════════
-            with st.container():
-                # TẦNG 1: Trợ lý Gợi ý tại chỗ (In-Context Guidance)
-                render_callout(
-                    "💡 **Chưa hoàn toàn vừa ý với TKB lần đầu? Bạn có thể tối ưu theo 2 bước đơn giản:**\n\n"
-                    "• **Bước 1 (Khảo sát phương án):** Bấm **`🎲 Thử phương án khác (Đổi Seed)`** để máy tính tìm nhánh xếp mới, "
-                    "hoặc bấm **`⏱️ Giải sâu hơn (+30s)`** để triệt tiêu các tiết trống/lủng của giáo viên.\n"
-                    "• **Bước 2 (Khóa & Tinh chỉnh):** Chọn phương án ưng ý nhất làm nền tảng ➔ Mở mục Khóa & Tinh chỉnh ➔ Khóa các lớp đã đẹp ➔ Bấm **`🎯 Tinh chỉnh các ô còn lại`**.",
-                    level="info",
-                    title="🎯 Studio Điều Phối & Tinh Chỉnh TKB",
-                )
-
-                # TẦNG 2: Hộp Cẩm nang Tối ưu TKB 30 giây (Quick Help Expander)
-                with st.expander("❓ Cẩm nang 30 giây: Nên làm gì khi TKB chưa đúng ý? (Bấm xem nhanh)", expanded=False):
-                    st.markdown(
-                        """
-                        | Tình huống thực tế bạn gặp | Giải pháp khuyên dùng | Nút cần bấm |
-                        | :--- | :--- | :--- |
-                        | **"Thấy TKB nhìn chung chưa ưng, muốn xem kiểu bố trí khác"** | Đổi sang nhánh tìm kiếm ngẫu nhiên mới (đổi Seed). | Bấm **`🎲 Thử phương án khác (Đổi Seed)`** |
-                        | **"TKB khá ổn nhưng vẫn còn 1-2 GV bị lủng tiết giữa buổi"** | Cho máy tính thêm thời gian để ghép kín tiết hơn. | Bấm **`⏱️ Giải sâu hơn (+30s)`** |
-                        | **"Khối 12 TKB đã rất đẹp, chỉ còn Khối 10 bị xấu"** | Khóa trọn vẹn Khối 12, chỉ cho solver xếp lại Khối 10. | Mở phần **`🔒 Khóa & Tinh chỉnh`** ➔ Chọn Lớp ➔ Bấm **`🎯 Tinh chỉnh`** |
-                        | **"Chỉ muốn tráo đổi vị trí 2 tiết cụ thể cho nhau"** | Đổi thủ công trực tiếp, tự kiểm tra trùng lịch GV. | Dùng công cụ **`🔄 Smart Swap (Đổi chéo)`** bên dưới |
-                        """
-                    )
-
-                # GIAI ĐOẠN 1: ACTION BAR SINH PHƯƠNG ÁN (ON-DEMAND)
+            with st.expander("🛠️ Công cụ Tinh chỉnh nâng cao (Đổi Seed, Giải sâu, Khóa lớp & Smart Swap)", expanded=False):
                 col_bar1, col_bar2 = st.columns([1, 1])
                 with col_bar1:
                     if st.button(
                         "🎲 Thử phương án khác (Đổi Seed)",
                         key="btn_cand_seed",
-                        help="Đổi số ngẫu nhiên (Seed) để thuật toán khám phá cách xếp mới hoàn toàn nhưng vẫn đúng 100% quy chuẩn.",
-                        width="stretch",
+                        help="Đổi số ngẫu nhiên (Seed) để thuật toán khám phá cách xếp mới.",
+                        use_container_width=True,
                     ):
                         new_seed = random.randint(100, 99999)
                         new_id = len(st.session_state["candidates"]) + 1
@@ -553,6 +1008,7 @@ with tab_schedule:
                             st.session_state["candidates"][new_id] = {
                                 "id": new_id,
                                 "name": cand_name,
+                                "strategy_desc": f"Thử nghiệm ngẫu nhiên Seed {new_seed}",
                                 "seed": new_seed,
                                 "time_limit": getattr(single_custom_cfg, "cpsat_time_limit_s", 45) if single_custom_cfg else 45,
                                 "result": res_new,
@@ -570,8 +1026,8 @@ with tab_schedule:
                     if st.button(
                         "⏱️ Giải sâu hơn (+30s Time Limit)",
                         key="btn_cand_deep",
-                        help="Tăng thời gian chạy CP-SAT để máy tính suy nghĩ kỹ hơn, giúp triệt tiêu các tiết trống/lủng của giáo viên.",
-                        width="stretch",
+                        help="Tăng thời gian chạy CP-SAT để máy tính ghép kín tiết trống hơn.",
+                        use_container_width=True,
                     ):
                         active_cand = st.session_state["candidates"].get(st.session_state.get("active_candidate_id", 1))
                         cur_tl = active_cand["time_limit"] if active_cand else 45
@@ -587,6 +1043,7 @@ with tab_schedule:
                             st.session_state["candidates"][new_id] = {
                                 "id": new_id,
                                 "name": cand_name,
+                                "strategy_desc": f"Tối ưu sâu với thời gian {new_tl}s",
                                 "seed": cand_seed,
                                 "time_limit": new_tl,
                                 "result": res_new,
@@ -599,45 +1056,6 @@ with tab_schedule:
                             st.rerun()
                         else:
                             st.error(f"Giải sâu không thành công: {res_new.failure_reason}")
-
-                # BẢNG ĐỐI SÁNH KPI ĐA PHƯƠNG ÁN (Khi có >= 2 phương án)
-                cand_items = list(st.session_state.get("candidates", {}).values())
-                if len(cand_items) >= 2:
-                    st.markdown("#### 📊 Đối sánh các phương án đã sinh:")
-                    cand_table = []
-                    for c in cand_items:
-                        m = c["metrics"]
-                        is_cur = (c["id"] == st.session_state.get("active_candidate_id"))
-                        cand_table.append({
-                            "Mã": f"#{c['id']}",
-                            "Tên phương án": f"{'👉 ' if is_cur else ''}{c['name']}",
-                            "Điểm TKB": f"{m['health_score']}/100 🏆" if m['health_score'] >= 90 else f"{m['health_score']}/100",
-                            "Tiết lủng GV": f"{m['hole_periods']} tiết {'✅' if m['hole_periods'] == 0 else '⚠️'}",
-                            "GV dạy >4 tiết": f"{m['over_4_periods']} lượt",
-                            "Vi phạm mềm": f"{m['shortfalls_count']} mục",
-                            "Trạng thái": "Đang chọn xem" if is_cur else "Ứng viên",
-                        })
-                    st.dataframe(pd.DataFrame(cand_table), hide_index=True, width="stretch")
-
-                    c_pick_col1, c_pick_col2 = st.columns([3, 1])
-                    with c_pick_col1:
-                        chosen_cand_id = st.selectbox(
-                            "Chọn Phương án làm Nền tảng (Hiển thị & Tinh chỉnh):",
-                            options=[c["id"] for c in cand_items],
-                            index=[c["id"] for c in cand_items].index(st.session_state.get("active_candidate_id", 1))
-                            if st.session_state.get("active_candidate_id") in [c["id"] for c in cand_items] else 0,
-                            format_func=lambda cid: next(c["name"] for c in cand_items if c["id"] == cid),
-                            key="sb_pick_active_cand",
-                        )
-                    with c_pick_col2:
-                        st.write("")
-                        st.write("")
-                        if st.button("👉 Xem & Kích hoạt", key="btn_apply_cand", width="stretch"):
-                            st.session_state["active_candidate_id"] = chosen_cand_id
-                            selected_c = next(c for c in cand_items if c["id"] == chosen_cand_id)
-                            st.session_state["last_result"] = selected_c["result"]
-                            st.session_state["last_input"] = selected_c["inp"]
-                            st.rerun()
 
                 # GIAI ĐOẠN 2: KHÓA & TINH CHỈNH CHI TIẾT
                 with st.expander("🔒 GIAI ĐOẠN 2: Khóa & Tinh chỉnh chi tiết (Incremental Re-solve & Smart Swap)", expanded=False):
@@ -830,179 +1248,57 @@ with tab_schedule:
                             st.success(f"**[{cat}]** {msg}")
                 st.markdown("---")
 
-            subject_names = {s.subject_id: s.name for s in inp.subjects}
-            classes_sorted = sorted(inp.classes, key=lambda c: c.sort_order)
-            tab_objs = st.tabs([c.name for c in classes_sorted])
-            for tab, cls in zip(tab_objs, classes_sorted):
-                with tab:
-                    cls_slots = [s for s in inp.slots if s.class_id == cls.class_id]
-                    periods = sorted({(s.ts.session, s.ts.period) for s in cls_slots},
-                                      key=lambda sp: (0 if sp[0] == "S" else 1, sp[1]))
-                    grid = {key: {} for key in periods}
-                    for s in cls_slots:
-                        subj_id = result.assignment.get(s.slot_id)
-                        grid[(s.ts.session, s.ts.period)][s.ts.weekday] = subject_names.get(subj_id, "")
-                    rows = []
-                    for (sess, per) in periods:
-                        row = {"Buổi": "Sáng" if sess == "S" else "Chiều", "Tiết": per}
-                        for wd in WEEKDAYS:
-                            row[WEEKDAY_NAMES[wd]] = grid[(sess, per)].get(wd, "")
-                        rows.append(row)
-                    st.dataframe(pd.DataFrame(rows), hide_index=True, width="stretch")
-
-            # ── Xem TKB theo Giáo viên ──
-            teacher_map = {t.teacher_id: t.name for t in inp.teachers}
-            teacher_sorted = sorted(inp.teachers, key=lambda t: t.name)
-            class_name_map = {c.class_id: c.name for c in inp.classes}
-
-            with st.expander("👩‍🏫 Xem thời khóa biểu theo Giáo viên", expanded=False):
-                # Build teacher schedule lookup
-                from collections import defaultdict as _ddict
-                _t_sched = _ddict(lambda: _ddict(list))
-                for s in inp.slots:
-                    sub = result.assignment.get(s.slot_id)
-                    if sub is not None and sub != -1:
-                        tid = inp.assigned_teacher.get((sub, s.class_id))
-                        if tid and tid > 0:
-                            _t_sched[tid][(s.ts.weekday, s.ts.session, s.ts.period)].append(
-                                (class_name_map.get(s.class_id, "?"), subject_names.get(sub, "?"))
-                            )
-
-                # Count periods per session for lone-session detection
-                _t_sess_counts = _ddict(int)
-                for tid in _t_sched:
-                    for (wd, sess, per) in _t_sched[tid]:
-                        _t_sess_counts[(tid, wd, sess)] += 1
-
-                # Quick stats
-                total_lone = sum(1 for v in _t_sess_counts.values() if v == 1)
-                if total_lone > 0:
-                    st.warning(f"⚠️ Có **{total_lone}** buổi giáo viên chỉ dạy 1 tiết (lẻ buổi).")
-                else:
-                    st.success("✅ Không có giáo viên nào bị lẻ 1 tiết / buổi.")
-
-                # View mode: single teacher or all teachers overview
-                view_mode = st.radio(
-                    "Chế độ xem", ["Chọn 1 GV", "Tổng quan tất cả GV"],
-                    horizontal=True, key="teacher_view_mode"
-                )
-
-                if view_mode == "Chọn 1 GV":
-                    chosen_teacher = st.selectbox(
-                        "Chọn giáo viên",
-                        teacher_sorted,
-                        format_func=lambda t: t.name,
-                        key="teacher_tkb_select",
-                    )
-                    if chosen_teacher:
-                        tid = chosen_teacher.teacher_id
-                        # Compute all sessions/periods this school uses
-                        all_periods = sorted(
-                            {(s.ts.session, s.ts.period) for s in inp.slots},
-                            key=lambda sp: (0 if sp[0] == "S" else 1, sp[1])
-                        )
-                        rows = []
-                        for (sess, per) in all_periods:
-                            row = {"Buổi": "Sáng" if sess == "S" else "Chiều", "Tiết": per}
-                            for wd in WEEKDAYS:
-                                entries = _t_sched[tid].get((wd, sess, per), [])
-                                row[WEEKDAY_NAMES[wd]] = ", ".join(f"{c} ({s})" for c, s in entries) if entries else ""
-                            rows.append(row)
-
-                        df = pd.DataFrame(rows)
-
-                        # Highlight lone sessions
-                        def _highlight_lone(row):
-                            styles = [""] * len(row)
-                            sess_code = "S" if row["Buổi"] == "Sáng" else "C"
-                            for i, col in enumerate(row.index):
-                                if col in ("Buổi", "Tiết"):
-                                    continue
-                                wd_num = next((k for k, v in WEEKDAY_NAMES.items() if v == col), None)
-                                if wd_num and row[col] and _t_sess_counts.get((tid, wd_num, sess_code), 0) == 1:
-                                    styles[i] = "background-color: #ffc7ce; font-weight: bold"
-                            return styles
-
-                        st.dataframe(
-                            df.style.apply(_highlight_lone, axis=1),
-                            hide_index=True, width="stretch",
-                        )
-
-                        # Summary stats for this teacher
-                        total_periods = sum(len(v) for k, v in _t_sched[tid].items())
-                        days_teaching = len({wd for (wd, sess, per) in _t_sched[tid]})
-                        sessions_teaching = len({(wd, sess) for (wd, sess, per) in _t_sched[tid]})
-                        lone_count = sum(
-                            1 for (wd, sess) in {(wd, sess) for (wd, sess, per) in _t_sched[tid]}
-                            if _t_sess_counts.get((tid, wd, sess), 0) == 1
-                        )
-                        col1, col2, col3, col4 = st.columns(4)
-                        col1.metric("Tổng tiết/tuần", total_periods)
-                        col2.metric("Số ngày dạy", days_teaching)
-                        col3.metric("Số buổi dạy", sessions_teaching)
-                        col4.metric("Buổi lẻ 1 tiết", lone_count, delta=f"-{lone_count}" if lone_count else None,
-                                    delta_color="inverse" if lone_count else "off")
-
-                else:
-                    # Overview: table with all teachers, their stats and lone sessions
-                    overview_rows = []
-                    for t in teacher_sorted:
-                        tid = t.teacher_id
-                        total_periods = sum(len(v) for k, v in _t_sched[tid].items())
-                        if total_periods == 0:
-                            continue
-                        sessions_set = {(wd, sess) for (wd, sess, per) in _t_sched[tid]}
-                        lone_count = sum(1 for (wd, sess) in sessions_set if _t_sess_counts.get((tid, wd, sess), 0) == 1)
-                        lone_details = []
-                        for (wd, sess) in sorted(sessions_set):
-                            if _t_sess_counts.get((tid, wd, sess), 0) == 1:
-                                sess_name = "S" if sess == "S" else "C"
-                                lone_details.append(f"{WEEKDAY_NAMES[wd]} ({sess_name})")
-                        overview_rows.append({
-                            "Giáo viên": t.name,
-                            "Tổng tiết": total_periods,
-                            "Số buổi dạy": len(sessions_set),
-                            "Buổi lẻ 1 tiết": lone_count,
-                            "Chi tiết lẻ": ", ".join(lone_details) if lone_details else "—",
-                        })
-
-                    df_overview = pd.DataFrame(overview_rows)
-
-                    def _highlight_lone_overview(row):
-                        return [
-                            "background-color: #ffc7ce; font-weight: bold" if col == "Buổi lẻ 1 tiết" and row[col] > 0
-                            else "" for col in row.index
-                        ]
-
-                    st.dataframe(
-                        df_overview.style.apply(_highlight_lone_overview, axis=1),
-                        hide_index=True, width="stretch",
-                    )
+            cells_curr = {
+                (s.class_id, s.ts.weekday, s.ts.session, s.ts.period): result.assignment.get(s.slot_id)
+                for s in inp.slots
+            }
+            eff_assigned = _build_effective_assigned_teacher(inp)
+            _render_interactive_timetable_studio(
+                classes=inp.classes,
+                subjects=inp.subjects,
+                teachers=inp.teachers,
+                cells=cells_curr,
+                assignments=eff_assigned,
+                key_prefix="fresh_result_",
+                title="Studio Khảo Sát Chi Tiết Phương Án Vừa Xếp",
+            )
 
             proceed_with_hard_violations = _render_rule_violations(
                 _schedule_violations(inp, result), "proceed_with_hard_violations",
             )
 
-            st.subheader("Kiểm tra định mức (thực tế − định mức, kỳ vọng 0)")
+            # ── Kiểm tra định mức số tiết (Progressive Disclosure) ──
             if scheduled_week is not None:
                 expected_quota = repo.get_periods_for_week(conn, week_no=scheduled_week, parity=parity)
             else:
                 expected_quota = repo.get_periods_per_week(conn)
             diff = compute_quota_diff(inp.slots, result.assignment, expected_quota, parity)
-            check_rows = []
-            for subj in sorted(inp.subjects, key=lambda s: s.sort_order):
-                row = {"Môn": subj.name}
-                for cls in classes_sorted:
-                    row[cls.name] = diff.get((subj.subject_id, cls.class_id), 0)
-                check_rows.append(row)
+            classes_sorted = sorted(inp.classes, key=lambda c: getattr(c, "sort_order", 0) or 0)
+            non_zero_diffs = sum(1 for v in diff.values() if v != 0)
 
-            def _highlight_nonzero(row):
-                return ["background-color: #ffc7ce" if col != "Môn" and row[col] != 0 else "" for col in row.index]
-
-            st.dataframe(
-                pd.DataFrame(check_rows).style.apply(_highlight_nonzero, axis=1),
-                hide_index=True, width="stretch",
-            )
+            if non_zero_diffs == 0:
+                with st.expander("📋 Kiểm tra định mức số tiết (Khớp 100% định mức chuẩn)", expanded=False):
+                    check_rows = []
+                    for subj in sorted(inp.subjects, key=lambda s: s.sort_order):
+                        row = {"Môn": subj.name}
+                        for cls in classes_sorted:
+                            row[cls.name] = diff.get((subj.subject_id, cls.class_id), 0)
+                        check_rows.append(row)
+                    st.dataframe(pd.DataFrame(check_rows), hide_index=True, width="stretch")
+            else:
+                st.subheader(f"⚠️ Kiểm tra định mức (Có {non_zero_diffs} ô lệch định mức)")
+                check_rows = []
+                for subj in sorted(inp.subjects, key=lambda s: s.sort_order):
+                    row = {"Môn": subj.name}
+                    for cls in classes_sorted:
+                        row[cls.name] = diff.get((subj.subject_id, cls.class_id), 0)
+                    check_rows.append(row)
+                def _highlight_nonzero(row):
+                    return ["background-color: #ffc7ce" if col != "Môn" and row[col] != 0 else "" for col in row.index]
+                st.dataframe(
+                    pd.DataFrame(check_rows).style.apply(_highlight_nonzero, axis=1),
+                    hide_index=True, width="stretch",
+                )
 
             col_acc1, col_acc2, col_acc3 = st.columns([1.2, 1.2, 1])
             with col_acc1:

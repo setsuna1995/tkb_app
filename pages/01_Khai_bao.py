@@ -129,6 +129,7 @@ with tab_teachers:
         "teacher_id": t.teacher_id, "Tên GV": t.name, "Chức vụ": t.role,
         "Đi T2": t.must_monday, "GVCN": t.is_gvcn,
         "Nghỉ mấy buổi/tuần": t.off_sessions_override,
+        "Nghỉ chiều (buổi/tuần)": t.min_afternoon_off,
         "Nghỉ trọn ngày - Thứ": WEEKDAY_NAMES.get(t.pinned_full_day_off, ""),
         "Nghỉ chiều cố định - Thứ": WEEKDAY_NAMES.get(t.pinned_afternoon_off, ""),
     } for t in teachers])
@@ -140,6 +141,9 @@ with tab_teachers:
             "Chức vụ": st.column_config.TextColumn(help="Nhập chức vụ / nhiệm vụ (ví dụ: GVCN, Tổ trưởng, Thư ký, TPT...)"),
             "Nghỉ mấy buổi/tuần": st.column_config.NumberColumn(
                 min_value=0, max_value=3, step=1, help="Bỏ trống = dùng mặc định chung của trường",
+            ),
+            "Nghỉ chiều (buổi/tuần)": st.column_config.NumberColumn(
+                min_value=0, max_value=5, step=1, help="Số buổi chiều muốn nghỉ tự do trong tuần (vd: GV Hồng nghỉ 2 buổi chiều)",
             ),
             "Nghỉ trọn ngày - Thứ": st.column_config.SelectboxColumn(
                 options=weekday_pin_options,
@@ -166,6 +170,8 @@ with tab_teachers:
             is_gvcn = bool(row["GVCN"])
             off_override = row.get("Nghỉ mấy buổi/tuần")
             off_override = int(off_override) if pd.notna(off_override) else None
+            min_afternoon_off = row.get("Nghỉ chiều (buổi/tuần)")
+            min_afternoon_off = int(min_afternoon_off) if pd.notna(min_afternoon_off) else None
             full_day_name = str(row.get("Nghỉ trọn ngày - Thứ") or "").strip()
             afternoon_name = str(row.get("Nghỉ chiều cố định - Thứ") or "").strip()
             pinned_full_day_off = weekday_name_to_num.get(full_day_name)
@@ -186,7 +192,7 @@ with tab_teachers:
                 errors.append(f"{name}: Buổi chiều ghim nghỉ nằm trong 'Buổi cấm chọn làm buổi nghỉ GV'.")
 
             to_save.append((tid, name, str(row["Chức vụ"] or ""), must_monday, is_gvcn,
-                             off_override, pinned_full_day_off, pinned_afternoon_off))
+                             off_override, min_afternoon_off, pinned_full_day_off, pinned_afternoon_off))
 
         if errors:
             for e in errors:
@@ -195,12 +201,13 @@ with tab_teachers:
             try:
                 existing_ids = {t.teacher_id for t in teachers}
                 kept_ids = set()
-                for tid, name, role, must_monday, is_gvcn, off_override, full_day_off, afternoon_off in to_save:
+                for tid, name, role, must_monday, is_gvcn, off_override, min_aft_off, full_day_off, afternoon_off in to_save:
                     new_id = repo.upsert_teacher(
                         conn, name, role, must_monday, is_gvcn, teacher_id=tid,
                         off_sessions_override=off_override,
                         pinned_full_day_off=full_day_off,
                         pinned_afternoon_off=afternoon_off,
+                        min_afternoon_off=min_aft_off,
                     )
                     kept_ids.add(new_id)
                 for tid in existing_ids - kept_ids:

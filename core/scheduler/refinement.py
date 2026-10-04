@@ -65,8 +65,11 @@ def compute_candidate_metrics(inp: SchedulingInput, result: ScheduleResult) -> d
 
     hole_periods = 0
     over_4_periods = 0
+    raw_lone_sessions = 0
     for tid, sess_map in t_periods.items():
         for (wd, sess), per_list in sess_map.items():
+            if len(per_list) == 1:
+                raw_lone_sessions += 1
             if len(per_list) > 4:
                 over_4_periods += 1
             if len(per_list) >= 2:
@@ -75,12 +78,33 @@ def compute_candidate_metrics(inp: SchedulingInput, result: ScheduleResult) -> d
                 span = sorted_p[-1] - sorted_p[0] + 1
                 hole_periods += max(0, span - len(sorted_p))
 
+    lone_sessions = sum(1 for v in violations if v.rule_id == "II.4")
+    missing_mornings = sum(1 for v in violations if v.rule_id == "II.3")
+    split_days = sum(1 for v in violations if v.rule_id == "II.8")
+
+    # Kiểm tra chỉ tiêu nghỉ chiều của GV
+    aft_off_status = {}
+    all_wd = sorted({s.ts.weekday for s in inp.slots})
+    for t in inp.teachers:
+        if t.min_afternoon_off is not None and t.min_afternoon_off > 0:
+            actual_aft_off = sum(1 for wd in all_wd if len(t_periods[t.teacher_id].get((wd, "C"), [])) == 0)
+            aft_off_status[t.name] = {
+                "target": t.min_afternoon_off,
+                "actual": actual_aft_off,
+                "satisfied": actual_aft_off >= t.min_afternoon_off,
+            }
+
     return {
         "health_score": health_score,
         "hole_periods": hole_periods,
         "over_4_periods": over_4_periods,
+        "lone_sessions": lone_sessions,
+        "raw_lone_sessions": raw_lone_sessions,
+        "missing_mornings": missing_mornings,
+        "split_days": split_days,
         "shortfalls_count": len(shortfalls),
         "breaches_count": len(breaches),
+        "afternoon_off_status": aft_off_status,
         "is_valid": len(breaches) == 0,
     }
 
