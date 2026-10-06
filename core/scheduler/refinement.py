@@ -204,3 +204,53 @@ def validate_and_swap_slots(
         new_assignment.pop(slot_b_id, None)
 
     return True, "Đổi chéo thành công và hợp lệ 100%.", new_assignment
+
+
+def find_valid_swap_candidates(
+    assignment: dict,
+    target_slot_id: int,
+    inp: SchedulingInput,
+) -> list[dict]:
+    """Tìm tất cả các tiết trong cùng lớp có thể đổi chéo an toàn 100% với target_slot_id."""
+    from core.models import WEEKDAY_NAMES
+
+    slot_by_id = {s.slot_id: s for s in inp.slots}
+    if target_slot_id not in slot_by_id:
+        return []
+
+    target_slot = slot_by_id[target_slot_id]
+    target_class_id = target_slot.class_id
+
+    subj_map = {s.subject_id: s.name for s in inp.subjects}
+    eff_assigned = _build_effective_assigned_teacher(inp)
+    t_map = {t.teacher_id: t.name for t in inp.teachers}
+
+    candidates = []
+    for other_s in inp.slots:
+        if other_s.class_id != target_class_id or other_s.slot_id == target_slot_id:
+            continue
+
+        ok, reason, _ = validate_and_swap_slots(assignment, target_slot_id, other_s.slot_id, inp)
+        if ok:
+            other_subj_id = assignment.get(other_s.slot_id)
+            other_subj_name = subj_map.get(other_subj_id, "(Trống)")
+            other_tid = eff_assigned.get((other_subj_id, target_class_id))
+            other_tname = t_map.get(other_tid, "")
+
+            sess_label = "Sáng" if other_s.ts.session == "S" else "Chiều"
+            wd_label = WEEKDAY_NAMES.get(other_s.ts.weekday, f"Thứ {other_s.ts.weekday}")
+
+            candidates.append({
+                "slot_id": other_s.slot_id,
+                "weekday": other_s.ts.weekday,
+                "session": other_s.ts.session,
+                "period": other_s.ts.period,
+                "subject_id": other_subj_id,
+                "subject_name": other_subj_name,
+                "teacher_name": other_tname,
+                "label": f"{wd_label} - {sess_label} Tiết {other_s.ts.period}: {other_subj_name} (GV: {other_tname})",
+            })
+
+    candidates.sort(key=lambda c: (c["weekday"], 0 if c["session"] == "S" else 1, c["period"]))
+    return candidates
+

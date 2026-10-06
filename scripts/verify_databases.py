@@ -1,4 +1,8 @@
 import sqlite3
+import sys, os
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+sys.stdout.reconfigure(encoding="utf-8")
+
 from core.scheduler import cpsat_model
 from data.repositories.builder import build_scheduling_input
 from core.scheduler.refinement import compute_candidate_metrics

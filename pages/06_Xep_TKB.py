@@ -11,7 +11,7 @@ from core.rules.params import resolve_effective_params
 from core.rules.view import build_schedule_view
 from core.rules.violations import BREACH, FORCED, SHORTFALL, classify, group_by_rule
 from core.scheduler.placement import _build_effective_assigned_teacher
-from core.scheduler.refinement import compute_candidate_metrics, validate_and_swap_slots
+from core.scheduler.refinement import compute_candidate_metrics, find_valid_swap_candidates, validate_and_swap_slots
 from core.validation import compute_quota_diff, compute_tkb_health_score
 from data import repository as repo
 from io_excel.exporter import export_xlsx
@@ -1090,7 +1090,128 @@ with tab_schedule:
                         "sau đó yêu cầu thuật toán **chỉ đảo các ô còn lại** để triệt tiêu các điểm lủng/xấu mà không làm thay đổi các phần đã khóa."
                     )
 
-                    tab_lock, tab_swap = st.tabs(["🔒 Khóa & Tinh chỉnh CP-SAT", "🔄 Đổi chéo 2 tiết (Smart Swap)"])
+                    tab_single_slot, tab_lock, tab_swap = st.tabs([
+                        "🎯 Tinh chỉnh Tiết đơn lẻ",
+                        "🔒 Khóa & Tinh chỉnh diện rộng",
+                        "🔄 Đổi chéo thủ công 2 tiết",
+                    ])
+
+                    with tab_single_slot:
+                        st.markdown("**Chọn 1 tiết cụ thể cần thay đổi (hệ thống giữ nguyên toàn bộ các tiết còn lại):**")
+                        c_single_cls = st.selectbox("Chọn lớp:", options=[c.name for c in inp.classes], key="single_cls_pick")
+                        target_cls = next(c for c in inp.classes if c.name == c_single_cls)
+                        cls_slots = [s for s in inp.slots if s.class_id == target_cls.class_id]
+
+                        subj_map = {s.subject_id: s.name for s in inp.subjects}
+                        eff_assigned = _build_effective_assigned_teacher(inp)
+                        t_map = {t.teacher_id: t.name for t in inp.teachers}
+
+                        # Sắp xếp các slot theo thứ tự thời gian
+                        cls_slots.sort(key=lambda s: (s.ts.weekday, 0 if s.ts.session == "S" else 1, s.ts.period))
+                        slot_labels = {}
+                        for s in cls_slots:
+                            s_subj = result.assignment.get(s.slot_id)
+                            subj_label = subj_map.get(s_subj, "(Trống)")
+                            tid = eff_assigned.get((s_subj, target_cls.class_id))
+                            tname = t_map.get(tid, "")
+                            gv_str = f" | GV: {tname}" if tname else ""
+                            sess_label = "Sáng" if s.ts.session == "S" else "Chiều"
+                            slot_labels[s.slot_id] = f"{WEEKDAY_NAMES.get(s.ts.weekday)} - {sess_label} Tiết {s.ts.period}: {subj_label}{gv_str}"
+
+                        target_slot_id = st.selectbox(
+                            "Chọn tiết muốn thay đổi:",
+                            options=list(slot_labels.keys()),
+                            format_func=lambda sid: slot_labels[sid],
+                            key="single_target_slot",
+                        )
+
+                        curr_subj_id = result.assignment.get(target_slot_id)
+                        curr_subj_name = subj_map.get(curr_subj_id, "(Trống)")
+                        curr_tid = eff_assigned.get((curr_subj_id, target_cls.class_id))
+                        curr_tname = t_map.get(curr_tid, "Chưa phân công")
+
+                        st.info(f"📍 **Tiết đang chọn:** {slot_labels[target_slot_id]}")
+
+                        col_opt1, col_opt2 = st.columns(2)
+
+                        with col_opt1:
+                            st.markdown("##### ⚡ Cách 1: Gợi ý Đổi chéo an toàn (1-Click)")
+                            st.caption("Tìm các tiết khác trong lớp có thể hoán đổi an toàn 100% (không trùng lịch GV, không vi phạm bận).")
+
+                            valid_swaps = find_valid_swap_candidates(result.assignment, target_slot_id, inp)
+                            if valid_swaps:
+                                swap_choice_map = {c["slot_id"]: c["label"] for c in valid_swaps}
+                                pick_swap_sid = st.selectbox(
+                                    "Chọn tiết đổi cùng:",
+                                    options=list(swap_choice_map.keys()),
+                                    format_func=lambda sid: swap_choice_map[sid],
+                                    key="pick_instant_swap",
+                                )
+                                if st.button("🔄 Đổi ngay với tiết này", key="btn_apply_instant_swap", type="primary"):
+                                    ok, msg, new_ass = validate_and_swap_slots(result.assignment, target_slot_id, pick_swap_sid, inp)
+                                    if ok:
+                                        result.assignment = new_ass
+                                        cur_cid = st.session_state.get("active_candidate_id", 1)
+                                        if cur_cid in st.session_state.get("candidates", {}):
+                                            st.session_state["candidates"][cur_cid]["metrics"] = compute_candidate_metrics(inp, result)
+                                        st.session_state["last_result"] = result
+                                        st.success(f"✅ {msg}")
+                                        st.rerun()
+                                    else:
+                                        st.error(f"❌ {msg}")
+                            else:
+                                st.warning("Không có tiết nào trong lớp có thể đổi chéo trực tiếp mà không xung đột lịch GV.")
+
+                        with col_opt2:
+                            st.markdown("##### 🎯 Cách 2: Solver tìm phương án thế chỗ")
+                            st.caption("Khóa cố định 100% tất cả các lớp khác và giữ tối đa TKB của lớp này, chỉ chạy solver tìm hoán vị tối thiểu.")
+                            if st.button("🚀 Chạy Solver tìm cách đổi tiết này", key="btn_single_slot_solver"):
+                                # Khóa tất cả các slot của các lớp khác
+                                computed_locked = {}
+                                for s in inp.slots:
+                                    sid = result.assignment.get(s.slot_id)
+                                    if sid is not None and s.class_id != target_cls.class_id:
+                                        computed_locked[s.slot_id] = sid
+
+                                # Với lớp hiện tại: khóa tất cả các slot ngoại trừ slot được chọn và các slot cùng môn
+                                for s in inp.slots:
+                                    if s.class_id == target_cls.class_id:
+                                        sid = result.assignment.get(s.slot_id)
+                                        if sid is not None and s.slot_id != target_slot_id and sid != curr_subj_id:
+                                            computed_locked[s.slot_id] = sid
+
+                                refine_cfg = dataclasses.replace(
+                                    single_custom_cfg or inp.config,
+                                    cpsat_minimize_changes=True,
+                                    cpsat_time_limit_s=15,
+                                )
+                                refine_seed = random.randint(100, 99999)
+                                inp_ref, res_ref = _run_single_solver(
+                                    refine_seed,
+                                    refine_cfg,
+                                    s_locked_slots=computed_locked,
+                                    s_reference_assignment=result.assignment,
+                                )
+                                if res_ref.success:
+                                    metrics_ref = compute_candidate_metrics(inp_ref, res_ref)
+                                    new_id = len(st.session_state["candidates"]) + 1
+                                    cand_name = f"Phương án {new_id} (Đổi riêng tiết {target_cls.name})"
+                                    st.session_state["candidates"][new_id] = {
+                                        "id": new_id,
+                                        "name": cand_name,
+                                        "seed": refine_seed,
+                                        "time_limit": 15,
+                                        "result": res_ref,
+                                        "inp": inp_ref,
+                                        "metrics": metrics_ref,
+                                    }
+                                    st.session_state["active_candidate_id"] = new_id
+                                    st.session_state["last_result"] = res_ref
+                                    st.session_state["last_input"] = inp_ref
+                                    st.success(f"🎉 Tinh chỉnh tiết thành công! Đã sinh phương án {new_id}.")
+                                    st.rerun()
+                                else:
+                                    st.error(f"Solver không tìm được phương án hoán vị khả dĩ: {res_ref.failure_reason}")
 
                     with tab_lock:
                         col_l1, col_l2 = st.columns(2)

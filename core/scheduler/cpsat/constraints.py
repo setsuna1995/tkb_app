@@ -117,6 +117,21 @@ def _add_teacher_constraints(built: CpSatModel) -> None:
                 if key in built.x and teacher_of.get(key) == teacher_id:
                     m.Add(built.x[key] == 0)
 
+    # 2b. Giáo viên có cờ "Đi T2" (must_monday): nếu GV không bị bận toàn bộ sáng Thứ 2
+    # và có phân công dạy, bắt buộc phải có ít nhất 1 tiết dạy vào sáng Thứ 2.
+    teachers_by_id = {t.teacher_id: t for t in inp.teachers}
+    for t_id, t in teachers_by_id.items():
+        if getattr(t, "must_monday", False):
+            m_morning_vars = []
+            for (slot_id, subj_id), var in built.x.items():
+                if teacher_of.get((slot_id, subj_id)) == t_id:
+                    s = slot_by_id[slot_id]
+                    if s.ts.weekday == 2 and s.ts.session == "S":
+                        if (t_id, s.ts.ts_id) not in inp.ban_busy:
+                            m_morning_vars.append(var)
+            if m_morning_vars:
+                m.Add(sum(m_morning_vars) >= 1)
+
     # 3. Trần tiết/buổi.
     for vs in vars_by_teacher_session.values():
         m.Add(sum(vs) <= params.max_periods_per_session)
