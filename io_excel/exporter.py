@@ -423,9 +423,153 @@ def export_full_backup_xlsx(conn) -> bytes:
         # cột parity riêng -- phải tự chèn tag khi ghi để đọc lại đúng.
         ws_tc.cell(row, 3).value = f"{h['created_at']} [{h['parity']}]"
 
-    for ws in (ws_pc, ws_st, ws_dm, ws_gb, ws_khung, ws_nh, ws_tc):
+    # ---- CauHinh & Luat_Mon_Lop ----
+    ws_cfg, ws_rules = export_scheduling_config_sheet(wb, conn)
+
+    for ws in (ws_pc, ws_st, ws_dm, ws_gb, ws_khung, ws_nh, ws_tc, ws_cfg, ws_rules):
         _autofit_sheet(ws)
 
     buffer = io.BytesIO()
     wb.save(buffer)
     return buffer.getvalue()
+
+
+def export_scheduling_config_sheet(wb, conn) -> tuple:
+    """Ghi sheet CauHinh và Luat_Mon_Lop vào workbook để sao lưu toàn bộ thiết lập ràng buộc."""
+    classes = repo.list_classes(conn)
+    subjects = repo.list_subjects(conn)
+    teachers = repo.list_teachers(conn)
+    teacher_names = {t.teacher_id: t.name for t in teachers}
+    subject_names = {s.subject_id: s.name for s in subjects}
+    class_names = {c.class_id: c.name for c in classes}
+    config = repo.get_scheduling_config(conn)
+
+    ws_cfg = wb.create_sheet("CauHinh")
+    headers = ["Mã Cấu Hình", "Tiêu Chuẩn / Ràng Buộc", "Giá Trị", "Diễn Giải / Tên Chi Tiết"]
+    for col_idx, h in enumerate(headers, 1):
+        cell = ws_cfg.cell(1, col_idx, h)
+        cell.font = openpyxl.styles.Font(bold=True, color="FFFFFF")
+        cell.fill = openpyxl.styles.PatternFill("solid", fgColor="1F497D")
+
+    def _subjs(ids):
+        return ", ".join(subject_names[i] for i in sorted(ids) if i in subject_names)
+
+    def _teachers(ids):
+        return ", ".join(teacher_names[i] for i in sorted(ids) if i in teacher_names)
+
+    def _classes(ids):
+        return ", ".join(class_names[i] for i in sorted(ids) if i in class_names)
+
+    def _cells(cells):
+        return ", ".join(f"{w}{s}" for w, s in sorted(cells))
+
+    rows = [
+        # Khung & HĐTN
+        ("hdtn_mode", "Mô hình tổ chức HĐTN", config.hdtn_mode, "separate: phân bổ 3 tiết | thematic: dồn 3 tiết chuyên đề"),
+        ("chao_co_weekday", "Thứ Chào cờ đầu tuần", config.chao_co_weekday, f"Thứ {config.chao_co_weekday}"),
+        ("chao_co_session", "Buổi Chào cờ đầu tuần", config.chao_co_session, "Sáng" if config.chao_co_session == "S" else "Chiều"),
+        ("chao_co_period", "Tiết Chào cờ đầu tuần", config.chao_co_period, f"Tiết {config.chao_co_period}"),
+        ("hdtn_p1_weekday", "HĐTN Tiết 1 (Chào cờ) - Thứ", config.hdtn_p1_weekday, f"Thứ {config.hdtn_p1_weekday}"),
+        ("hdtn_p1_session", "HĐTN Tiết 1 (Chào cờ) - Buổi", config.hdtn_p1_session, "Sáng" if config.hdtn_p1_session == "S" else "Chiều"),
+        ("hdtn_p1_period", "HĐTN Tiết 1 (Chào cờ) - Tiết", config.hdtn_p1_period, f"Tiết {config.hdtn_p1_period}"),
+        ("hdtn_p2_mode", "HĐTN Tiết 2 (Chủ đề) - Chế độ", "fixed" if config.hdtn_p2_weekday is not None else "auto", "fixed: cố định | auto: tự do linh hoạt"),
+        ("hdtn_p2_weekday", "HĐTN Tiết 2 (Chủ đề) - Thứ", config.hdtn_p2_weekday or "", f"Thứ {config.hdtn_p2_weekday}" if config.hdtn_p2_weekday else "Tự do"),
+        ("hdtn_p2_session", "HĐTN Tiết 2 (Chủ đề) - Buổi", config.hdtn_p2_session or "S", "Sáng" if config.hdtn_p2_session == "S" else "Chiều"),
+        ("hdtn_p2_period", "HĐTN Tiết 2 (Chủ đề) - Tiết", config.hdtn_p2_period or "", f"Tiết {config.hdtn_p2_period}" if config.hdtn_p2_period else "Tự do"),
+        ("hdtn_period2_afternoon", "HĐTN Tiết 2 ưu tiên xếp chiều", int(config.hdtn_period2_afternoon), "1: Có ưu tiên chiều | 0: Không"),
+        ("hdtn_p3_mode", "HĐTN Tiết 3 (SHL) - Chế độ", "fixed" if config.hdtn_p3_weekday is not None else "auto", "fixed: cố định | auto: tự động tiết cuối tuần"),
+        ("hdtn_p3_weekday", "HĐTN Tiết 3 (SHL) - Thứ", config.hdtn_p3_weekday or "", f"Thứ {config.hdtn_p3_weekday}" if config.hdtn_p3_weekday else "Tiết cuối tuần"),
+        ("hdtn_p3_session", "HĐTN Tiết 3 (SHL) - Buổi", config.hdtn_p3_session or "S", "Sáng" if config.hdtn_p3_session == "S" else "Chiều"),
+        ("hdtn_p3_period", "HĐTN Tiết 3 (SHL) - Tiết", config.hdtn_p3_period or "", f"Tiết {config.hdtn_p3_period}" if config.hdtn_p3_period else "Tiết cuối buổi"),
+        ("hdtn_thematic_mode", "HĐTN Chuyên đề dồn - Chế độ", config.hdtn_thematic_mode, "auto: tự động tìm dải | fixed: cố định"),
+        ("hdtn_thematic_weekday", "HĐTN Chuyên đề dồn - Thứ", config.hdtn_thematic_weekday or "", f"Thứ {config.hdtn_thematic_weekday}" if config.hdtn_thematic_weekday else ""),
+        ("hdtn_thematic_session", "HĐTN Chuyên đề dồn - Buổi", config.hdtn_thematic_session or "S", "Sáng" if config.hdtn_thematic_session == "S" else "Chiều"),
+        ("hdtn_thematic_start_period", "HĐTN Chuyên đề dồn - Tiết bắt đầu", config.hdtn_thematic_start_period or "", f"Tiết {config.hdtn_thematic_start_period}" if config.hdtn_thematic_start_period else ""),
+        ("gvcn_monday_period2_enabled", "Ưu tiên GVCN dạy tiết 2 Thứ 2", int(config.gvcn_monday_period2_enabled), "1: Bật | 0: Tắt"),
+        ("gvcn_monday_period2_exempt_class_ids", "Lớp miễn trừ GVCN tiết 2 Thứ 2", ",".join(str(cid) for cid in sorted(config.gvcn_monday_period2_exempt_class_ids)), _classes(config.gvcn_monday_period2_exempt_class_ids)),
+        # GDTC
+        ("gdtc_avoid_period", "Tiết GDTC tránh xếp", config.gdtc_avoid_period, f"Tiết {config.gdtc_avoid_period}"),
+        ("gdtc_morning_allowed_periods", "GDTC: Các tiết sáng được phép", ",".join(map(str, config.gdtc_morning_allowed_periods)), "Tiết " + ", ".join(map(str, config.gdtc_morning_allowed_periods))),
+        ("gdtc_afternoon_allowed_periods", "GDTC: Các tiết chiều được phép", ",".join(map(str, config.gdtc_afternoon_allowed_periods)), "Tiết " + ", ".join(map(str, config.gdtc_afternoon_allowed_periods))),
+        # Hiện diện & Nghỉ GV
+        ("strict_morning_weekdays", "Sáng MỌI GV bắt buộc có tiết dạy", ",".join(map(str, config.strict_morning_weekdays)), ", ".join(f"Thứ {w}" for w in config.strict_morning_weekdays)),
+        ("mandatory_morning_weekdays", "Sáng bắt buộc GV có mặt (theo tải)", ",".join(map(str, config.mandatory_morning_weekdays)), ", ".join(f"Thứ {w}" for w in config.mandatory_morning_weekdays)),
+        ("min_weekly_periods_for_mandatory_morning", "Ngưỡng tải xét sáng có mặt", config.min_weekly_periods_for_mandatory_morning, f">= {config.min_weekly_periods_for_mandatory_morning} tiết/tuần"),
+        ("teacher_off_sessions_per_week", "Số buổi nghỉ của mỗi GV trong tuần", config.teacher_off_sessions_per_week, f"{config.teacher_off_sessions_per_week} buổi"),
+        ("teacher_off_sessions_mode", "Mức độ áp dụng buổi nghỉ", config.teacher_off_sessions_mode, "none: Không áp dụng | soft: Ưu tiên cao | hard: Bắt buộc"),
+        ("forbidden_off_cells", "Buổi cấm chọn làm buổi nghỉ", _cells(config.forbidden_off_cells), ", ".join(f"Thứ {w} {'Sáng' if s == 'S' else 'Chiều'}" for w, s in sorted(config.forbidden_off_cells))),
+        ("reserved_off_weekdays_chieu", "Thứ có buổi chiều luôn trống", ",".join(map(str, config.reserved_off_weekdays_chieu)), ", ".join(f"Chiều Thứ {w}" for w in config.reserved_off_weekdays_chieu)),
+        ("lone_session_exempt_teacher_ids", "GV miễn trừ luật tránh 1 tiết/buổi", ",".join(str(tid) for tid in sorted(config.lone_session_exempt_teacher_ids)), _teachers(config.lone_session_exempt_teacher_ids)),
+        ("compact_schedule_teacher_ids", "GV ưu tiên gom tiết nghỉ nhiều buổi", ",".join(str(tid) for tid in sorted(config.compact_schedule_teacher_ids)), _teachers(config.compact_schedule_teacher_ids)),
+        # Phân luồng môn
+        ("heavy_subjects_morning_only", "Môn Nặng bắt buộc xếp buổi sáng (cấm chiều)", int(config.heavy_subjects_morning_only), "1: Bật | 0: Tắt"),
+        ("morning_only_subject_ids", "Môn bắt buộc xếp sáng (cấm chiều) cụ thể", ",".join(str(sid) for sid in sorted(config.morning_only_subject_ids)), _subjs(config.morning_only_subject_ids)),
+        ("afternoon_preferred_subject_ids", "Môn ưu tiên xếp buổi chiều", ",".join(str(sid) for sid in sorted(config.afternoon_preferred_subject_ids)), _subjs(config.afternoon_preferred_subject_ids)),
+        ("non_consecutive_subject_ids", "Môn không xếp liền ngày (cách nhật)", ",".join(str(sid) for sid in sorted(config.non_consecutive_subject_ids)), _subjs(config.non_consecutive_subject_ids)),
+        ("single_pair_subject_ids", "Môn xếp 1 cặp liền tiết", ",".join(str(sid) for sid in sorted(config.single_pair_subject_ids)), _subjs(config.single_pair_subject_ids)),
+        # Định mức & Tiêu chuẩn sư phạm
+        ("max_periods_per_session", "Mỗi GV: tối đa tiết/buổi", config.max_periods_per_session, f"{config.max_periods_per_session} tiết"),
+        ("max_teacher_periods_per_day", "Mỗi GV: tối đa tiết/ngày", config.max_teacher_periods_per_day, f"{config.max_teacher_periods_per_day} tiết"),
+        ("max_heavy_consecutive", "Môn nặng: tối đa tiết liên tiếp trong buổi", config.max_heavy_consecutive, f"{config.max_heavy_consecutive} tiết"),
+        ("max_heavy_per_session", "Tối đa tiết môn nặng/buổi cho 1 lớp", config.max_heavy_per_session, f"{config.max_heavy_per_session} tiết"),
+        ("heavy_subject_priority_periods", "Môn nặng ưu tiên N tiết đầu sáng", config.heavy_subject_priority_periods, f"{config.heavy_subject_priority_periods} tiết"),
+        ("avoid_teacher_gaps", "Tránh tiết trống / lủng của GV trong buổi", int(config.avoid_teacher_gaps), "1: Bật | 0: Tắt"),
+        ("avoid_teacher_lone_periods", "Tránh GV đi dạy chỉ 1 tiết/ngày", int(config.avoid_teacher_lone_periods), "1: Bật | 0: Tắt"),
+        ("balance_afternoon_teachers", "Cân đối tiết buổi chiều cho GV", int(config.balance_afternoon_teachers), "1: Bật | 0: Tắt"),
+        ("avoid_gdtc_consecutive_days", "GDTC không xếp 2 ngày liên tiếp", int(config.avoid_gdtc_consecutive_days), "1: Bật | 0: Tắt"),
+        ("avoid_heavy_afternoon_period3", "Hạn chế môn nặng tiết 3 chiều", int(config.avoid_heavy_afternoon_period3), "1: Bật | 0: Tắt"),
+        ("avoid_teacher_4_consecutive_morning", "Hạn chế GV dạy 4 tiết sáng liên tục", int(config.avoid_teacher_4_consecutive_morning), "1: Bật | 0: Tắt"),
+        ("min_weekly_periods_for_lone_penalty", "Ngưỡng tiết/tuần phạt lẻ tiết GV", config.min_weekly_periods_for_lone_penalty, f"{config.min_weekly_periods_for_lone_penalty} tiết"),
+        # CP-SAT Solver
+        ("cpsat_time_limit_seconds", "Giới hạn thời gian giải CP-SAT (giây)", config.cpsat_time_limit_seconds, f"{config.cpsat_time_limit_seconds}s"),
+        ("cpsat_workers", "Số luồng CPU (workers) CP-SAT", config.cpsat_workers, "0: tự động" if config.cpsat_workers == 0 else f"{config.cpsat_workers} workers"),
+        ("cpsat_minimize_changes", "Ưu tiên giữ nguyên TKB cũ", int(config.cpsat_minimize_changes), "1: Bật | 0: Tắt"),
+    ]
+
+    for r_idx, (key, desc, val, detail) in enumerate(rows, 2):
+        ws_cfg.cell(r_idx, 1, key)
+        ws_cfg.cell(r_idx, 2, desc)
+        ws_cfg.cell(r_idx, 3, str(val) if val is not None else "")
+        ws_cfg.cell(r_idx, 4, str(detail) if detail is not None else "")
+
+    # Luat_Mon_Lop
+    existing_rules = repo.list_subject_class_rules(conn)
+    ws_rules = wb.create_sheet("Luat_Mon_Lop")
+    rule_headers = ["ID Luật", "Tên Môn Học", "Môn ID", "Danh Sách Lớp", "Lớp IDs", "Thứ - Buổi Được Xếp", "Các Ô"]
+    for col_idx, h in enumerate(rule_headers, 1):
+        cell = ws_rules.cell(1, col_idx, h)
+        cell.font = openpyxl.styles.Font(bold=True, color="FFFFFF")
+        cell.fill = openpyxl.styles.PatternFill("solid", fgColor="1F497D")
+
+    for r_idx, rule in enumerate(existing_rules, 2):
+        s_id = rule["subject_id"]
+        s_name = subject_names.get(s_id, str(s_id))
+        c_names = ", ".join(class_names.get(cid, str(cid)) for cid in rule["class_ids"])
+        c_ids_str = ",".join(str(cid) for cid in rule["class_ids"])
+        cells_desc = ", ".join(f"Thứ {wd} {'Sáng' if s == 'S' else 'Chiều'}" for wd, s in sorted(rule["cells"]))
+        cells_raw = ",".join(f"{wd}{s}" for wd, s in sorted(rule["cells"]))
+        ws_rules.cell(r_idx, 1, rule["rule_id"])
+        ws_rules.cell(r_idx, 2, s_name)
+        ws_rules.cell(r_idx, 3, s_id)
+        ws_rules.cell(r_idx, 4, c_names)
+        ws_rules.cell(r_idx, 5, c_ids_str)
+        ws_rules.cell(r_idx, 6, cells_desc)
+        ws_rules.cell(r_idx, 7, cells_raw)
+
+    return ws_cfg, ws_rules
+
+
+def export_config_xlsx(conn) -> bytes:
+    """Xuất riêng toàn bộ cấu hình xếp lịch và ràng buộc ra 1 file Excel độc lập."""
+    wb = openpyxl.Workbook()
+    # Xoá sheet mặc định
+    default_sheet = wb.active
+    ws_cfg, ws_rules = export_scheduling_config_sheet(wb, conn)
+    if default_sheet and default_sheet != ws_cfg and default_sheet != ws_rules:
+        wb.remove(default_sheet)
+    for ws in (ws_cfg, ws_rules):
+        _autofit_sheet(ws)
+    buf = io.BytesIO()
+    wb.save(buf)
+    return buf.getvalue()
+

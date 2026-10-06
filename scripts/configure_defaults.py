@@ -1,4 +1,8 @@
+import os
 import sqlite3
+import sys
+
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 def setup_defaults(db_path: str):
     print(f"Configuring defaults for {db_path}...")
@@ -57,10 +61,27 @@ def setup_defaults(db_path: str):
 
     # 4. Period frames
     classes = conn.execute("SELECT class_id, name FROM classes").fetchall()
+    k67 = [c for c in classes if c["name"].startswith(('6', '7'))]
+    k89 = [c for c in classes if c["name"].startswith(('8', '9'))]
     is_2_buoi = "2-buoi" in db_path or "2_buoi" in db_path
     if is_2_buoi:
-        # Khung 2 buổi: Thứ 2..4 (S1..S4, C1..C3), Thứ 5 (S1..S4), Thứ 6 (S1..S5 có tiết 5)
-        for c in classes:
+        # Khung 2 buổi:
+        # Khối 6-7 (29 tiết): T2-T4 (S1-S4, C1-C3), T5 (S1-S4), T6 (S1-S4 - không có tiết 5)
+        # Khối 8-9 (30 tiết): T2-T4 (S1-S4, C1-C3), T5 (S1-S4), T6 (S1-S5 - có tiết 5)
+        for c in k67:
+            cid = c["class_id"]
+            conn.execute("DELETE FROM class_allowed_cells WHERE class_id = ?", (cid,))
+            for w in (2, 3, 4):
+                for p in range(1, 5):
+                    conn.execute("INSERT OR IGNORE INTO class_allowed_cells (class_id, weekday, session, period) VALUES (?, ?, 'S', ?)", (cid, str(w), p))
+                for p in range(1, 4):
+                    conn.execute("INSERT OR IGNORE INTO class_allowed_cells (class_id, weekday, session, period) VALUES (?, ?, 'C', ?)", (cid, str(w), p))
+            for p in range(1, 5):
+                conn.execute("INSERT OR IGNORE INTO class_allowed_cells (class_id, weekday, session, period) VALUES (?, '5', 'S', ?)", (cid, p))
+            for p in range(1, 5):
+                conn.execute("INSERT OR IGNORE INTO class_allowed_cells (class_id, weekday, session, period) VALUES (?, '6', 'S', ?)", (cid, p))
+
+        for c in k89:
             cid = c["class_id"]
             conn.execute("DELETE FROM class_allowed_cells WHERE class_id = ?", (cid,))
             for w in (2, 3, 4):
@@ -93,6 +114,17 @@ def setup_defaults(db_path: str):
                 for p in range(1, 6):
                     conn.execute("INSERT OR IGNORE INTO class_allowed_cells (class_id, weekday, session, period) VALUES (?, ?, 'S', ?)", (cid, str(w), p))
 
+    # 5. Cập nhật SchedulingConfig mặc định
+    from data import repository as repo
+    from core.models import SchedulingConfig
+    cfg = repo.get_scheduling_config(conn)
+    cfg.gvcn_monday_period2_enabled = False
+    cfg.strict_morning_weekdays = (2,)
+    cfg.teacher_off_sessions_per_week = 0
+    cfg.teacher_off_sessions_mode = "none"
+    cfg.morning_only_subject_ids = frozenset()
+    repo.set_scheduling_config(conn, cfg)
+
     conn.commit()
     conn.close()
     print(f"Finished defaults for {db_path}\n")
@@ -100,3 +132,5 @@ def setup_defaults(db_path: str):
 if __name__ == "__main__":
     setup_defaults("schools/truong-thcs.db")
     setup_defaults("schools/truong-thcs-2-buoi.db")
+    setup_defaults("data/sample_truong_thcs.db")
+    setup_defaults("data/sample_truong_thcs_2_buoi.db")

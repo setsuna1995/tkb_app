@@ -126,8 +126,8 @@ class SchedulingConfig:
     hdtn_thematic_start_period: Optional[int] = None  # 1..3 (tiết bắt đầu) khi hdtn_thematic_mode == "fixed"
     max_heavy_consecutive: int = 3
     max_periods_per_session: int = 4
-    teacher_off_sessions_per_week: int = 1
-    teacher_off_sessions_mode: str = "soft"  # "soft" (Ưu tiên cao) hoặc "hard" (Bắt buộc tuyệt đối)
+    teacher_off_sessions_per_week: int = 0
+    teacher_off_sessions_mode: str = "none"  # "none" (Không áp dụng), "soft" (Ưu tiên cao), "hard" (Bắt buộc)
     forbidden_off_cells: frozenset = field(
         default_factory=lambda: frozenset({(2, "S")})
     )
@@ -142,12 +142,12 @@ class SchedulingConfig:
     avoid_teacher_lone_periods: bool = True  # Tránh GV chỉ có 1 tiết/ngày hoặc sáng 1 tiết + chiều 1 tiết
     balance_afternoon_teachers: bool = True  # Cân đối buổi chiều, tránh GV nghỉ full chiều khi dạy lớp có tiết chiều
     mandatory_morning_weekdays: tuple = (2,)  # Các sáng bắt buộc toàn thể GV có mặt/đi làm (mặc định chỉ sáng Thứ 2)
-    strict_morning_weekdays: tuple = ()
+    strict_morning_weekdays: tuple = (2,)
     # Các sáng mà MỌI GV đều phải có tiết dạy, không xét ngưỡng tải
     # (min_weekly_periods_for_mandatory_morning không áp dụng cho các sáng này).
     # Ngoại lệ duy nhất: BGH (Hiệu trưởng / Phó hiệu trưởng) -- tải của họ quá ít
     # để trải đủ các sáng, và họ vẫn có mặt ở trường theo lịch quản lý.
-    # Rỗng = tắt (mặc định), giữ nguyên hành vi cũ cho các trường chưa cấu hình.
+    # Mặc định chỉ sáng Thứ 2 (Chào cờ).
     min_weekly_periods_for_mandatory_morning: int = 10
     # Tiêu chí II.3 chỉ ép GV có tải >= ngưỡng này phải có mặt các sáng bắt buộc.
     # Trước 2026-09-04 số 10 nằm cứng trong quality.py; tách ra thành cấu hình vì đo
@@ -177,7 +177,7 @@ class SchedulingConfig:
     balance_morning_academic_load: bool = True  # Cân bằng và xen kẽ môn học thuật (Toán, Văn, Anh, KHTN) buổi sáng
     max_academic_per_morning: int = 3  # Trần cứng: Tối đa 3 tiết học thuật/buổi sáng (luôn có >=1 tiết nhẹ)
     min_academic_per_morning: int = 2  # Sàn mềm: Khuyến khích >= 2 tiết học thuật/buổi sáng (tránh buổi sáng quá nhàn)
-    gvcn_monday_period2_enabled: bool = True  # Ưu tiên mềm: tiết 2 Thứ 2 nên do GVCN dạy lớp chủ nhiệm
+    gvcn_monday_period2_enabled: bool = False  # Mặc định tắt ưu tiên GVCN dạy tiết 2 Thứ 2
     gvcn_monday_period2_exempt_class_ids: frozenset = field(default_factory=frozenset)  # lớp được miễn trừ luật trên
 
     def __post_init__(self):

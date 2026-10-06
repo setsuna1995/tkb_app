@@ -89,9 +89,32 @@ def build_database(db_path: str):
         repo.set_meta(conn, "mandatory_morning_weekdays", "2")
 
         classes = conn.execute("SELECT class_id, name FROM classes").fetchall()
+        k67 = [c for c in classes if c["name"].startswith(('6', '7'))]
+        k89 = [c for c in classes if c["name"].startswith(('8', '9'))]
+
         if is_2_buoi:
-            # Khung 2 buổi: Thứ 2..4 (S1..S4, C1..C3), Thứ 5 (S1..S4), Thứ 6 (S1..S5 có tiết 5)
-            for c in classes:
+            # Khung 2 buổi:
+            # Khối 6-7 (29 tiết): T2-T4 (S1-S4, C1-C3 = 21t), T5 (S1-S4 = 4t), T6 (S1-S4 = 4t) -> 29t
+            # Khối 8-9 (30 tiết): T2-T4 (S1-S4, C1-C3 = 21t), T5 (S1-S4 = 4t), T6 (S1-S5 = 5t) -> 30t
+            for c in k67:
+                cid = c["class_id"]
+                conn.execute("DELETE FROM class_allowed_cells WHERE class_id = ?", (cid,))
+                for w in (2, 3, 4):
+                    for p in range(1, 5):
+                        conn.execute("INSERT OR IGNORE INTO class_allowed_cells (class_id, weekday, session, period) VALUES (?, ?, 'S', ?)", (cid, str(w), p))
+                    for p in range(1, 4):
+                        conn.execute("INSERT OR IGNORE INTO class_allowed_cells (class_id, weekday, session, period) VALUES (?, ?, 'C', ?)", (cid, str(w), p))
+                for p in range(1, 5):
+                    conn.execute("INSERT OR IGNORE INTO class_allowed_cells (class_id, weekday, session, period) VALUES (?, '5', 'S', ?)", (cid, p))
+                for p in range(1, 5):
+                    conn.execute("INSERT OR IGNORE INTO class_allowed_cells (class_id, weekday, session, period) VALUES (?, '6', 'S', ?)", (cid, p))
+
+                repo.set_frame_template(
+                    conn, cid, morning_periods=4, afternoon_periods=3, study_sunday=False,
+                    short_weekday=None, short_morning_periods=None, short_afternoon_periods=None
+                )
+
+            for c in k89:
                 cid = c["class_id"]
                 conn.execute("DELETE FROM class_allowed_cells WHERE class_id = ?", (cid,))
                 for w in (2, 3, 4):
@@ -110,8 +133,6 @@ def build_database(db_path: str):
                 )
         else:
             # Khung 1 buổi: K67 = 29 periods, K89 = 30 periods
-            k67 = [c for c in classes if c["name"].startswith(('6', '7'))]
-            k89 = [c for c in classes if c["name"].startswith(('8', '9'))]
 
             for c in k67:
                 cid = c["class_id"]

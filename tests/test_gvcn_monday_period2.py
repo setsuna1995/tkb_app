@@ -37,11 +37,19 @@ def _minimal_input(config, need_toan=1):
     )
 
 
+def test_default_config_has_gvcn_disabled():
+    """Mặc định hệ thống tắt ưu tiên GVCN tiết 2 Thứ 2 theo yêu cầu người dùng."""
+    cfg = SchedulingConfig()
+    assert cfg.gvcn_monday_period2_enabled is False
+    built = build_model(_minimal_input(cfg))
+    assert "_gvcn_monday_period2" not in built.penalty_terms
+
+
 def test_penalty_term_present_when_class_has_determinable_gvcn():
     """GVCN (GV 10) dạy cả HĐTN lẫn Toán cho lớp 101 -> xác định được GVCN,
-    ô Thứ 2 tiết 2 của lớp phải sinh ra penalty term theo dõi việc GVCN có
-    dạy ô đó hay không."""
-    built = build_model(_minimal_input(SchedulingConfig()))
+    khi bật gvcn_monday_period2_enabled, ô Thứ 2 tiết 2 của lớp phải sinh ra
+    penalty term theo dõi việc GVCN có dạy ô đó hay không."""
+    built = build_model(_minimal_input(SchedulingConfig(gvcn_monday_period2_enabled=True)))
     assert "_gvcn_monday_period2" in built.penalty_terms
 
 
@@ -59,7 +67,7 @@ def test_no_penalty_term_for_exempt_class():
     subjects = [Subject(1, "Toan", ROLE_THUONG), Subject(2, "Van", ROLE_THUONG),
                 Subject(99, "HDTN", ROLE_HDTN)]
     teachers = [Teacher(10, "GVCN 101"), Teacher(30, "GVCN 102")]
-    config = SchedulingConfig(gvcn_monday_period2_exempt_class_ids=frozenset({101}))
+    config = SchedulingConfig(gvcn_monday_period2_enabled=True, gvcn_monday_period2_exempt_class_ids=frozenset({101}))
     inp = SchedulingInput(
         classes=[ClassRoom(101, "6A1"), ClassRoom(102, "6A2")],
         subjects=subjects,
@@ -117,7 +125,7 @@ def _full_scenario(config, extra_slot_for_class_102=False):
 
 
 def test_gvcn_preferred_over_other_teacher_for_monday_period2():
-    inp = _full_scenario(SchedulingConfig())
+    inp = _full_scenario(SchedulingConfig(gvcn_monday_period2_enabled=True))
     built = build_model(inp)
     assignment = solve(built, time_limit_s=10.0)
     assert assignment is not None
@@ -132,7 +140,7 @@ def test_gvcn_penalty_is_soft_not_hard_when_teacher_double_booked_elsewhere():
     lớp 101, và bắt buộc dùng đúng GVCN (GV 10) -- theo luật cứng "GV không
     dạy 2 lớp cùng tiết" thì GVCN không thể có mặt ở ô Thứ 2 tiết 2 của lớp
     101 nữa. Ưu tiên MỀM này không được biến bài toán thành vô nghiệm."""
-    inp = _full_scenario(SchedulingConfig(), extra_slot_for_class_102=True)
+    inp = _full_scenario(SchedulingConfig(gvcn_monday_period2_enabled=True), extra_slot_for_class_102=True)
     built = build_model(inp)
     assignment = solve(built, time_limit_s=10.0)
     assert assignment is not None, (

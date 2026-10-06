@@ -333,6 +333,17 @@ def import_xlsm(conn, path: str) -> ImportReport:
             f"Đã nạp bổ sung định lượng 35 tuần ({n_weekly_rows} bản ghi)."
         )
 
+    # ---- CauHinh & Luat_Mon_Lop (nếu có trong file backup) ----
+    if "CauHinh" in wb.sheetnames:
+        try:
+            cfg_rep = import_scheduling_config_from_excel(conn, wb)
+            report.warnings.append(
+                f"Đã khôi phục cấu hình xếp lịch ({cfg_rep.get('config_keys_updated', 0)} mục) "
+                f"và {cfg_rep.get('rules_count', 0)} luật riêng môn/lớp từ sheet CauHinh."
+            )
+        except Exception as e:
+            report.warnings.append(f"Không thể đọc sheet CauHinh: {e}")
+
     report.counts = {
         "classes": n_classes,
         "subjects": n_subjects,
@@ -343,3 +354,122 @@ def import_xlsm(conn, path: str) -> ImportReport:
         "weekly_curriculum_rows": n_weekly_rows,
     }
     return report
+
+
+def import_scheduling_config_from_excel(conn, source) -> dict:
+    """Khôi phục toàn bộ cấu hình SchedulingConfig và luật riêng môn/lớp từ sheet CauHinh & Luat_Mon_Lop.
+
+    Tham số `source` có thể là đường dẫn file (str), bytes/BytesIO, hoặc openpyxl.Workbook.
+    """
+    import io
+    from core.models import SchedulingConfig
+    from data.repositories.config import (
+        _parse_bool, _parse_id_set, _parse_int, _parse_off_cells,
+        _parse_period_tuple, _parse_weekday_tuple,
+    )
+
+    if isinstance(source, openpyxl.Workbook):
+        wb = source
+    elif isinstance(source, (bytes, bytearray)):
+        wb = openpyxl.load_workbook(io.BytesIO(source), data_only=True)
+    elif hasattr(source, "read"):
+        wb = openpyxl.load_workbook(source, data_only=True)
+    elif isinstance(source, str):
+        wb = openpyxl.load_workbook(source, data_only=True)
+    else:
+        raise ValueError(f"Nguồn dữ liệu không hợp lệ: {type(source)}")
+
+    if "CauHinh" not in wb.sheetnames:
+        return {"imported": False, "message": "Không tìm thấy sheet 'CauHinh' trong file Excel."}
+
+    ws_cfg = wb["CauHinh"]
+    current_cfg = repo.get_scheduling_config(conn)
+    fields = getattr(SchedulingConfig, "__dataclass_fields__", {})
+
+    bool_fields = {
+        "hdtn_period2_afternoon", "heavy_subjects_morning_only", "avoid_teacher_gaps",
+        "avoid_teacher_lone_periods", "balance_afternoon_teachers", "avoid_gdtc_consecutive_days",
+        "avoid_heavy_afternoon_period3", "avoid_teacher_4_consecutive_morning", "use_cpsat",
+        "cpsat_minimize_changes", "gvcn_monday_period2_enabled", "balance_morning_academic_load",
+    }
+    int_fields = {
+        "gdtc_avoid_period", "chao_co_weekday", "chao_co_period", "hdtn_p1_weekday",
+        "hdtn_p1_period", "hdtn_p2_weekday", "hdtn_p2_period", "hdtn_p3_weekday",
+        "hdtn_p3_period", "hdtn_thematic_weekday", "hdtn_thematic_start_period",
+        "max_heavy_consecutive", "max_periods_per_session", "teacher_off_sessions_per_week",
+        "heavy_subject_priority_periods", "min_weekly_periods_for_mandatory_morning",
+        "max_teacher_periods_per_day", "max_heavy_per_session", "min_weekly_periods_for_lone_penalty",
+        "cpsat_time_limit_seconds", "cpsat_workers", "max_academic_per_morning", "min_academic_per_morning",
+    }
+    tuple_fields = {
+        "gdtc_morning_allowed_periods", "gdtc_afternoon_allowed_periods", "strict_morning_weekdays",
+        "reserved_off_weekdays_chieu", "mandatory_morning_weekdays",
+    }
+    id_set_fields = {
+        "gvcn_monday_period2_exempt_class_ids", "afternoon_preferred_subject_ids",
+        "morning_only_subject_ids", "lone_session_exempt_teacher_ids", "compact_schedule_teacher_ids",
+        "non_consecutive_subject_ids", "single_pair_subject_ids",
+    }
+
+    parsed_values = {}
+    r = 2
+    while _norm(ws_cfg.cell(r, 1).value):
+        key = _norm(ws_cfg.cell(r, 1).value)
+        val = ws_cfg.cell(r, 3).value
+        val_str = _norm(val)
+
+        if key in bool_fields:
+            parsed_values[key] = _parse_bool(val, getattr(current_cfg, key, False))
+        elif key in int_fields:
+            if not val_str:
+                parsed_values[key] = None
+            else:
+                parsed_values[key] = _parse_int(val, getattr(current_cfg, key, 0))
+        elif key in tuple_fields:
+            parsed_values[key] = _parse_weekday_tuple(val_str)
+        elif key in id_set_fields:
+            parsed_values[key] = _parse_id_set(val_str)
+        elif key == "forbidden_off_cells":
+            parsed_values[key] = _parse_off_cells(val_str)
+        elif key in fields:
+            parsed_values[key] = val_str
+
+        r += 1
+
+    merged_kwargs = {f: getattr(current_cfg, f) for f in fields}
+    for k, v in parsed_values.items():
+        if k in merged_kwargs:
+            merged_kwargs[k] = v
+
+    new_cfg = SchedulingConfig(**merged_kwargs)
+    repo.set_scheduling_config(conn, new_cfg)
+
+    # Đọc sheet Luat_Mon_Lop
+    rules_count = 0
+    if "Luat_Mon_Lop" in wb.sheetnames:
+        ws_rules = wb["Luat_Mon_Lop"]
+        r = 2
+        while _norm(ws_rules.cell(r, 3).value):
+            s_id_raw = ws_rules.cell(r, 3).value
+            c_ids_raw = ws_rules.cell(r, 5).value
+            cells_raw = ws_rules.cell(r, 7).value
+            try:
+                s_id = int(s_id_raw)
+                c_ids = [int(x.strip()) for x in str(c_ids_raw).split(",") if x.strip().isdigit()]
+                cells = []
+                for t in str(cells_raw).split(","):
+                    t = t.strip()
+                    if len(t) >= 2 and t[:-1].isdigit() and t[-1] in ("S", "C"):
+                        cells.append((int(t[:-1]), t[-1]))
+                if c_ids and cells:
+                    repo.upsert_subject_class_rule(conn, s_id, c_ids, cells)
+                    rules_count += 1
+            except Exception:
+                pass
+            r += 1
+
+    return {
+        "imported": True,
+        "config_keys_updated": len(parsed_values),
+        "rules_count": rules_count,
+    }

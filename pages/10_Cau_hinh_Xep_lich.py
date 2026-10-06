@@ -6,6 +6,8 @@ from core.models import (
     SchedulingConfig, WEEKDAY_NAMES, WEEKDAYS,
 )
 from data import repository as repo
+from io_excel.exporter import export_config_xlsx
+from io_excel.importer import import_scheduling_config_from_excel
 from ui_common import (
     get_conn, require_auth, require_school, sidebar_backup_export,
     sidebar_fixed_rules, sidebar_school_switcher,
@@ -255,7 +257,7 @@ with tab1:
     col_gvcn1, col_gvcn2 = st.columns([1, 2])
     gvcn_monday_period2_enabled = col_gvcn1.checkbox(
         "Bật ưu tiên GVCN dạy tiết 2 Thứ 2 của lớp mình chủ nhiệm",
-        value=getattr(config, "gvcn_monday_period2_enabled", True),
+        value=getattr(config, "gvcn_monday_period2_enabled", False),
         help="Ưu tiên cao nhất: Thuật toán xếp đúng GVCN dạy môn chuyên môn của mình tại lớp mình chủ nhiệm "
              "vào tiết 2 Thứ 2 (ngay sau lễ Chào cờ) và tránh tối đa việc GVCN bị phân tán đi dạy lớp khác vào tiết này.",
         key=f"{k_pfx}gvcn_monday_period2_enabled",
@@ -316,9 +318,9 @@ with tab2:
     strict_morning_selection = st.multiselect(
         "Sáng mà MỌI giáo viên bắt buộc phải có tiết dạy (bắt buộc toàn trường):",
         options=list(WEEKDAYS),
-        default=list(getattr(config, "strict_morning_weekdays", (2, 6)) or (2, 6)),
+        default=list(getattr(config, "strict_morning_weekdays", (2,)) if getattr(config, "strict_morning_weekdays", None) is not None else (2,)),
         format_func=lambda w: f"{WEEKDAY_NAMES[w]} Sáng",
-        help="Mặc định: Thứ 2 (Chào cờ) và Thứ 6 (Sinh hoạt lớp/Tổng kết). "
+        help="Mặc định: Thứ 2 (Chào cờ). "
              "Mọi giáo viên bắt buộc có tiết dạy. Ngoại lệ duy nhất: Ban Giám hiệu (Hiệu trưởng / Phó hiệu trưởng) "
              "được miễn trừ do phụ trách điều hành quản lý chung và số tiết định mức ít (2-4 tiết/tuần).",
         key=f"{k_pfx}strict_morning_selection",
@@ -343,24 +345,26 @@ with tab2:
     col_off1, col_off2 = st.columns([1, 1])
     teacher_off_sessions_per_week = col_off1.number_input(
         "Số buổi nghỉ cho mỗi giáo viên trong tuần (buổi):",
-        0, 3, config.teacher_off_sessions_per_week,
+        0, 3, getattr(config, "teacher_off_sessions_per_week", 0),
         help="Số buổi nghỉ trọn vẹn trong tuần cho mỗi giáo viên (0 = tắt luật; 1 = 1 buổi/tuần; 2 = 2 buổi/tuần).",
         key=f"{k_pfx}teacher_off_sessions_per_week",
     )
     off_mode_options = {
+        "none": "Không áp dụng (Tắt ràng buộc buổi nghỉ - Mặc định)",
         "soft": "Ưu tiên cao (Mềm - phạt nặng nếu thiếu, không gây vô nghiệm)",
         "hard": "Bắt buộc tuyệt đối (Cứng - giáo viên đủ điều kiện phải được nghỉ)",
     }
-    current_off_mode = getattr(config, "teacher_off_sessions_mode", "soft")
+    current_off_mode = getattr(config, "teacher_off_sessions_mode", "none")
     if current_off_mode not in off_mode_options:
-        current_off_mode = "soft"
+        current_off_mode = "none"
     teacher_off_sessions_mode = col_off2.selectbox(
         "Mức độ áp dụng buổi nghỉ:",
         options=list(off_mode_options.keys()),
         index=list(off_mode_options.keys()).index(current_off_mode),
         format_func=lambda k: off_mode_options[k],
-        help="Bắt buộc tuyệt đối: Ép cứng số buổi nghỉ cho các GV có đủ điều kiện số tiết (tự động chuyển mềm cho GV quá tải tiết). "
-             "Ưu tiên cao: Dồn tiết để xếp buổi nghỉ trước (phạt 1.000 điểm/buổi thiếu và phạt thêm 2.500 điểm nếu hoàn toàn không được nghỉ buổi nào).",
+        help="Không áp dụng: Tắt ràng buộc buổi nghỉ giúp bộ giải linh hoạt tối đa tránh số buổi lẻ tăng cao. "
+             "Ưu tiên cao: Dồn tiết để xếp buổi nghỉ trước (phạt điểm nếu thiếu buổi). "
+             "Bắt buộc tuyệt đối: Ép cứng số buổi nghỉ cho các GV có đủ điều kiện số tiết.",
         key=f"{k_pfx}teacher_off_sessions_mode",
     )
 
@@ -591,7 +595,53 @@ if conflict_afternoon_morning:
     c_names = [subject_names.get(sid, str(sid)) for sid in conflict_afternoon_morning]
     st.warning(f"⚠️ **Xung đột cấu hình:** Môn **{', '.join(c_names)}** vừa được đặt \"Bắt buộc sáng (cấm chiều)\" vừa được chọn \"Ưu tiên buổi chiều\". Hãy bỏ chọn ở một trong hai mục.")
 
-if st.button("💾 Lưu toàn bộ cấu hình xếp lịch", type="primary", key=f"{k_pfx}btn_save_all_cfg"):
+col_act1, col_act2, col_act3 = st.columns([2, 1.5, 1.2])
+with col_act1:
+    btn_save = st.button("💾 Lưu toàn bộ cấu hình xếp lịch", type="primary", key=f"{k_pfx}btn_save_all_cfg", width="stretch")
+with col_act2:
+    try:
+        cfg_file_bytes = export_config_xlsx(conn)
+        st.download_button(
+            "📥 Xuất file cấu hình (.xlsx)",
+            data=cfg_file_bytes,
+            file_name=f"Cau_Hinh_TKB_{school_slug}.xlsx",
+            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+            key=f"{k_pfx}btn_export_config_xlsx",
+            width="stretch",
+            help="Xuất toàn bộ 18 tiêu chí và luật riêng môn/lớp ra file Excel độc lập",
+        )
+    except Exception as e:
+        st.error(f"Lỗi tạo file cấu hình: {e}")
+with col_act3:
+    btn_reset_defaults = st.button("🔄 Khôi phục mặc định", key=f"{k_pfx}btn_reset_defaults", width="stretch", help="Đưa mọi thiết lập về giá trị mặc định chuẩn")
+
+if btn_reset_defaults:
+    default_cfg = SchedulingConfig()
+    repo.set_scheduling_config(conn, default_cfg)
+    st.success("✅ Đã khôi phục toàn bộ cấu hình về mặc định ban đầu!")
+    st.rerun()
+
+with st.expander("📤 Nạp cấu hình từ file Excel (.xlsx / .xlsm)", expanded=False):
+    st.caption("Khôi phục nhanh toàn bộ 18 tiêu chí chuyên môn và các luật riêng môn/lớp từ file cấu hình hoặc file sao lưu đã xuất trước đó.")
+    c_up1, c_up2 = st.columns([3, 1])
+    with c_up1:
+        up_cfg_file = st.file_uploader("Chọn file cấu hình Excel", type=["xlsx", "xlsm"], key=f"{k_pfx}upload_cfg_file")
+    with c_up2:
+        st.markdown("<div style='height: 28px;'></div>", unsafe_allow_html=True)
+        btn_apply_cfg = st.button("🚀 Áp dụng cấu hình", type="primary", disabled=up_cfg_file is None, key=f"{k_pfx}btn_apply_uploaded_cfg", width="stretch")
+
+    if up_cfg_file is not None and btn_apply_cfg:
+        try:
+            res = import_scheduling_config_from_excel(conn, up_cfg_file.getvalue())
+            if res.get("imported"):
+                st.success(f"✅ Đã nạp thành công {res.get('config_keys_updated', 0)} thiết lập và {res.get('rules_count', 0)} luật riêng môn/lớp từ file Excel!")
+                st.rerun()
+            else:
+                st.error(res.get("message", "Không tìm thấy dữ liệu cấu hình hợp lệ."))
+        except Exception as err:
+            st.error(f"Lỗi khi đọc file cấu hình: {err}")
+
+if btn_save:
     cfg_kwargs = dict(
         gdtc_avoid_period=int(gdtc_avoid_period),
         gdtc_morning_allowed_periods=tuple(sorted(gdtc_morning_allowed)),

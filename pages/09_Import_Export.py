@@ -143,6 +143,22 @@ with tab_backup:
     except Exception as e:
         st.error(f"Lỗi xuất TKB Nháp: {e}")
 
+    st.markdown("---")
+    st.markdown("### 3. Xuất file Cấu hình Ràng buộc & Tiêu chuẩn Sư phạm")
+    st.caption("Xuất riêng toàn bộ 18 tiêu chí chuyên môn, phân bổ hiện diện và các luật riêng môn/lớp ra file Excel độc lập.")
+    try:
+        from io_excel.exporter import export_config_xlsx
+        data_cfg = export_config_xlsx(conn)
+        st.download_button(
+            "⚙️ Tải file Cấu hình & Tiêu chuẩn (.xlsx)",
+            data=data_cfg,
+            file_name=f"Cau_Hinh_TKB_{datetime.now().strftime('%Y%m%d_%H%M')}.xlsx",
+            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+            key="btn_export_cfg_alone",
+        )
+    except Exception as e:
+        st.error(f"Lỗi xuất Cấu hình: {e}")
+
 sidebar_backup_export(conn)
 sidebar_fixed_rules(conn)
 sidebar_school_switcher()
