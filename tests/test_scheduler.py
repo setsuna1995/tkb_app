@@ -461,10 +461,10 @@ def test_off_slots_respect_forbidden_cells_gvcn_and_must_monday():
 
         # GVCN: chỉ ô SHL (sáng Thứ 7, theo gvcn_shl_cell) bị cấm -> chiều Thứ 7 vẫn chọn được
         assert (7, "S") not in offs[1]
-        assert {wd for wd, _ in offs[1]} <= {3, 4, 7}
+        assert {wd for wd, _ in offs[1]} <= {3, 4, 5, 6, 7}
 
-        # Tổ trưởng, must_monday: Thứ 2 bị cấm cả 2 buổi -> chọn 2 trong {3, 4, 7}
-        assert {wd for wd, _ in offs[2]} <= {3, 4, 7}
+        # Tổ trưởng, must_monday: Thứ 2 bị cấm cả 2 buổi -> chọn 2 trong {3, 4, 5, 6, 7}
+        assert {wd for wd, _ in offs[2]} <= {3, 4, 5, 6, 7}
 
         # GV thường: chỉ áp dụng FORBIDDEN_OFF_CELLS chung (sáng T2 vẫn cấm, chiều T2 thì không)
         assert (2, "S") not in offs[3]

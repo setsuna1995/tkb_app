@@ -21,7 +21,7 @@ def test_off_slot_shortfall_is_reported_not_silently_dropped():
     REPORTED as shortfall, never silently given fewer with no trace."""
     teachers_by_id = {1: Teacher(teacher_id=1, name="Hieu Truong", role="Hiệu trưởng")}
     rng = random.Random(2026)
-    gv_off_slots, shortfall = _assign_off_slots({1}, teachers_by_id, rng, off_slot_count=5)
+    gv_off_slots, shortfall = _assign_off_slots({1}, teachers_by_id, rng, off_slot_count=7)
     assert 1 in shortfall, "Regression: shortfall must be reported, not silently absorbed"
     assigned_count, required_count = shortfall[1]
     assert assigned_count == len(gv_off_slots[1])

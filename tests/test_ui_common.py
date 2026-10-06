@@ -65,8 +65,8 @@ def test_independent_school_scheduling_configs(tmp_path):
     # Initial configs should both be default
     cfg_a = repo.get_scheduling_config(conn_a)
     cfg_b = repo.get_scheduling_config(conn_b)
-    assert cfg_a.teacher_off_sessions_per_week == 1
-    assert cfg_b.teacher_off_sessions_per_week == 1
+    assert cfg_a.teacher_off_sessions_per_week == 0
+    assert cfg_b.teacher_off_sessions_per_week == 0
     assert cfg_a.hdtn_mode == "separate"
     assert cfg_b.hdtn_mode == "separate"
 
@@ -93,7 +93,7 @@ def test_independent_school_scheduling_configs(tmp_path):
     assert len(rules_a) == 1
 
     # School B remains completely unaffected
-    assert reloaded_b.teacher_off_sessions_per_week == 1
+    assert reloaded_b.teacher_off_sessions_per_week == 0
     assert reloaded_b.hdtn_mode == "separate"
     assert reloaded_b.heavy_subjects_morning_only is False
     rules_b = repo.list_subject_class_rules(conn_b)

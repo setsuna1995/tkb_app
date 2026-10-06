@@ -22,13 +22,16 @@ def _check_hard_post_generation_rules(inp: SchedulingInput, state: _State, confi
     total = 0
     mand_morns = getattr(config, "mandatory_morning_weekdays", (2, 5, 6))
     pinned_day_offs = {t.teacher_id: t.pinned_full_day_off for t in getattr(inp, "teachers", ()) if getattr(t, "pinned_full_day_off", None) is not None}
+    must_mon_ids = frozenset(t.teacher_id for t in inp.teachers if getattr(t, "must_monday", False))
+    bgh_ids = frozenset(t.teacher_id for t in inp.teachers if is_bgh(t))
     missing = _count_teacher_missing_mandatory_mornings(
         inp.slots, state.assigned, state.slot_teacher, mand_morns,
         min_weekly_periods=getattr(config, "min_weekly_periods_for_mandatory_morning", 10),
         strict_weekdays=getattr(config, "strict_morning_weekdays", ()) or (),
-        exempt_teacher_ids=frozenset(t.teacher_id for t in inp.teachers if is_bgh(t)),
+        exempt_teacher_ids=bgh_ids,
         ban_busy=getattr(inp, "ban_busy", None),
         pinned_day_offs=pinned_day_offs,
+        must_monday_ids=must_mon_ids,
     )
     if missing > 0:
         violated.append("II.3")
@@ -37,9 +40,8 @@ def _check_hard_post_generation_rules(inp: SchedulingInput, state: _State, confi
         min_lone_load = getattr(config, "min_weekly_periods_for_lone_penalty", 8)
         strict_morns = getattr(config, "strict_morning_weekdays", ()) or ()
         min_mand_load = getattr(config, "min_weekly_periods_for_mandatory_morning", 10)
-        must_mon_ids = frozenset(t.teacher_id for t in inp.teachers if getattr(t, "must_monday", False))
-        bgh_ids = frozenset(t.teacher_id for t in inp.teachers if is_bgh(t))
         allow_lone_mand = getattr(config, "allow_lone_period_on_mandatory_mornings", True)
+        lone_exempt = getattr(config, "lone_session_exempt_teacher_ids", frozenset()) or frozenset()
 
         lone_sessions = _count_teacher_lone_sessions(
             inp.slots, state.assigned, state.slot_teacher,

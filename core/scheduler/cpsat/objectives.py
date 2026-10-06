@@ -145,6 +145,9 @@ def _add_objective(built: CpSatModel) -> None:
             must_mon_t = (2,) if getattr(t_obj, "must_monday", False) else ()
             t_pinned_off = getattr(t_obj, "pinned_full_day_off", None)
             req_morns_t = {w for w in (*strict_t, *mand_t, *must_mon_t) if w != t_pinned_off} if allow_lone_mand else set()
+            must_mon_ids = getattr(params, "must_monday_ids", frozenset())
+            if must_mon_ids and t not in must_mon_ids:
+                req_morns_t.discard(2)
 
             for (wd, sess) in sessions:
                 if sess == "S" and wd in req_morns_t:
@@ -200,10 +203,13 @@ def _add_objective(built: CpSatModel) -> None:
 
     # 2. II.3 Thiếu sáng bắt buộc
     all_mand_strict = sorted(set(mand_morns) | set(strict_morns))
+    must_mon_ids = getattr(params, "must_monday_ids", frozenset())
     for t in teachers:
         t_obj = teachers_by_id.get(t)
         for wd in all_mand_strict:
             if t_obj and t_obj.pinned_full_day_off == wd:
+                continue
+            if wd == 2 and must_mon_ids and t not in must_mon_ids:
                 continue
             is_busy = _is_teacher_busy_morning(inp, t, wd)
             is_strict = (wd in strict_morns and t not in bgh_ids and not is_busy)

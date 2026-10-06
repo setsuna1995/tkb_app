@@ -68,7 +68,7 @@ def test_diagnose_pass1_optimal_baseline():
         ban_busy=set(),
         slots=slots,
         timeslots=ts,
-        config=SchedulingConfig(),
+        config=SchedulingConfig(strict_morning_weekdays=()),
     )
 
     built = cpsat.build_model(inp)

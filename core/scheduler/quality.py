@@ -41,8 +41,14 @@ def _is_mandatory_morning_for_teacher(
 ) -> bool:
     if pinned_day_offs and pinned_day_offs.get(tid) == wd:
         return False
-    if tid in must_monday_ids and wd == 2:
-        return True
+    if wd == 2:
+        if must_monday_ids and tid not in must_monday_ids:
+            return False
+        if tid in must_monday_ids:
+            return True
+        if tid in bgh_ids:
+            return False
+        return (wd in strict_weekdays) or (total >= min_mand_load and wd in mandatory_mornings)
     if tid not in bgh_ids and wd in strict_weekdays:
         return True
     if total >= min_mand_load and wd in mandatory_mornings:
@@ -212,7 +218,8 @@ def _count_teacher_missing_mandatory_mornings(slots: list[Slot], assigned: dict,
                                                strict_weekdays: tuple = (),
                                                exempt_teacher_ids: frozenset = frozenset(),
                                                ban_busy: set = None,
-                                               pinned_day_offs: dict = None) -> int:
+                                               pinned_day_offs: dict = None,
+                                               must_monday_ids: frozenset = frozenset()) -> int:
     """min_weekly_periods: chỉ ép GV có tải >= ngưỡng này phải có mặt các sáng bắt
     buộc. Mặc định 10 = đúng hằng số cũ nằm cứng trong hàm này; nay cấu hình được
     trên trang Cấu hình xếp lịch (2026-09-04).
@@ -224,7 +231,9 @@ def _count_teacher_missing_mandatory_mornings(slots: list[Slot], assigned: dict,
     ban_busy: tập (teacher_id, ts_id) các ô GV đã chủ động tích bận (2026-09-06).
     GV đã tích bận toàn bộ sáng đó được miễn trừ không tính vi phạm.
     pinned_day_offs: dict mapping teacher_id -> pinned_full_day_off. GV được BGH duyệt
-    nghỉ trọn ngày đó thì được miễn trừ không tính vi phạm sáng bắt buộc."""
+    nghỉ trọn ngày đó thì được miễn trừ không tính vi phạm sáng bắt buộc.
+    must_monday_ids: tập teacher_id của các GV có cờ must_monday=True. Nếu danh sách này
+    được cung cấp và tid không có trong đó thì được miễn trừ sáng Thứ 2."""
     teacher_morns = defaultdict(lambda: defaultdict(int))
     teacher_totals = defaultdict(int)
     for s in slots:
@@ -244,6 +253,8 @@ def _count_teacher_missing_mandatory_mornings(slots: list[Slot], assigned: dict,
             for wd in strict_weekdays:
                 if pinned_day_offs and pinned_day_offs.get(tid) == wd:
                     continue
+                if wd == 2 and must_monday_ids and tid not in must_monday_ids:
+                    continue
                 if teacher_morns[tid][wd] == 0:
                     if ban_busy and _is_teacher_busy_on_morning_quality(tid, wd, slots, slot_teacher, ban_busy):
                         continue
@@ -254,6 +265,8 @@ def _count_teacher_missing_mandatory_mornings(slots: list[Slot], assigned: dict,
                 if wd in strict_weekdays:
                     continue
                 if pinned_day_offs and pinned_day_offs.get(tid) == wd:
+                    continue
+                if wd == 2 and must_monday_ids and tid not in must_monday_ids:
                     continue
                 if teacher_morns[tid][wd] == 0:
                     if ban_busy and _is_teacher_busy_on_morning_quality(tid, wd, slots, slot_teacher, ban_busy):

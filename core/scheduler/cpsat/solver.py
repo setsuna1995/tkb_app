@@ -238,10 +238,13 @@ def _presolve_capacity_screening(built: CpSatModel) -> set[str]:
         morn_slots = [s for s in built.inp.slots if s.ts.weekday == wd and s.ts.session == "S"]
         cap = len(morn_slots)
         mand_teacher_ids = set()
+        must_mon_ids = getattr(params, "must_monday_ids", frozenset())
         for t in built.inp.teachers:
             if t.teacher_id in bgh_ids:
                 continue
             if t.pinned_full_day_off == wd:
+                continue
+            if wd == 2 and must_mon_ids and t.teacher_id not in must_mon_ids:
                 continue
             if _is_teacher_busy_morning(built.inp, t.teacher_id, wd):
                 continue

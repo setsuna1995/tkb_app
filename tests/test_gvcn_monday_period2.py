@@ -125,7 +125,7 @@ def _full_scenario(config, extra_slot_for_class_102=False):
 
 
 def test_gvcn_preferred_over_other_teacher_for_monday_period2():
-    inp = _full_scenario(SchedulingConfig(gvcn_monday_period2_enabled=True))
+    inp = _full_scenario(SchedulingConfig(gvcn_monday_period2_enabled=True, strict_morning_weekdays=()))
     built = build_model(inp)
     assignment = solve(built, time_limit_s=10.0)
     assert assignment is not None

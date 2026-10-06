@@ -899,8 +899,10 @@ def test_objective_matches_quality_teacher_penalty():
         config=SchedulingConfig(
             teacher_off_sessions_per_week=0,
             mandatory_morning_weekdays=(2, 3),
+            strict_morning_weekdays=(),
             min_weekly_periods_for_mandatory_morning=2,
             min_weekly_periods_for_lone_penalty=2,
+            allow_lone_period_on_mandatory_mornings=False,
         ),
     )
     built = cpsat.build_model(inp)
@@ -941,6 +943,7 @@ def test_lone_session_exempt_teacher_receives_no_lone_penalty():
             teacher_off_sessions_per_week=0,
             lone_session_exempt_teacher_ids=frozenset({10}),
             min_weekly_periods_for_lone_penalty=1,
+            allow_lone_period_on_mandatory_mornings=False,
         ),
     )
     built = cpsat.build_model(inp)
@@ -971,6 +974,7 @@ def test_lone_session_exempt_teacher_still_gets_small_soft_penalty():
             teacher_off_sessions_per_week=0,
             lone_session_exempt_teacher_ids=frozenset({10}),
             min_weekly_periods_for_lone_penalty=1,
+            allow_lone_period_on_mandatory_mornings=False,
         ),
     )
     built = cpsat.build_model(inp)
@@ -1150,6 +1154,7 @@ def test_schedule_result_perfect_has_successes_found_1_and_no_relaxed_rules():
         config=SchedulingConfig(
             teacher_off_sessions_per_week=0,
             mandatory_morning_weekdays=(),
+            strict_morning_weekdays=(),
             min_weekly_periods_for_lone_penalty=5,
         ),
     )

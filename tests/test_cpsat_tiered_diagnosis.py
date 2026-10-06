@@ -21,6 +21,7 @@ def test_capacity_screening_detects_ii4_overflow():
         mandatory_morning_weekdays=(2,),
         min_weekly_periods_for_mandatory_morning=10,
         avoid_teacher_lone_periods=True,
+        allow_lone_period_on_mandatory_mornings=False,
     )
 
     inp = SchedulingInput(

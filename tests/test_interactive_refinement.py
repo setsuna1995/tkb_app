@@ -28,7 +28,7 @@ def _setup_tiny_input(locked_slots=None, reference_assignment=None):
         need={(1, 101): 3, (2, 101): 3},
         assigned_teacher={(1, 101): 10, (2, 101): 20},
         ban_busy=set(), slots=slots, timeslots=ts,
-        config=SchedulingConfig(),
+        config=SchedulingConfig(strict_morning_weekdays=()),
         locked_slots=locked_slots or {},
         reference_assignment=reference_assignment or {},
     )

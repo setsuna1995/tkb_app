@@ -124,12 +124,15 @@ def _render_interactive_timetable_studio(
         role = getattr(t, "role", "") or ""
         is_bgh = any(k in role for k in ["Hiệu trưởng", "Phó hiệu trưởng"])
         req = set()
-        if getattr(t, "must_monday", False):
-            req.add(2)
         if not is_bgh:
             req |= strict_morns
         if load_p >= min_mand_load:
             req |= mand_morns
+        has_must_mon_flag = getattr(t, "must_monday", None)
+        if has_must_mon_flag is True:
+            req.add(2)
+        elif has_must_mon_flag is False and any(getattr(tch, "must_monday", False) for tch in teachers):
+            req.discard(2)
         pinned_off = getattr(t, "pinned_full_day_off", None)
         if pinned_off:
             req.discard(pinned_off)
@@ -425,10 +428,11 @@ def _render_interactive_timetable_studio(
                     delta_color="inverse"
                 )
         else:
+            mon_p_count = sum(1 for (wd, sess, per) in t_slots if wd == 2 and sess == "S")
             kpi_t5.metric(
                 "Sáng Thứ 2",
-                "Có tiết dạy" if has_monday_morning else "Nghỉ sáng T2",
-                "Tự do",
+                f"Có tiết dạy ({mon_p_count} tiết)" if has_monday_morning else "Nghỉ sáng T2",
+                "ℹ️ Tự do" if has_monday_morning else "ℹ️ Không bắt buộc",
                 delta_color="off"
             )
 
@@ -454,7 +458,7 @@ def _render_interactive_timetable_studio(
 
         if lone_count > 0:
             st.warning(f"⚠️ Giáo viên đang có **{lone_count} buổi lẻ 1 tiết** cần tránh: {', '.join(lone_details)}.")
-        elif accepted_mand_lones:
+        if accepted_mand_lones:
             mand_names = [f"Sáng {WEEKDAY_NAMES[w]}" for w in accepted_mand_lones]
             st.info(f"💡 GV {chosen_t.name} có 1 tiết dạy vào **{', '.join(mand_names)}** để đảm bảo có mặt ở trường theo quy định (buổi bắt buộc có mặt, được chấp nhận).")
 
@@ -526,17 +530,41 @@ def _render_interactive_timetable_studio(
             total_p = sum(len(v) for v in t_slots.values())
             s_set = {(wd, sess) for (wd, sess, per) in t_slots}
             d_set = {wd for (wd, sess, per) in t_slots}
-            t_lone = sum(1 for (wd, sess) in s_set if teacher_sess_counts.get((tid, wd, sess), 0) == 1)
+            t_req_morns = _get_required_mornings(t, total_p)
+
+            t_violating_lones = [
+                (wd, sess) for (wd, sess) in sorted(s_set)
+                if teacher_sess_counts.get((tid, wd, sess), 0) == 1
+                and not (allow_lone_mand and sess == "S" and wd in t_req_morns)
+            ]
+            t_lone = len(t_violating_lones)
 
             aft_t = sum(1 for (wd, sess) in s_set if sess == "C")
             aft_off = 6 - aft_t
             req_a = getattr(t, "min_afternoon_off", None)
             aft_label = f"{aft_off} (Định mức: {req_a})" if req_a else f"{aft_off}"
 
-            lone_dt = [f"{WEEKDAY_NAMES[wd]} ({'S' if sess == 'S' else 'C'})" for (wd, sess) in sorted(s_set) if teacher_sess_counts.get((tid, wd, sess), 0) == 1]
+            lone_dt = [f"{WEEKDAY_NAMES[wd]} ({'S' if sess == 'S' else 'C'})" for (wd, sess) in t_violating_lones]
             has_morn = (2, "S") in s_set
+            mon_p_count = sum(1 for (wd, sess, per) in t_slots if wd == 2 and sess == "S")
 
-            has_problem = (t_lone > 0) or (req_a and aft_off < req_a)
+            is_mon_pinned = (getattr(t, "pinned_full_day_off", None) == 2)
+            mon_busy_periods = {p for p in range(1, 6) if (2, "S", p) in teacher_busy_map.get(tid, set())}
+            is_mon_all_busy = (len(mon_busy_periods) >= 4)
+            is_mon_req = (2 in t_req_morns) and not is_mon_all_busy and not is_mon_pinned
+
+            if has_morn:
+                mon_status = f"Có mặt ({mon_p_count} tiết)"
+            elif is_mon_pinned:
+                mon_status = "Nghỉ (Được duyệt)"
+            elif is_mon_all_busy:
+                mon_status = "Nghỉ (Bận lịch)"
+            elif not is_mon_req:
+                mon_status = "Nghỉ (Không bắt buộc)"
+            else:
+                mon_status = "⚠️ Vắng mặt"
+
+            has_problem = (t_lone > 0) or (req_a and aft_off < req_a) or (is_mon_req and not has_morn)
             if show_issues_only and not has_problem:
                 continue
 
@@ -555,7 +583,7 @@ def _render_interactive_timetable_studio(
                 "Nghỉ chiều": aft_label,
                 "Buổi lẻ 1 tiết": t_lone,
                 "Chi tiết buổi lẻ": ", ".join(lone_dt) if lone_dt else "—",
-                "Sáng Thứ 2": "Có mặt" if has_morn else "Nghỉ",
+                "Sáng Thứ 2": mon_status,
             })
 
         df_matrix = pd.DataFrame(matrix_rows)
@@ -565,6 +593,10 @@ def _render_interactive_timetable_studio(
                 if row["Buổi lẻ 1 tiết"] > 0:
                     for i, col in enumerate(row.index):
                         if col == "Buổi lẻ 1 tiết":
+                            styles[i] = "background-color: #FEF2F2; color: #DC2626; font-weight: bold;"
+                if "⚠️" in str(row["Sáng Thứ 2"]):
+                    for i, col in enumerate(row.index):
+                        if col == "Sáng Thứ 2":
                             styles[i] = "background-color: #FEF2F2; color: #DC2626; font-weight: bold;"
                 return styles
             st.dataframe(df_matrix.style.apply(_highlight_matrix, axis=1), hide_index=True, width="stretch")

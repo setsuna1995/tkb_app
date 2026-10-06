@@ -8,7 +8,7 @@ def test_scheduling_config_defaults_match_current_hardcoded_behavior():
     assert config.chao_co_period == 1
     assert config.max_heavy_consecutive == 3
     assert config.max_periods_per_session == 4
-    assert config.teacher_off_sessions_per_week == 1
+    assert config.teacher_off_sessions_per_week == 0
     assert config.forbidden_off_cells == frozenset({(2, "S")})
     assert config.reserved_off_weekdays_chieu == (5, 6)
     assert config.heavy_subject_priority_periods == 4

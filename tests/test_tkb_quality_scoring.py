@@ -29,6 +29,7 @@ def test_perfect_tkb_health_score():
         timeslots=ts,
         config=SchedulingConfig(
             mandatory_morning_weekdays=(2, 4),
+            strict_morning_weekdays=(),
             min_weekly_periods_for_mandatory_morning=10,
             min_weekly_periods_for_lone_penalty=5,
         ),

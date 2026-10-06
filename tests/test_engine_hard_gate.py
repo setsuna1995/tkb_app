@@ -51,7 +51,11 @@ def test_check_hard_post_generation_rules_gates_ii8_split_day_again():
         inp = SchedulingInput(
             classes=[ClassRoom(101, "6A1")], subjects=[], teachers=[Teacher(1, "GV A")],
             need={}, assigned_teacher={}, ban_busy=set(), slots=slots, timeslots=[],
-            config=SchedulingConfig(min_weekly_periods_for_lone_penalty=15),
+            config=SchedulingConfig(
+                min_weekly_periods_for_lone_penalty=15,
+                strict_morning_weekdays=(),
+                mandatory_morning_weekdays=(),
+            ),
         )
         state = _State(remaining_need={}, busy=set())
         for slot in slots:
@@ -101,7 +105,7 @@ def test_check_hard_post_generation_rules_gates_ii3_missing_mandatory_morning_ag
     inp = SchedulingInput(
         classes=[ClassRoom(101, "6A1")], subjects=[], teachers=[Teacher(1, "GV A")],
         need={}, assigned_teacher={}, ban_busy=set(), slots=slots, timeslots=[],
-        config=SchedulingConfig(),
+        config=SchedulingConfig(mandatory_morning_weekdays=(2, 5, 6)),
     )
     state = _State(remaining_need={}, busy=set())
     for slot in slots:
