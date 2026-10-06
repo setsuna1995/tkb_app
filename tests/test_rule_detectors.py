@@ -59,15 +59,15 @@ def test_missing_mandatory_morning_excuses_teacher_busy_that_morning():
 # --- II.4 / II.8 ---
 
 def test_lone_session_respects_load_threshold():
-    slots = _morning_slots([(2, 1)])
+    slots = _morning_slots([(3, 1)])
     assert detect_teacher_lone_sessions(*_teacher_1(slots, SchedulingConfig(min_weekly_periods_for_lone_penalty=15))) == []
     assert pick(detect_teacher_lone_sessions(*_teacher_1(slots, NO_LONE_THRESHOLD)),
-                "teacher_id", "weekday", "session") == [(1, 2, "S")]
+                "teacher_id", "weekday", "session") == [(1, 3, "S")]
 
 
 def test_lone_day():
-    violations = detect_teacher_lone_days(*_teacher_1(_morning_slots([(2, 1)]), NO_LONE_THRESHOLD))
-    assert pick(violations, "teacher_id", "weekday", "session") == [(1, 2, None)]
+    violations = detect_teacher_lone_days(*_teacher_1(_morning_slots([(3, 1)]), NO_LONE_THRESHOLD))
+    assert pick(violations, "teacher_id", "weekday", "session") == [(1, 3, None)]
 
 
 def test_split_day_respects_load_threshold():

@@ -129,14 +129,27 @@ def _add_objective(built: CpSatModel) -> None:
     soft_exempt_split_terms = []
     soft_exempt_lone_day_terms = []
 
+    allow_lone_mand = getattr(config, "allow_lone_period_on_mandatory_mornings", True)
+    teachers_by_id = {t.teacher_id: t for t in inp.teachers}
+
     # 1. II.4 (Buổi lẻ, Ngày lẻ, Dồn buổi lẻ) & II.8 (Ngày chia lẻ)
     if avoid_lone:
         for t in teachers:
             if load[t] < min_lone_load:
                 continue
             is_soft_exempt = t in lone_exempt
+            t_obj = teachers_by_id.get(t)
+            is_bgh_t = t in bgh_ids
+            strict_t = () if is_bgh_t else strict_morns
+            mand_t = mand_morns if load[t] >= min_mand_load else ()
+            must_mon_t = (2,) if getattr(t_obj, "must_monday", False) else ()
+            t_pinned_off = getattr(t_obj, "pinned_full_day_off", None)
+            req_morns_t = {w for w in (*strict_t, *mand_t, *must_mon_t) if w != t_pinned_off} if allow_lone_mand else set()
 
             for (wd, sess) in sessions:
+                if sess == "S" and wd in req_morns_t:
+                    # User: Với buổi bắt buộc phải có mặt thì có thể chấp nhận 1 tiết lẻ để có mặt ở trường
+                    continue
                 if is_soft_exempt:
                     soft_exempt_lone_terms.append(lone[t, wd, sess])
                     penalty_terms["_exempt_lone_session"].append(lone[t, wd, sess])
@@ -155,6 +168,8 @@ def _add_objective(built: CpSatModel) -> None:
                     penalty_terms["II.8"].append(sp)
 
             for wd in weekdays:
+                if wd in req_morns_t:
+                    continue
                 day_cnts = [cnt[t, wd, sess] for sess in ("S", "C") if (t, wd, sess) in cnt]
                 if day_cnts:
                     ld = m.NewBoolVar(f"lone_day_t{t}_wd{wd}")
@@ -167,26 +182,24 @@ def _add_objective(built: CpSatModel) -> None:
                         lone_day_terms.append(ld)
                         penalty_terms["II.4"].append(ld)
 
+            t_lones_to_spread = [lone[t, wd, sess] for (wd, sess) in sessions if (t, wd, sess) in lone and not (sess == "S" and wd in req_morns_t)]
             if is_soft_exempt:
-                t_lones = [lone[t, wd, sess] for (wd, sess) in sessions if (t, wd, sess) in lone]
-                if t_lones:
-                    m.Add(sum(t_lones) <= 2)
-                    extra_l = m.NewIntVar(0, len(t_lones), f"extra_lone_exempt_t{t}")
-                    m.Add(extra_l >= sum(t_lones) - 1)
+                if t_lones_to_spread:
+                    m.Add(sum(t_lones_to_spread) <= 2)
+                    extra_l = m.NewIntVar(0, len(t_lones_to_spread), f"extra_lone_exempt_t{t}")
+                    m.Add(extra_l >= sum(t_lones_to_spread) - 1)
                     m.Add(extra_l >= 0)
                     lone_spread_terms.append(extra_l)
                 continue
 
-            t_lones = [lone[t, wd, sess] for (wd, sess) in sessions if (t, wd, sess) in lone]
-            if t_lones:
-                extra_l = m.NewIntVar(0, len(t_lones), f"extra_lone_t{t}")
-                m.Add(extra_l >= sum(t_lones) - 1)
+            if t_lones_to_spread:
+                extra_l = m.NewIntVar(0, len(t_lones_to_spread), f"extra_lone_t{t}")
+                m.Add(extra_l >= sum(t_lones_to_spread) - 1)
                 m.Add(extra_l >= 0)
                 lone_spread_terms.append(extra_l)
 
     # 2. II.3 Thiếu sáng bắt buộc
     all_mand_strict = sorted(set(mand_morns) | set(strict_morns))
-    teachers_by_id = {t.teacher_id: t for t in inp.teachers}
     for t in teachers:
         t_obj = teachers_by_id.get(t)
         for wd in all_mand_strict:

@@ -10,7 +10,7 @@ is only used to decide whether a violation was forced (core/rules/violations.py)
 from __future__ import annotations
 
 from collections import defaultdict
-from dataclasses import dataclass, replace
+from dataclasses import dataclass, field, replace
 
 from core.models import RoleIndex, SchedulingConfig, SchedulingInput, is_bgh
 from core.roles import resolve_roles
@@ -67,6 +67,8 @@ class EffectiveParams:
     morning_only_subject_ids: frozenset     # includes heavy subjects when heavy_subjects_morning_only
     non_consecutive_subject_ids: frozenset  # includes GDTC when avoid_gdtc_consecutive_days
     flags: dict                             # name in RULE_FLAG_NAMES -> bool
+    allow_lone_period_on_mandatory_mornings: bool = True
+    must_monday_ids: frozenset = field(default_factory=frozenset)
 
     def as_effective(self) -> "EffectiveParams":
         """Copy whose declared thresholds are what the model enforced.
@@ -109,6 +111,8 @@ def resolve_effective_params(inp: SchedulingInput) -> EffectiveParams:
         gdtc_afternoon_allowed_periods=tuple(config.gdtc_afternoon_allowed_periods or ()),
         morning_only_subject_ids=_morning_only_ids(config, roles, flags),
         non_consecutive_subject_ids=_non_consecutive_ids(config, roles, flags),
+        allow_lone_period_on_mandatory_mornings=getattr(config, "allow_lone_period_on_mandatory_mornings", True),
+        must_monday_ids=frozenset(t.teacher_id for t in inp.teachers if getattr(t, "must_monday", False)),
         flags=flags,
     )
 

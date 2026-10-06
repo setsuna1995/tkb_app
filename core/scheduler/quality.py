@@ -30,12 +30,35 @@ def _count_teacher_gaps(slots: list[Slot], assigned: dict, slot_teacher: dict) -
     return total_gaps
 
 
+def _is_mandatory_morning_for_teacher(
+    tid: int, wd: int, total: int,
+    mandatory_mornings: tuple = (),
+    strict_weekdays: tuple = (),
+    min_mand_load: int = 10,
+    must_monday_ids: frozenset = frozenset(),
+    bgh_ids: frozenset = frozenset(),
+    pinned_day_offs: dict = None
+) -> bool:
+    if pinned_day_offs and pinned_day_offs.get(tid) == wd:
+        return False
+    if tid in must_monday_ids and wd == 2:
+        return True
+    if tid not in bgh_ids and wd in strict_weekdays:
+        return True
+    if total >= min_mand_load and wd in mandatory_mornings:
+        return True
+    return False
+
+
 def _count_teacher_lone_days(slots: list[Slot], assigned: dict, slot_teacher: dict, min_weekly_periods: int = 0,
-                              exempt_teacher_ids: frozenset = frozenset()) -> int:
-    """exempt_teacher_ids: GV được miễn trừ luật buổi lẻ theo tên, không theo
-    ngưỡng tải -- dành cho GV vốn phải có mặt ở trường vì nhiệm vụ khác (phụ
-    trách thiết bị, thư viện...), nên một buổi 1 tiết không bắt họ đi lại thêm.
-    Cấu hình trên trang Cấu hình xếp lịch, không hard-code (2026-09-04)."""
+                              exempt_teacher_ids: frozenset = frozenset(),
+                              mandatory_mornings: tuple = (),
+                              strict_weekdays: tuple = (),
+                              min_mandatory_load: int = 10,
+                              must_monday_ids: frozenset = frozenset(),
+                              bgh_ids: frozenset = frozenset(),
+                              pinned_day_offs: dict = None,
+                              allow_lone_mandatory_mornings: bool = True) -> int:
     teacher_days = defaultdict(int)
     teacher_totals = defaultdict(int)
     for slot in slots:
@@ -45,14 +68,28 @@ def _count_teacher_lone_days(slots: list[Slot], assigned: dict, slot_teacher: di
             if tid is not None and tid > 0:
                 teacher_days[(tid, slot.ts.weekday)] += 1
                 teacher_totals[tid] += 1
-    return sum(1 for (tid, wd), count in teacher_days.items()
-               if count == 1 and teacher_totals[tid] >= min_weekly_periods
-               and tid not in exempt_teacher_ids)
+    count = 0
+    for (tid, wd), c in teacher_days.items():
+        if c == 1 and teacher_totals[tid] >= min_weekly_periods and tid not in exempt_teacher_ids:
+            if allow_lone_mandatory_mornings and _is_mandatory_morning_for_teacher(
+                tid, wd, teacher_totals[tid], mandatory_mornings, strict_weekdays, min_mandatory_load,
+                must_monday_ids, bgh_ids, pinned_day_offs
+            ):
+                continue
+            count += 1
+    return count
 
 
 def _count_teacher_concentrated_lone_sessions(slots: list[Slot], assigned: dict, slot_teacher: dict,
                                                min_weekly_periods: int = 0,
-                                               exempt_teacher_ids: frozenset = frozenset()) -> int:
+                                               exempt_teacher_ids: frozenset = frozenset(),
+                                               mandatory_mornings: tuple = (),
+                                               strict_weekdays: tuple = (),
+                                               min_mandatory_load: int = 10,
+                                               must_monday_ids: frozenset = frozenset(),
+                                               bgh_ids: frozenset = frozenset(),
+                                               pinned_day_offs: dict = None,
+                                               allow_lone_mandatory_mornings: bool = True) -> int:
     """Counts lone sessions BEYOND THE FIRST for each teacher.
 
     _count_teacher_lone_sessions is linear: three teachers with one lone session
@@ -73,15 +110,27 @@ def _count_teacher_concentrated_lone_sessions(slots: list[Slot], assigned: dict,
                 teacher_totals[tid] += 1
 
     lone_per_teacher = defaultdict(int)
-    for (tid, _wd, _sess), count in t_sess.items():
+    for (tid, wd, sess), count in t_sess.items():
         if (count == 1 and teacher_totals[tid] >= min_weekly_periods
                 and tid not in exempt_teacher_ids):
+            if allow_lone_mandatory_mornings and sess == "S" and _is_mandatory_morning_for_teacher(
+                tid, wd, teacher_totals[tid], mandatory_mornings, strict_weekdays, min_mandatory_load,
+                must_monday_ids, bgh_ids, pinned_day_offs
+            ):
+                continue
             lone_per_teacher[tid] += 1
     return sum(max(0, n - 1) for n in lone_per_teacher.values())
 
 
 def _count_teacher_lone_sessions(slots: list[Slot], assigned: dict, slot_teacher: dict, min_weekly_periods: int = 0,
-                                  exempt_teacher_ids: frozenset = frozenset()) -> int:
+                                  exempt_teacher_ids: frozenset = frozenset(),
+                                  mandatory_mornings: tuple = (),
+                                  strict_weekdays: tuple = (),
+                                  min_mandatory_load: int = 10,
+                                  must_monday_ids: frozenset = frozenset(),
+                                  bgh_ids: frozenset = frozenset(),
+                                  pinned_day_offs: dict = None,
+                                  allow_lone_mandatory_mornings: bool = True) -> int:
     """exempt_teacher_ids: xem _count_teacher_lone_days."""
     t_sess = defaultdict(int)
     teacher_totals = defaultdict(int)
@@ -92,9 +141,16 @@ def _count_teacher_lone_sessions(slots: list[Slot], assigned: dict, slot_teacher
             if tid is not None and tid > 0:
                 t_sess[(tid, slot.ts.weekday, slot.ts.session)] += 1
                 teacher_totals[tid] += 1
-    return sum(1 for (tid, wd, sess), count in t_sess.items()
-               if count == 1 and teacher_totals[tid] >= min_weekly_periods
-               and tid not in exempt_teacher_ids)
+    count = 0
+    for (tid, wd, sess), c in t_sess.items():
+        if c == 1 and teacher_totals[tid] >= min_weekly_periods and tid not in exempt_teacher_ids:
+            if allow_lone_mandatory_mornings and sess == "S" and _is_mandatory_morning_for_teacher(
+                tid, wd, teacher_totals[tid], mandatory_mornings, strict_weekdays, min_mandatory_load,
+                must_monday_ids, bgh_ids, pinned_day_offs
+            ):
+                continue
+            count += 1
+    return count
 
 
 def _count_teacher_split_sessions(slots: list[Slot], assigned: dict, slot_teacher: dict, min_weekly_periods: int = 0,

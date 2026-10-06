@@ -89,8 +89,38 @@ def _render_interactive_timetable_studio(
     assignments: dict,
     key_prefix: str = "",
     title: str = "Studio Khảo Sát Chi Tiết Thời Khóa Biểu",
+    config=None,
 ):
     from collections import defaultdict
+    from core.models import SchedulingConfig
+
+    if config is None:
+        try:
+            school_slug = require_school()
+            c_conn = get_conn(school_slug)
+            config = repo.get_scheduling_config(c_conn)
+        except Exception:
+            config = SchedulingConfig()
+
+    strict_morns = set(getattr(config, "strict_morning_weekdays", (2,)) if getattr(config, "strict_morning_weekdays", None) is not None else (2,))
+    mand_morns = set(getattr(config, "mandatory_morning_weekdays", (2, 5, 6)) if getattr(config, "mandatory_morning_weekdays", None) is not None else (2, 5, 6))
+    min_mand_load = getattr(config, "min_weekly_periods_for_mandatory_morning", 10)
+    allow_lone_mand = getattr(config, "allow_lone_period_on_mandatory_mornings", True)
+
+    def _get_required_mornings(t, load_p):
+        role = getattr(t, "role", "") or ""
+        is_bgh = any(k in role for k in ["Hiệu trưởng", "Phó hiệu trưởng"])
+        req = set()
+        if getattr(t, "must_monday", False):
+            req.add(2)
+        if not is_bgh:
+            req |= strict_morns
+        if load_p >= min_mand_load:
+            req |= mand_morns
+        pinned_off = getattr(t, "pinned_full_day_off", None)
+        if pinned_off:
+            req.discard(pinned_off)
+        return req
 
     subj_map = {s.subject_id: s.name for s in subjects}
     teach_map = {t.teacher_id: t.name for t in teachers}
@@ -133,10 +163,16 @@ def _render_interactive_timetable_studio(
 
     for t in active_teachers:
         tid = t.teacher_id
+        t_total_p = sum(len(v) for v in teacher_sched[tid].values())
+        t_req_morns = _get_required_mornings(t, t_total_p)
         t_sessions = {(wd, sess) for (wd, sess, per) in teacher_sched[tid]}
-        t_lone = sum(1 for (wd, sess) in t_sessions if teacher_sess_counts.get((tid, wd, sess), 0) == 1)
-        if t_lone > 0:
-            total_lone_school += t_lone
+        t_violating_lone = sum(
+            1 for (wd, sess) in t_sessions
+            if teacher_sess_counts.get((tid, wd, sess), 0) == 1
+            and not (allow_lone_mand and sess == "S" and wd in t_req_morns)
+        )
+        if t_violating_lone > 0:
+            total_lone_school += t_violating_lone
             teachers_with_lone.append(t)
 
         t_aft_teaching = sum(1 for (wd, sess) in t_sessions if sess == "C")
@@ -281,11 +317,20 @@ def _render_interactive_timetable_studio(
         aft_teaching = sum(1 for (wd, sess) in sessions_set if sess == "C")
         aft_off_count = 6 - aft_teaching
 
-        lone_count = sum(1 for (wd, sess) in sessions_set if teacher_sess_counts.get((tid, wd, sess), 0) == 1)
+        req_morns_chosen = _get_required_mornings(chosen_t, total_p)
+        violating_lones = []
+        accepted_mand_lones = []
+        for (wd, sess) in sorted(sessions_set):
+            if teacher_sess_counts.get((tid, wd, sess), 0) == 1:
+                if allow_lone_mand and sess == "S" and wd in req_morns_chosen:
+                    accepted_mand_lones.append(wd)
+                else:
+                    violating_lones.append((wd, sess))
+
+        lone_count = len(violating_lones)
         lone_details = [
             f"{WEEKDAY_NAMES[wd]} ({'Sáng' if sess == 'S' else 'Chiều'})"
-            for (wd, sess) in sorted(sessions_set)
-            if teacher_sess_counts.get((tid, wd, sess), 0) == 1
+            for (wd, sess) in violating_lones
         ]
         has_monday_morning = (2, "S") in sessions_set
 
@@ -307,18 +352,63 @@ def _render_interactive_timetable_studio(
             kpi_t3.metric("Nghỉ buổi chiều", f"{aft_off_count} buổi", "Tự do")
 
         is_lone_clean = (lone_count == 0)
-        kpi_t4.metric(
-            "Buổi lẻ 1 tiết",
-            f"{lone_count} buổi",
-            "✅ Chuẩn sư phạm" if is_lone_clean else "⚠️ Có buổi lẻ",
-            delta_color="normal" if is_lone_clean else "inverse"
-        )
+        if is_lone_clean:
+            if accepted_mand_lones:
+                mand_str = ", ".join(f"T{w}" for w in accepted_mand_lones)
+                kpi_t4.metric(
+                    "Buổi lẻ 1 tiết",
+                    "0 buổi",
+                    f"✅ Chuẩn SP ({mand_str} hợp lệ)",
+                    delta_color="normal"
+                )
+            else:
+                kpi_t4.metric(
+                    "Buổi lẻ 1 tiết",
+                    "0 buổi",
+                    "✅ Chuẩn sư phạm",
+                    delta_color="normal"
+                )
+        else:
+            kpi_t4.metric(
+                "Buổi lẻ 1 tiết",
+                f"{lone_count} buổi",
+                "⚠️ Có buổi lẻ",
+                delta_color="inverse"
+            )
 
-        kpi_t5.metric(
-            "Sáng Thứ 2",
-            "Có tiết dạy" if has_monday_morning else "Nghỉ sáng T2",
-            "✅ Đúng quy định"
-        )
+        is_mon_pinned_off = (getattr(chosen_t, "pinned_full_day_off", None) == 2)
+        is_mon_required = (2 in req_morns_chosen)
+
+        if is_mon_pinned_off:
+            kpi_t5.metric(
+                "Sáng Thứ 2",
+                "Nghỉ sáng T2",
+                "ℹ️ Được duyệt nghỉ",
+                delta_color="off"
+            )
+        elif is_mon_required:
+            if has_monday_morning:
+                mon_p_count = sum(1 for (wd, sess, per) in t_slots if wd == 2 and sess == "S")
+                kpi_t5.metric(
+                    "Sáng Thứ 2",
+                    f"Có tiết dạy ({mon_p_count} tiết)",
+                    "✅ Đúng quy định",
+                    delta_color="normal"
+                )
+            else:
+                kpi_t5.metric(
+                    "Sáng Thứ 2",
+                    "Nghỉ sáng T2",
+                    "⚠️ Chưa đạt",
+                    delta_color="inverse"
+                )
+        else:
+            kpi_t5.metric(
+                "Sáng Thứ 2",
+                "Có tiết dạy" if has_monday_morning else "Nghỉ sáng T2",
+                "Tự do",
+                delta_color="off"
+            )
 
         # Special Inspector Alerts
         if "Hà" in chosen_t.name or "Ha" in chosen_t.name:
@@ -337,8 +427,14 @@ def _render_interactive_timetable_studio(
                 off_days = [WEEKDAY_NAMES[wd] for wd in WEEKDAYS if (wd, "C") not in sessions_set]
                 st.success(f"✨ **Kiểm tra chuyên sâu GV {chosen_t.name}:** Đạt chuẩn nghỉ {req_aft} buổi chiều! Các buổi chiều được nghỉ: **{', '.join(off_days)}**.")
 
+        if is_mon_required and not has_monday_morning:
+            st.warning(f"⚠️ **Kiểm tra GV {chosen_t.name}:** Chưa có tiết dạy vào **Sáng Thứ 2** (buổi bắt buộc có mặt theo quy chế của trường)!")
+
         if lone_count > 0:
-            st.warning(f"⚠️ Giáo viên đang có **{lone_count} buổi lẻ 1 tiết**: {', '.join(lone_details)}.")
+            st.warning(f"⚠️ Giáo viên đang có **{lone_count} buổi lẻ 1 tiết** cần tránh: {', '.join(lone_details)}.")
+        elif accepted_mand_lones:
+            mand_names = [f"Sáng {WEEKDAY_NAMES[w]}" for w in accepted_mand_lones]
+            st.info(f"💡 GV {chosen_t.name} có 1 tiết dạy vào **{', '.join(mand_names)}** để đảm bảo có mặt ở trường theo quy định (buổi bắt buộc có mặt, được chấp nhận).")
 
         # Teacher Weekly Grid
         rows_t = []
@@ -362,7 +458,10 @@ def _render_interactive_timetable_studio(
                 wd_num = next((k for k, v in WEEKDAY_NAMES.items() if v == col), None)
                 if wd_num and row[col] and row[col] != "—":
                     if teacher_sess_counts.get((tid, wd_num, sess_code), 0) == 1:
-                        styles[i] = "background-color: #FEF2F2; color: #DC2626; font-weight: 700; border: 1px solid #FCA5A5;"
+                        if allow_lone_mand and sess_code == "S" and wd_num in req_morns_chosen:
+                            styles[i] = "background-color: #F0FDF4; color: #166534; font-weight: 600; border: 1px dashed #86EFAC;"
+                        else:
+                            styles[i] = "background-color: #FEF2F2; color: #DC2626; font-weight: 700; border: 1px solid #FCA5A5;"
                     else:
                         styles[i] = "background-color: #F0FDF4; color: #166534; font-weight: 500;"
             return styles
@@ -453,6 +552,7 @@ def _render_interactive_timetable_studio(
 
 def _render_saved_tkb(conn, cells: dict, classes: list, subjects: list, teachers: list, key_prefix: str = ""):
     assignments = repo.get_assignments(conn)
+    cfg = repo.get_scheduling_config(conn)
     _render_interactive_timetable_studio(
         classes=classes,
         subjects=subjects,
@@ -461,6 +561,7 @@ def _render_saved_tkb(conn, cells: dict, classes: list, subjects: list, teachers
         assignments=assignments,
         key_prefix=key_prefix,
         title="Studio Khảo Sát Thời Khóa Biểu",
+        config=cfg,
     )
 
 require_auth()
@@ -1408,6 +1509,7 @@ with tab_schedule:
                 assignments=eff_assigned,
                 key_prefix="fresh_result_",
                 title="Studio Khảo Sát Chi Tiết Phương Án Vừa Xếp",
+                config=inp.config,
             )
 
             view_curr = build_schedule_view(inp, result.assignment)

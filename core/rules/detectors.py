@@ -153,12 +153,17 @@ detect_teacher_5_consecutive_mornings = detect_teacher_4_consecutive_mornings
 # II.4 (buổi lẻ) -- mirrors objectives.py section 1, lone[t, wd, sess] in penalty_terms["II.4"]
 def detect_teacher_lone_sessions(view: ScheduleView, params: EffectiveParams) -> list:
     totals = _teacher_totals(view, params.lone_exempt_ids)
-    return [
-        Violation("II.4", teacher_id=tid, weekday=wd, session=sess, count=n,
-                  detail=f"{view.teacher_name(tid)}: {_day(wd)} {_session(sess)} chỉ có 1 tiết (buổi lẻ)")
-        for (tid, wd, sess), n in _teacher_session_counts(view, params.lone_exempt_ids).items()
-        if n == 1 and totals[tid] >= params.min_weekly_periods_for_lone_penalty
-    ]
+    allow_lone_mand = getattr(params, "allow_lone_period_on_mandatory_mornings", True)
+    violations = []
+    for (tid, wd, sess), n in _teacher_session_counts(view, params.lone_exempt_ids).items():
+        if n == 1 and totals[tid] >= params.min_weekly_periods_for_lone_penalty:
+            if allow_lone_mand and sess == "S" and wd in _required_mornings(tid, totals[tid], params):
+                continue
+            violations.append(
+                Violation("II.4", teacher_id=tid, weekday=wd, session=sess, count=n,
+                          detail=f"{view.teacher_name(tid)}: {_day(wd)} {_session(sess)} chỉ có 1 tiết (buổi lẻ)")
+            )
+    return violations
 
 
 # II.4 (ngày lẻ) -- mirrors objectives.py section 1, lone_day terms in penalty_terms["II.4"]
@@ -166,12 +171,17 @@ def detect_teacher_lone_days(view: ScheduleView, params: EffectiveParams) -> lis
     totals = _teacher_totals(view, params.lone_exempt_ids)
     per_day = Counter((t, slot.ts.weekday) for slot, _subject, t in view.placed()
                       if t is not None and t not in params.lone_exempt_ids)
-    return [
-        Violation("II.4", teacher_id=tid, weekday=wd, count=n,
-                  detail=f"{view.teacher_name(tid)}: {_day(wd)} cả ngày chỉ có đúng 1 tiết")
-        for (tid, wd), n in per_day.items()
-        if n == 1 and totals[tid] >= params.min_weekly_periods_for_lone_penalty
-    ]
+    allow_lone_mand = getattr(params, "allow_lone_period_on_mandatory_mornings", True)
+    violations = []
+    for (tid, wd), n in per_day.items():
+        if n == 1 and totals[tid] >= params.min_weekly_periods_for_lone_penalty:
+            if allow_lone_mand and wd in _required_mornings(tid, totals[tid], params):
+                continue
+            violations.append(
+                Violation("II.4", teacher_id=tid, weekday=wd, count=n,
+                          detail=f"{view.teacher_name(tid)}: {_day(wd)} cả ngày chỉ có đúng 1 tiết")
+            )
+    return violations
 
 
 # II.8 -- mirrors objectives.py section 1, split terms in penalty_terms["II.8"].
@@ -223,10 +233,13 @@ def detect_teacher_missing_mandatory_mornings(view: ScheduleView, params: Effect
 
 def _required_mornings(teacher_id: int, total: int, params: EffectiveParams) -> tuple:
     strict = () if teacher_id in params.bgh_ids else params.strict_morning_weekdays
+    must_mon = (2,) if teacher_id in getattr(params, "must_monday_ids", ()) else ()
     if total < params.min_weekly_periods_for_mandatory_morning:
-        return tuple(strict)
+        res = set(strict) | set(must_mon)
+        return tuple(sorted(res))
     mandatory = tuple(wd for wd in params.mandatory_morning_weekdays if wd not in params.strict_morning_weekdays)
-    return (*strict, *mandatory)
+    res = set(strict) | set(mandatory) | set(must_mon)
+    return tuple(sorted(res))
 
 
 # C.GDTC_PERIOD -- mirrors constraints.py:_add_subject_constraints rule 3

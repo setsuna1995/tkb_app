@@ -35,11 +35,28 @@ def _check_hard_post_generation_rules(inp: SchedulingInput, state: _State, confi
     total += missing
     if getattr(config, "avoid_teacher_lone_periods", True):
         min_lone_load = getattr(config, "min_weekly_periods_for_lone_penalty", 8)
-        lone_exempt = getattr(config, "lone_session_exempt_teacher_ids", frozenset()) or frozenset()
-        lone_sessions = _count_teacher_lone_sessions(inp.slots, state.assigned, state.slot_teacher,
-                                                     min_weekly_periods=min_lone_load, exempt_teacher_ids=lone_exempt)
-        lone_days = _count_teacher_lone_days(inp.slots, state.assigned, state.slot_teacher,
-                                              min_weekly_periods=min_lone_load, exempt_teacher_ids=lone_exempt)
+        strict_morns = getattr(config, "strict_morning_weekdays", ()) or ()
+        min_mand_load = getattr(config, "min_weekly_periods_for_mandatory_morning", 10)
+        must_mon_ids = frozenset(t.teacher_id for t in inp.teachers if getattr(t, "must_monday", False))
+        bgh_ids = frozenset(t.teacher_id for t in inp.teachers if is_bgh(t))
+        allow_lone_mand = getattr(config, "allow_lone_period_on_mandatory_mornings", True)
+
+        lone_sessions = _count_teacher_lone_sessions(
+            inp.slots, state.assigned, state.slot_teacher,
+            min_weekly_periods=min_lone_load, exempt_teacher_ids=lone_exempt,
+            mandatory_mornings=mand_morns, strict_weekdays=strict_morns,
+            min_mandatory_load=min_mand_load, must_monday_ids=must_mon_ids,
+            bgh_ids=bgh_ids, pinned_day_offs=pinned_day_offs,
+            allow_lone_mandatory_mornings=allow_lone_mand,
+        )
+        lone_days = _count_teacher_lone_days(
+            inp.slots, state.assigned, state.slot_teacher,
+            min_weekly_periods=min_lone_load, exempt_teacher_ids=lone_exempt,
+            mandatory_mornings=mand_morns, strict_weekdays=strict_morns,
+            min_mandatory_load=min_mand_load, must_monday_ids=must_mon_ids,
+            bgh_ids=bgh_ids, pinned_day_offs=pinned_day_offs,
+            allow_lone_mandatory_mornings=allow_lone_mand,
+        )
         if lone_sessions > 0 or lone_days > 0:
             violated.append("II.4")
         total += lone_sessions + lone_days

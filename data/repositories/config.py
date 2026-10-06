@@ -345,6 +345,9 @@ def get_scheduling_config(conn: sqlite3.Connection) -> SchedulingConfig:
         min_academic_per_morning=_parse_int(
             get_meta(conn, "sched_min_academic_per_morning"), default.min_academic_per_morning
         ),
+        allow_lone_period_on_mandatory_mornings=_parse_bool(
+            get_meta(conn, "sched_allow_lone_period_on_mandatory_mornings"), default.allow_lone_period_on_mandatory_mornings
+        ),
     )
 
 
@@ -404,3 +407,4 @@ def set_scheduling_config(conn: sqlite3.Connection, config: SchedulingConfig) ->
     set_meta(conn, "sched_balance_morning_academic_load", str(int(config.balance_morning_academic_load)))
     set_meta(conn, "sched_max_academic_per_morning", str(config.max_academic_per_morning))
     set_meta(conn, "sched_min_academic_per_morning", str(config.min_academic_per_morning))
+    set_meta(conn, "sched_allow_lone_period_on_mandatory_mornings", str(int(config.allow_lone_period_on_mandatory_mornings)))

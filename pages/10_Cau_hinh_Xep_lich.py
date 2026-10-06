@@ -342,6 +342,13 @@ with tab2:
         key=f"{k_pfx}min_weekly_periods_for_mandatory_morning",
     )
 
+    allow_lone_period_on_mandatory_mornings = st.checkbox(
+        "Chấp nhận buổi lẻ 1 tiết vào các buổi bắt buộc có mặt (để GV có mặt tại trường)",
+        value=getattr(config, "allow_lone_period_on_mandatory_mornings", True),
+        help="Khi bật: Nếu GV chỉ có 1 tiết dạy vào các buổi sáng bắt buộc có mặt (như Sáng Thứ 2 chào cờ), hệ thống chấp nhận để GV có mặt tại trường và không phạt/báo lỗi buổi lẻ. Các buổi khác vẫn kiểm soát chặt chẽ tránh buổi lẻ 1 tiết.",
+        key=f"{k_pfx}allow_lone_mand_morning",
+    )
+
     col_off1, col_off2 = st.columns([1, 1])
     teacher_off_sessions_per_week = col_off1.number_input(
         "Số buổi nghỉ cho mỗi giáo viên trong tuần (buổi):",
@@ -677,6 +684,7 @@ if btn_save:
         lone_session_exempt_teacher_ids=frozenset(lone_exempt_selection),
         compact_schedule_teacher_ids=frozenset(compact_sched_selection),
         mandatory_morning_weekdays=tuple(sorted(mandatory_morning_selection)),
+        allow_lone_period_on_mandatory_mornings=bool(allow_lone_period_on_mandatory_mornings),
         avoid_gdtc_consecutive_days=bool(avoid_gdtc_consecutive),
         max_teacher_periods_per_day=int(max_teacher_periods_per_day),
         max_heavy_per_session=int(max_heavy_per_session),
