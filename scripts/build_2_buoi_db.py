@@ -78,31 +78,55 @@ def build_database(db_path: str):
         rep_weekly = import_weekly_curriculum_from_excel(conn, WEEKLY_EXCEL)
         print(f"[{os.path.basename(db_path)}] import_weekly: {rep_weekly['records_imported']} records across {rep_weekly['weeks_count']} weeks")
 
-        repo.set_meta(conn, "school_name", SCHOOL_NAME)
+        is_2_buoi = "2_buoi" in db_path or "2-buoi" in db_path
+        if is_2_buoi:
+            repo.set_meta(conn, "school_name", "Trường THCS - Học 2 buổi (2026-2027)")
+        else:
+            repo.set_meta(conn, "school_name", SCHOOL_NAME)
         repo.set_meta(conn, "base_cap", "19")
         repo.set_meta(conn, "min_floor", "16")
         repo.set_meta(conn, "forbidden_off_cells", "2S")
         repo.set_meta(conn, "mandatory_morning_weekdays", "2")
 
-        # Configure frames: K67 = 29 periods, K89 = 30 periods
         classes = conn.execute("SELECT class_id, name FROM classes").fetchall()
-        k67 = [c for c in classes if c["name"].startswith(('6', '7'))]
-        k89 = [c for c in classes if c["name"].startswith(('8', '9'))]
-
-        for c in k67:
-            cid = c["class_id"]
-            conn.execute("DELETE FROM class_allowed_cells WHERE class_id = ? AND weekday = '7' AND session = 'S' AND period = 5", (cid,))
-            for w in range(2, 7):
+        if is_2_buoi:
+            # Khung 2 buổi: Thứ 2..4 (S1..S4, C1..C3), Thứ 5 (S1..S4), Thứ 6 (S1..S5 có tiết 5)
+            for c in classes:
+                cid = c["class_id"]
+                conn.execute("DELETE FROM class_allowed_cells WHERE class_id = ?", (cid,))
+                for w in (2, 3, 4):
+                    for p in range(1, 5):
+                        conn.execute("INSERT OR IGNORE INTO class_allowed_cells (class_id, weekday, session, period) VALUES (?, ?, 'S', ?)", (cid, str(w), p))
+                    for p in range(1, 4):
+                        conn.execute("INSERT OR IGNORE INTO class_allowed_cells (class_id, weekday, session, period) VALUES (?, ?, 'C', ?)", (cid, str(w), p))
+                for p in range(1, 5):
+                    conn.execute("INSERT OR IGNORE INTO class_allowed_cells (class_id, weekday, session, period) VALUES (?, '5', 'S', ?)", (cid, p))
                 for p in range(1, 6):
-                    conn.execute("INSERT OR IGNORE INTO class_allowed_cells (class_id, weekday, session, period) VALUES (?, ?, 'S', ?)", (cid, str(w), p))
-            for p in range(1, 5):
-                conn.execute("INSERT OR IGNORE INTO class_allowed_cells (class_id, weekday, session, period) VALUES (?, '7', 'S', ?)", (cid, p))
+                    conn.execute("INSERT OR IGNORE INTO class_allowed_cells (class_id, weekday, session, period) VALUES (?, '6', 'S', ?)", (cid, p))
 
-        for c in k89:
-            cid = c["class_id"]
-            for w in range(2, 8):
-                for p in range(1, 6):
-                    conn.execute("INSERT OR IGNORE INTO class_allowed_cells (class_id, weekday, session, period) VALUES (?, ?, 'S', ?)", (cid, str(w), p))
+                repo.set_frame_template(
+                    conn, cid, morning_periods=4, afternoon_periods=3, study_sunday=False,
+                    short_weekday=6, short_morning_periods=5, short_afternoon_periods=None
+                )
+        else:
+            # Khung 1 buổi: K67 = 29 periods, K89 = 30 periods
+            k67 = [c for c in classes if c["name"].startswith(('6', '7'))]
+            k89 = [c for c in classes if c["name"].startswith(('8', '9'))]
+
+            for c in k67:
+                cid = c["class_id"]
+                conn.execute("DELETE FROM class_allowed_cells WHERE class_id = ? AND weekday = '7' AND session = 'S' AND period = 5", (cid,))
+                for w in range(2, 7):
+                    for p in range(1, 6):
+                        conn.execute("INSERT OR IGNORE INTO class_allowed_cells (class_id, weekday, session, period) VALUES (?, ?, 'S', ?)", (cid, str(w), p))
+                for p in range(1, 5):
+                    conn.execute("INSERT OR IGNORE INTO class_allowed_cells (class_id, weekday, session, period) VALUES (?, '7', 'S', ?)", (cid, p))
+
+            for c in k89:
+                cid = c["class_id"]
+                for w in range(2, 8):
+                    for p in range(1, 6):
+                        conn.execute("INSERT OR IGNORE INTO class_allowed_cells (class_id, weekday, session, period) VALUES (?, ?, 'S', ?)", (cid, str(w), p))
 
         # Import Week 6 official timetable if file exists
         if os.path.exists(TKB_TUAN_6_EXCEL):

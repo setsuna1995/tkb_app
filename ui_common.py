@@ -220,6 +220,7 @@ def reset_school_session_state(new_slug: str | None = None) -> None:
         "_active_school_slug",
         "sidebar_school_select_box",
         "explicit_school_switch",
+        "_sidebar_school_switcher_rendered",
     }
     for k in list(st.session_state.keys()):
         if k not in preserved and not k.startswith("db_conn_"):
@@ -258,12 +259,12 @@ def require_auth() -> None:
 def require_school() -> str:
     inject_theme()
     st.session_state["_sidebar_school_switcher_rendered"] = False
-    sidebar_branding()
     slug = st.session_state.get("school_slug")
     if slug and (SCHOOLS_DIR / f"{slug}.db").exists():
         active = st.session_state.get("_active_school_slug")
         if active != slug:
             reset_school_session_state(slug)
+        sidebar_branding()
         return slug
     st.session_state.pop("school_slug", None)
     st.session_state.pop("_active_school_slug", None)
@@ -273,7 +274,10 @@ def require_school() -> str:
         # Tự động chọn trường THCS (2026-2027) làm trường mẫu mặc định
         default_school = next((s for s in schools if s["slug"] == "truong-thcs"), schools[0])
         reset_school_session_state(default_school["slug"])
+        sidebar_branding()
         return default_school["slug"]
+
+    sidebar_branding()
 
     st.title("🏫 Quản Lý & Chọn Trường Học")
     if schools:

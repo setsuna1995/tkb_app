@@ -55,32 +55,43 @@ def setup_defaults(db_path: str):
     conn.execute("INSERT INTO app_meta (key, value) VALUES ('mandatory_morning_weekdays', '2') ON CONFLICT(key) DO UPDATE SET value='2'")
     conn.commit()
 
-    # 4. Period frames: K67 = 29 periods, K89 = 30 periods
-    # Check class_allowed_cells
-    # For K67: Saturday (wd 7) period 5 is disallowed (or not allowed)
+    # 4. Period frames
     classes = conn.execute("SELECT class_id, name FROM classes").fetchall()
-    k67 = [c for c in classes if c["name"].startswith(('6', '7'))]
-    k89 = [c for c in classes if c["name"].startswith(('8', '9'))]
-    print(f"Classes: K67 count = {len(k67)}, K89 count = {len(k89)}")
-
-    # For K67, ensure Saturday period 5 is deleted from class_allowed_cells if present
-    for c in k67:
-        cid = c["class_id"]
-        # Delete Saturday period 5
-        conn.execute("DELETE FROM class_allowed_cells WHERE class_id = ? AND weekday = '7' AND session = 'S' AND period = 5", (cid,))
-        # Ensure Monday-Friday (all 5 periods) and Saturday periods 1-4 are present
-        for w in range(2, 7):
+    is_2_buoi = "2-buoi" in db_path or "2_buoi" in db_path
+    if is_2_buoi:
+        # Khung 2 buổi: Thứ 2..4 (S1..S4, C1..C3), Thứ 5 (S1..S4), Thứ 6 (S1..S5 có tiết 5)
+        for c in classes:
+            cid = c["class_id"]
+            conn.execute("DELETE FROM class_allowed_cells WHERE class_id = ?", (cid,))
+            for w in (2, 3, 4):
+                for p in range(1, 5):
+                    conn.execute("INSERT OR IGNORE INTO class_allowed_cells (class_id, weekday, session, period) VALUES (?, ?, 'S', ?)", (cid, str(w), p))
+                for p in range(1, 4):
+                    conn.execute("INSERT OR IGNORE INTO class_allowed_cells (class_id, weekday, session, period) VALUES (?, ?, 'C', ?)", (cid, str(w), p))
+            for p in range(1, 5):
+                conn.execute("INSERT OR IGNORE INTO class_allowed_cells (class_id, weekday, session, period) VALUES (?, '5', 'S', ?)", (cid, p))
             for p in range(1, 6):
-                conn.execute("INSERT OR IGNORE INTO class_allowed_cells (class_id, weekday, session, period) VALUES (?, ?, 'S', ?)", (cid, str(w), p))
-        for p in range(1, 5):
-            conn.execute("INSERT OR IGNORE INTO class_allowed_cells (class_id, weekday, session, period) VALUES (?, '7', 'S', ?)", (cid, p))
+                conn.execute("INSERT OR IGNORE INTO class_allowed_cells (class_id, weekday, session, period) VALUES (?, '6', 'S', ?)", (cid, p))
+    else:
+        # Khung 1 buổi: K67 = 29 periods, K89 = 30 periods
+        k67 = [c for c in classes if c["name"].startswith(('6', '7'))]
+        k89 = [c for c in classes if c["name"].startswith(('8', '9'))]
+        print(f"Classes: K67 count = {len(k67)}, K89 count = {len(k89)}")
 
-    # For K89, ensure all 30 periods (Monday-Saturday, periods 1-5) are present
-    for c in k89:
-        cid = c["class_id"]
-        for w in range(2, 8):
-            for p in range(1, 6):
-                conn.execute("INSERT OR IGNORE INTO class_allowed_cells (class_id, weekday, session, period) VALUES (?, ?, 'S', ?)", (cid, str(w), p))
+        for c in k67:
+            cid = c["class_id"]
+            conn.execute("DELETE FROM class_allowed_cells WHERE class_id = ? AND weekday = '7' AND session = 'S' AND period = 5", (cid,))
+            for w in range(2, 7):
+                for p in range(1, 6):
+                    conn.execute("INSERT OR IGNORE INTO class_allowed_cells (class_id, weekday, session, period) VALUES (?, ?, 'S', ?)", (cid, str(w), p))
+            for p in range(1, 5):
+                conn.execute("INSERT OR IGNORE INTO class_allowed_cells (class_id, weekday, session, period) VALUES (?, '7', 'S', ?)", (cid, p))
+
+        for c in k89:
+            cid = c["class_id"]
+            for w in range(2, 8):
+                for p in range(1, 6):
+                    conn.execute("INSERT OR IGNORE INTO class_allowed_cells (class_id, weekday, session, period) VALUES (?, ?, 'S', ?)", (cid, str(w), p))
 
     conn.commit()
     conn.close()

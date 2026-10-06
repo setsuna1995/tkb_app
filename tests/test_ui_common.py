@@ -21,6 +21,7 @@ def test_reset_school_session_state_purges_widget_state_and_preserves_system():
     st.session_state["_active_school_slug"] = "truong-thcs"
     st.session_state["sidebar_school_select_box"] = "truong-thcs"
     st.session_state["db_conn_truong-thcs"] = "fake_conn"
+    st.session_state["_sidebar_school_switcher_rendered"] = True
     # School-specific widget/editor states
     st.session_state["cfg_truong-thcs_hdtn_mode"] = "thematic"
     st.session_state["cfg_truong-thcs_off_sessions_per_week"] = 2
@@ -37,6 +38,7 @@ def test_reset_school_session_state_purges_widget_state_and_preserves_system():
     assert st.session_state["_theme_injected"] is True
     assert st.session_state["sidebar_school_select_box"] == "truong-thcs"
     assert st.session_state["db_conn_truong-thcs"] == "fake_conn"
+    assert st.session_state["_sidebar_school_switcher_rendered"] is True
     assert st.session_state["school_slug"] == "truong-thcs-2-buoi"
     assert st.session_state["_active_school_slug"] == "truong-thcs-2-buoi"
 
