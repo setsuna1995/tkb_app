@@ -104,29 +104,31 @@ def _pick_best_scored(class_id: int, slot: Slot, state: _State, role_index,
                 if teacher_tot <= 20:
                     score -= 220
 
+        mandatory_mornings = getattr(config, "mandatory_morning_weekdays", (2, 5, 6))
+        strict_mornings = getattr(config, "strict_morning_weekdays", ()) or ()
+        allow_lone_mand = getattr(config, "allow_lone_period_on_mandatory_mornings", True)
+        is_mand_morning = (ts.session == "S" and (ts.weekday in mandatory_mornings or ts.weekday in strict_mornings))
+
         if getattr(config, "avoid_teacher_lone_periods", True):
             current_in_session = len(state.teacher_session_periods.get((teacher_id, ts.weekday, ts.session), []))
             if current_in_session == 1:
-                score += TEACHER_SESSION_PAIR_BONUS
+                # Nếu là sáng bắt buộc có mặt và cho phép lẻ tiết: không cần cố ép thêm tiết thứ 2 (cặp tiết)
+                # để nhường chỗ cho các GV khác cũng được có mặt
+                if not (allow_lone_mand and is_mand_morning):
+                    score += TEACHER_SESSION_PAIR_BONUS
             elif current_in_session == 0:
                 teacher_rem_need = state.teacher_rem_need.get(teacher_id, 0)
-                # Opening a BRAND-NEW session for this teacher only pays off if they
-                # still have enough periods left to put a second one here later --
-                # otherwise this cell becomes a lone session (II.4). The penalty used
-                # to fire only at rem_need <= 1 (the teacher is literally out of
-                # periods), which missed the much more common case of a teacher with
-                # a few periods left spreading them thin across several new sessions.
-                # Graduated 2026-09-04 after a real timetable showed 26 lone sessions,
-                # most of them created at placement time rather than left over by the
-                # repair pass.
-                if teacher_rem_need <= 1:
-                    score -= TEACHER_LONE_SESSION_HEURISTIC_PENALTY
-                elif teacher_rem_need <= 3:
-                    score -= TEACHER_LONE_SESSION_HEURISTIC_PENALTY // 2
+                # Sáng bắt buộc cho phép lẻ tiết: không phạt mở buổi mới 1 tiết
+                if not (allow_lone_mand and is_mand_morning):
+                    if teacher_rem_need <= 1:
+                        score -= TEACHER_LONE_SESSION_HEURISTIC_PENALTY
+                    elif teacher_rem_need <= 3:
+                        score -= TEACHER_LONE_SESSION_HEURISTIC_PENALTY // 2
             if ts.session == "C" and current_in_session == 0:
                 morning_count = len(state.teacher_session_periods.get((teacher_id, ts.weekday, "S"), []))
                 if morning_count == 1:
-                    score -= TEACHER_SPLIT_DAY_PENALTY
+                    if not (allow_lone_mand and ts.weekday in (2,)):
+                        score -= TEACHER_SPLIT_DAY_PENALTY
 
         if getattr(config, "balance_afternoon_teachers", True) and ts.session == "C":
             if state.teacher_week_afternoon_count.get(teacher_id, 0) == 0:
@@ -152,18 +154,10 @@ def _pick_best_scored(class_id: int, slot: Slot, state: _State, role_index,
                 )
                 score -= TEACHER_COMPACT_SCHEDULE_PENALTY * (1 + sessions_used)
 
-        mandatory_mornings = getattr(config, "mandatory_morning_weekdays", (2, 5, 6))
-        strict_mornings = getattr(config, "strict_morning_weekdays", ()) or ()
-        if ts.session == "S" and (ts.weekday in mandatory_mornings or ts.weekday in strict_mornings):
+        if is_mand_morning:
             if len(state.teacher_session_periods.get((teacher_id, ts.weekday, "S"), [])) == 0:
-                if ts.weekday in strict_mornings:
-                    # Sáng "mọi GV phải có tiết": thưởng cho MỌI GV, không xét tải.
-                    # Ngưỡng >=12 bên dưới là thứ khiến GV tải thấp không bao giờ được
-                    # thưởng -- chính là nhóm hay vắng các sáng này (2026-09-04).
-                    # BGH cũng được thưởng ở đây; họ chỉ được miễn khi ĐẾM vi phạm,
-                    # còn nếu xếp được vào sáng đó thì vẫn tốt.
-                    score += TEACHER_MANDATORY_MORNING_BONUS
-                elif state.teacher_rem_need.get(teacher_id, 0) >= 12:
+                min_mand_p = getattr(config, "min_weekly_periods_for_mandatory_morning", 10)
+                if ts.weekday in strict_mornings or state.teacher_rem_need.get(teacher_id, 0) >= min_mand_p:
                     score += TEACHER_MANDATORY_MORNING_BONUS
 
         if slot.old_subject_id == subj.subject_id and rng.random() > pu:

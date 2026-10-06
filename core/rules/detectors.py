@@ -199,10 +199,10 @@ def detect_teacher_split_days(view: ScheduleView, params: EffectiveParams) -> li
     ]
 
 
-def is_teacher_busy_morning(view: ScheduleView, teacher_id: int, weekday: int) -> bool:
-    """A teacher counts as busy on a morning when fewer than 2 free periods remain there
-    (II.4 forbids a 1-period session). Same meaning as constraints.py:_is_teacher_busy_morning;
-    the two copies merge in Plan 3 (spec §5.4.4)."""
+def is_teacher_busy_morning(view: ScheduleView, teacher_id: int, weekday: int, allow_lone_morning: bool = True) -> bool:
+    """A teacher counts as busy on a morning when fewer than min_free free periods remain there.
+    When allow_lone_morning is True, 1 free period is enough to schedule attendance.
+    Only when len(free_periods) < min_free is the teacher considered busy."""
     if not view.ban_busy:
         return False
     morning = [s for s in view.slots if s.ts.weekday == weekday and s.ts.session == "S"]
@@ -211,7 +211,8 @@ def is_teacher_busy_morning(view: ScheduleView, teacher_id: int, weekday: int) -
     own_classes = view.teacher_classes.get(teacher_id, frozenset())
     candidates = [s for s in morning if s.class_id in own_classes] or morning
     free_periods = {s.ts.period for s in candidates if (teacher_id, s.ts.ts_id) not in view.ban_busy}
-    return len(free_periods) < MIN_FREE_MORNING_PERIODS
+    min_free = 1 if allow_lone_morning else MIN_FREE_MORNING_PERIODS
+    return len(free_periods) < min_free
 
 
 # II.3 -- mirrors objectives.py section 2 (penalty_terms["II.3"])
@@ -219,10 +220,11 @@ def detect_teacher_missing_mandatory_mornings(view: ScheduleView, params: Effect
     watched = set(params.mandatory_morning_weekdays) | set(params.strict_morning_weekdays)
     present = {(t, slot.ts.weekday) for slot, _subject, t in view.placed()
                if t is not None and slot.ts.session == "S" and slot.ts.weekday in watched}
+    allow_lone_mand = getattr(params, "allow_lone_period_on_mandatory_mornings", True)
     violations = []
     for tid, total in _teacher_totals(view).items():
         for wd in _required_mornings(tid, total, params):
-            if (tid, wd) in present or params.pinned_day_offs.get(tid) == wd or is_teacher_busy_morning(view, tid, wd):
+            if (tid, wd) in present or params.pinned_day_offs.get(tid) == wd or is_teacher_busy_morning(view, tid, wd, allow_lone_morning=allow_lone_mand):
                 continue
             violations.append(Violation(
                 "II.3", teacher_id=tid, weekday=wd, session="S",

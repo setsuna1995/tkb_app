@@ -107,6 +107,19 @@ def _render_interactive_timetable_studio(
     min_mand_load = getattr(config, "min_weekly_periods_for_mandatory_morning", 10)
     allow_lone_mand = getattr(config, "allow_lone_period_on_mandatory_mornings", True)
 
+    teacher_busy_map = defaultdict(set)
+    try:
+        school_slug = require_school()
+        c_conn = get_conn(school_slug)
+        busy_rows = repo.list_unavailability(c_conn)
+        for r in busy_rows:
+            try:
+                teacher_busy_map[int(r["teacher_id"])].add((int(r["weekday"]), str(r["session"]), int(r["period"])))
+            except Exception:
+                pass
+    except Exception:
+        pass
+
     def _get_required_mornings(t, load_p):
         role = getattr(t, "role", "") or ""
         is_bgh = any(k in role for k in ["Hiệu trưởng", "Phó hiệu trưởng"])
@@ -377,13 +390,22 @@ def _render_interactive_timetable_studio(
             )
 
         is_mon_pinned_off = (getattr(chosen_t, "pinned_full_day_off", None) == 2)
-        is_mon_required = (2 in req_morns_chosen)
+        mon_busy_periods = {p for p in range(1, 6) if (2, "S", p) in teacher_busy_map.get(chosen_t.teacher_id, set())}
+        is_mon_all_busy = (len(mon_busy_periods) >= 4)
+        is_mon_required = (2 in req_morns_chosen) and not is_mon_all_busy
 
         if is_mon_pinned_off:
             kpi_t5.metric(
                 "Sáng Thứ 2",
                 "Nghỉ sáng T2",
                 "ℹ️ Được duyệt nghỉ",
+                delta_color="off"
+            )
+        elif is_mon_all_busy:
+            kpi_t5.metric(
+                "Sáng Thứ 2",
+                "Nghỉ sáng T2",
+                "ℹ️ Bận theo lịch",
                 delta_color="off"
             )
         elif is_mon_required:
@@ -427,7 +449,7 @@ def _render_interactive_timetable_studio(
                 off_days = [WEEKDAY_NAMES[wd] for wd in WEEKDAYS if (wd, "C") not in sessions_set]
                 st.success(f"✨ **Kiểm tra chuyên sâu GV {chosen_t.name}:** Đạt chuẩn nghỉ {req_aft} buổi chiều! Các buổi chiều được nghỉ: **{', '.join(off_days)}**.")
 
-        if is_mon_required and not has_monday_morning:
+        if is_mon_required and not has_monday_morning and not is_mon_all_busy:
             st.warning(f"⚠️ **Kiểm tra GV {chosen_t.name}:** Chưa có tiết dạy vào **Sáng Thứ 2** (buổi bắt buộc có mặt theo quy chế của trường)!")
 
         if lone_count > 0:

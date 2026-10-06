@@ -735,13 +735,15 @@ def _add_block_constraints(built: CpSatModel) -> None:
 
 def _is_teacher_busy_morning(inp: SchedulingInput, teacher_id: int, weekday: int) -> bool:
     """Kiểm tra xem GV có bị bận buổi sáng thứ `weekday` hay không.
-    Nếu số tiết rảnh khả dụng của GV trong buổi sáng đó < 2 tiết, coi như bận
-    (vì theo II.4 không thể xếp buổi 1 tiết cho GV)."""
+    Nếu cho phép 1 tiết lẻ vào buổi sáng bắt buộc (allow_lone_period_on_mandatory_mornings),
+    chỉ coi như bận khi không còn tiết rảnh nào (< 1). Ngược lại cần ít nhất 2 tiết rảnh."""
     if not inp.ban_busy:
         return False
     morn_slots = [s for s in inp.slots if s.ts.weekday == weekday and s.ts.session == "S"]
     if not morn_slots:
         return False
+    allow_lone = getattr(inp.config, "allow_lone_period_on_mandatory_mornings", True)
+    min_free = 1 if allow_lone else 2
     eff = _build_effective_assigned_teacher(inp)
     candidate_slots = [
         s for s in morn_slots
@@ -749,9 +751,9 @@ def _is_teacher_busy_morning(inp: SchedulingInput, teacher_id: int, weekday: int
     ]
     if not candidate_slots:
         free_periods = {s.ts.period for s in morn_slots if (teacher_id, s.ts.ts_id) not in inp.ban_busy}
-        return len(free_periods) < 2
+        return len(free_periods) < min_free
     free_periods = {s.ts.period for s in candidate_slots if (teacher_id, s.ts.ts_id) not in inp.ban_busy}
-    return len(free_periods) < 2
+    return len(free_periods) < min_free
 
 
 def _add_locked_slots_constraints(built: CpSatModel) -> None:

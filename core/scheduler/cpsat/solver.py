@@ -264,7 +264,9 @@ def _presolve_capacity_screening(built: CpSatModel) -> set[str]:
                     cc_taken_by_others += 1
             cap -= cc_taken_by_others
 
-        min_needed = len(mand_teacher_ids) * 2
+        allow_lone_mand = getattr(config, "allow_lone_period_on_mandatory_mornings", True)
+        min_per_t = 1 if allow_lone_mand else 2
+        min_needed = len(mand_teacher_ids) * min_per_t
         if cap > 0 and min_needed > cap:
             return {"II.3"}
 
