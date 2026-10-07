@@ -297,13 +297,13 @@ def _select_fallback_relaxations(hard_rids: Sequence[str], strategy: str = "defa
 
 def _create_solver(built: CpSatModel, workers: Optional[int] = None) -> cp_model.CpSolver:
     """Khởi tạo và cấu hình solver CP-SAT với số worker và tham số chuẩn."""
-    if os.environ.get("PYTEST_XDIST_WORKER"):
+    if workers is not None and int(workers) > 0:
+        eff_workers = max(1, int(workers))
+    elif os.environ.get("PYTEST_XDIST_WORKER"):
         eff_workers = 2
-    elif workers is None or int(workers) <= 0:
+    else:
         user_workers = getattr(built.inp.config, "cpsat_workers", 0)
         eff_workers = detect_optimal_workers(override=user_workers)
-    else:
-        eff_workers = max(1, int(workers))
 
     solver = cp_model.CpSolver()
     solver.parameters.num_search_workers = int(eff_workers)
@@ -365,10 +365,12 @@ def _diagnose_and_solve(built: CpSatModel, solver: cp_model.CpSolver, time_limit
             if terms:
                 model.Add(sum(terms) == 0)
 
-        # Phân bổ thời gian giữa các pass: nếu còn nhiều pass và còn đủ thời gian,
-        # giới hạn pass 1 & 2 để luôn có ngân sách dự phòng cho pass tiếp theo.
-        if len(hard_rids) > 1 and remaining > 15.0:
-            pass_limit = min(max(remaining * 0.6, 15.0), 25.0)
+        # Phân bổ thời gian giữa các pass:
+        # Pass 1 là pass quan trọng nhất và nhiều điều kiện nhất (chặn cứng toàn bộ tiêu chí SP).
+        # Cần ưu tiên tối đa thời gian cho Pass 1 để tìm nghiệm chuẩn, tránh bị timeout oan.
+        # Các pass nới lỏng sau này rất lỏng lẻo nên giải rất nhanh (chỉ cần 1-3s), chỉ cần vài giây dự phòng.
+        if len(hard_rids) > 1 and remaining > 8.0:
+            pass_limit = max(1.0, float(remaining - 4.0))
         else:
             pass_limit = max(1.0, float(remaining))
 
@@ -459,7 +461,7 @@ def solve_three_strategies(built: CpSatModel, time_limit_s: float = 30.0,
         ("pareto", "PA3: Cân bằng tối ưu"),
     ]
     results = {}
-    per_strat_tl = max(6.0, min(float(time_limit_s) / 2.0, 15.0))
+    per_strat_tl = max(10.0, min(float(time_limit_s) * 0.7, 30.0))
     for strat_key, strat_label in strategies:
         if progress_cb:
             progress_cb({

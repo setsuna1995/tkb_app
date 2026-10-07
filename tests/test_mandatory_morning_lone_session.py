@@ -140,3 +140,34 @@ def test_split_day_on_mandatory_morning_flag_disabled():
     violations = detect_teacher_split_days(view, params)
     assert len(violations) == 1
     assert violations[0].weekday == 2
+
+
+def test_two_shift_school_morning_only_math_literature_no_lone_explosion():
+    """Khi trường học 2 buổi ép Toán và Văn chỉ học sáng, CP-SAT không được timeout sớm và không bị bùng nổ buổi lẻ."""
+    import sqlite3
+    import dataclasses
+    from data import repository as repo
+    from core.scheduler import cpsat_model
+    from core.rules.detectors import detect_teacher_lone_sessions
+    from core.rules.view import build_schedule_view
+    from core.rules.params import resolve_effective_params
+
+    conn = sqlite3.connect("schools/truong-thcs-2-buoi.db")
+    conn.row_factory = sqlite3.Row
+    inp = repo.build_scheduling_input(conn, parity="all", week_no=6)
+    inp_test = dataclasses.replace(inp, config=dataclasses.replace(inp.config, morning_only_subject_ids=frozenset({1, 2})))
+
+    built = cpsat_model.build_model(inp_test)
+    res = cpsat_model.solve_to_result(built, time_limit_s=45.0, workers=4)
+
+    assert res is not None and res.success
+    # Pass 1 phải FEASIBLE, không được để II.4 bị nới lỏng do timeout
+    assert res.diagnostics.get("pass1_status") == "FEASIBLE"
+    assert not any(r["rule_id"] == "II.4" for r in res.relaxed_rules)
+
+    # Kiểm tra số buổi lẻ thực tế: không có vi phạm II.4
+    view = build_schedule_view(inp_test, res.assignment)
+    params = resolve_effective_params(inp_test)
+    lones = detect_teacher_lone_sessions(view, params)
+    assert lones == [], f"Phải sạch hoàn toàn vi phạm buổi lẻ II.4, nhưng lại có: {lones}"
+
