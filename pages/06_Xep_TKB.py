@@ -91,6 +91,7 @@ def _render_interactive_timetable_studio(
     key_prefix: str = "",
     title: str = "Studio Khảo Sát Chi Tiết Thời Khóa Biểu",
     config=None,
+    file_tag: str = "",
 ):
     from collections import defaultdict
     from core.models import SchedulingConfig
@@ -203,6 +204,32 @@ def _render_interactive_timetable_studio(
     # Studio Container
     st.markdown(f"#### 📅 {title}")
     st.caption("Khảo sát đa chiều: Theo Lớp học • Chuyên sâu Giáo viên • Ma trận & Kiểm định toàn trường")
+
+    from functools import partial
+    from io_excel.exporter import export_class_sheets_xlsx, export_teacher_sheets_xlsx
+
+    xl_mime = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+    suffix = f" — {file_tag.replace('_', ' ')}" if file_tag else ""
+    export_args = (cells, classes, subjects, teachers, assignments)
+    col_x1, col_x2, _ = st.columns([1, 1, 2])
+    col_x1.download_button(
+        "📗 Xuất TKB lớp (mỗi lớp 1 sheet)",
+        data=partial(export_class_sheets_xlsx, *export_args, title_suffix=suffix),
+        file_name=f"TKB_Lop_{file_tag or 'hien_tai'}.xlsx",
+        mime=xl_mime,
+        key=f"{key_prefix}dl_class_sheets",
+        on_click="ignore",
+        width="stretch",
+    )
+    col_x2.download_button(
+        "📘 Xuất TKB giáo viên (mỗi GV 1 sheet)",
+        data=partial(export_teacher_sheets_xlsx, *export_args, title_suffix=suffix),
+        file_name=f"TKB_GiaoVien_{file_tag or 'hien_tai'}.xlsx",
+        mime=xl_mime,
+        key=f"{key_prefix}dl_teacher_sheets",
+        on_click="ignore",
+        width="stretch",
+    )
 
     tab_cls, tab_teacher, tab_matrix = st.tabs([
         "🏫 Xem Theo Lớp Học",
@@ -613,7 +640,7 @@ def _render_interactive_timetable_studio(
             st.info("Không có giáo viên nào khớp với điều kiện lọc.")
 
 
-def _render_saved_tkb(conn, cells: dict, classes: list, subjects: list, teachers: list, key_prefix: str = ""):
+def _render_saved_tkb(conn, cells: dict, classes: list, subjects: list, teachers: list, key_prefix: str = "", file_tag: str = ""):
     assignments = repo.get_assignments(conn)
     cfg = repo.get_scheduling_config(conn)
     _render_interactive_timetable_studio(
@@ -625,6 +652,7 @@ def _render_saved_tkb(conn, cells: dict, classes: list, subjects: list, teachers
         key_prefix=key_prefix,
         title="Studio Khảo Sát Thời Khóa Biểu",
         config=cfg,
+        file_tag=file_tag,
     )
 
 require_auth()
@@ -1757,6 +1785,7 @@ with tab_schedule:
                 key_prefix="fresh_result_",
                 title="Studio Khảo Sát Chi Tiết Phương Án Vừa Xếp",
                 config=inp.config,
+                file_tag=f"Tuan_{scheduled_week}_PA{st.session_state.get('active_candidate_id', 1)}",
             )
 
             view_curr = build_schedule_view(inp, result.assignment)
@@ -1834,7 +1863,11 @@ with tab_schedule:
 
             st.markdown(f"##### Chi tiết Thời khóa biểu Tuần {chosen_week}")
             saved_cells = repo.get_tkb_result(conn, saved_run["run_id"])
-            _render_saved_tkb(conn, saved_cells, classes, subjects, repo.list_teachers(conn), key_prefix=f"tab1_w{chosen_week}_")
+            _render_saved_tkb(
+                conn, saved_cells, classes, subjects, repo.list_teachers(conn),
+                key_prefix=f"tab1_w{chosen_week}_",
+                file_tag=f"Tuan_{chosen_week}",
+            )
         else:
             st.markdown("---")
             saved_weeks = repo.list_saved_weeks(conn)
@@ -2218,7 +2251,11 @@ with tab_history:
 
         st.markdown("---")
         saved_cells = repo.get_tkb_result(conn, run_for_week["run_id"])
-        _render_saved_tkb(conn, saved_cells, classes, subjects, repo.list_teachers(conn), key_prefix="tab2_")
+        _render_saved_tkb(
+            conn, saved_cells, classes, subjects, repo.list_teachers(conn),
+            key_prefix="tab2_",
+            file_tag=f"Tuan_{selected_view_week}",
+        )
 
 
 sidebar_backup_export(conn)

@@ -17,7 +17,7 @@ from collections import defaultdict
 from copy import copy
 
 import openpyxl
-from openpyxl.styles import PatternFill
+from openpyxl.styles import Alignment, Border, Font, PatternFill, Side
 
 from core import frame as frame_mod
 from core.models import WEEKDAY_NAMES, WEEKDAYS
@@ -573,4 +573,91 @@ def export_config_xlsx(conn) -> bytes:
     buf = io.BytesIO()
     wb.save(buf)
     return buf.getvalue()
+
+
+_THIN = Side(style="thin", color="CBD5E1")
+_BORDER = Border(left=_THIN, right=_THIN, top=_THIN, bottom=_THIN)
+_HEADER_FILL = PatternFill(start_color="DBEAFE", end_color="DBEAFE", fill_type="solid")
+_BAD_SHEET_CHARS = str.maketrans({c: "-" for c in "[]:*?/\\"})
+
+
+def _safe_sheet_name(name, used: set) -> str:
+    """Tên sheet hợp lệ cho Excel: <= 31 ký tự, không chứa []:*?/\\, không trùng (không phân biệt hoa thường)."""
+    base = (str(name).translate(_BAD_SHEET_CHARS).strip() or "Sheet")[:31]
+    candidate, n = base, 2
+    while candidate.lower() in used:
+        suffix = f" ({n})"
+        candidate = base[:31 - len(suffix)] + suffix
+        n += 1
+    used.add(candidate.lower())
+    return candidate
+
+
+def _write_grid_sheet(ws, title: str, grid: dict) -> None:
+    """grid: (weekday, session, period) -> text. Bảng Buổi/Tiết x Thứ giống Studio trang Xếp TKB."""
+    headers = ["Buổi", "Tiết"] + [WEEKDAY_NAMES[wd] for wd in WEEKDAYS]
+    sessions = ["S", "C"] if any(sess == "C" for (_wd, sess, _p) in grid) else ["S"]
+    for col, h in enumerate(headers, 1):
+        c = ws.cell(2, col, h)
+        c.font, c.fill, c.border = Font(bold=True), _HEADER_FILL, _BORDER
+        c.alignment = Alignment(horizontal="center")
+    row = 3
+    for sess in sessions:
+        for per in range(1, frame_mod.MAX_PERIODS_PER_SESSION + 1):
+            values = ["Sáng" if sess == "S" else "Chiều", per] + [grid.get((wd, sess, per), "") for wd in WEEKDAYS]
+            for col, v in enumerate(values, 1):
+                c = ws.cell(row, col, v)
+                c.border = _BORDER
+                c.alignment = Alignment(wrap_text=True, horizontal="center", vertical="center")
+            row += 1
+    _autofit_sheet(ws)  # trước khi ghi tiêu đề, để tiêu đề dài không kéo rộng cột A
+    ws.cell(1, 1, title).font = Font(bold=True, size=13)
+    ws.merge_cells(start_row=1, start_column=1, end_row=1, end_column=len(headers))
+    ws.freeze_panes = "C3"
+
+
+def _grid_workbook(sheets: list) -> bytes:
+    """sheets: [(tên sheet thô, tiêu đề, grid)]."""
+    wb = openpyxl.Workbook()
+    wb.remove(wb.active)
+    used: set = set()
+    for name, title, grid in sheets:
+        _write_grid_sheet(wb.create_sheet(_safe_sheet_name(name, used)), title, grid)
+    if not wb.sheetnames:
+        wb.create_sheet("Trống")
+    buffer = io.BytesIO()
+    wb.save(buffer)
+    return buffer.getvalue()
+
+
+def export_class_sheets_xlsx(cells, classes, subjects, teachers, assignments, title_suffix: str = "") -> bytes:
+    """Mỗi lớp 1 sheet, ô = 'Môn\\nGV' (giống tab 'Xem theo lớp' ở Studio)."""
+    subj = {s.subject_id: s.name for s in subjects}
+    tname = {t.teacher_id: t.name for t in teachers}
+    grids = defaultdict(dict)
+    for (cid, wd, sess, per), sid in cells.items():
+        if sid and sid > 0:
+            t = tname.get(assignments.get((sid, cid)), "")
+            grids[cid][(wd, sess, per)] = f"{subj.get(sid, sid)}\n{t}" if t else str(subj.get(sid, sid))
+    ordered = sorted(classes, key=lambda c: (c.sort_order, c.name))
+    return _grid_workbook([(c.name, f"Thời khóa biểu lớp {c.name}{title_suffix}", grids[c.class_id]) for c in ordered])
+
+
+def export_teacher_sheets_xlsx(cells, classes, subjects, teachers, assignments, title_suffix: str = "") -> bytes:
+    """Mỗi GV có tiết dạy 1 sheet, ô = 'Lớp (Môn)' (giống tab 'Tra cứu giáo viên' ở Studio)."""
+    subj = {s.subject_id: s.name for s in subjects}
+    cname = {c.class_id: c.name for c in classes}
+    per_teacher = defaultdict(lambda: defaultdict(list))
+    for (cid, wd, sess, per), sid in cells.items():
+        tid = assignments.get((sid, cid)) if sid and sid > 0 else None
+        if tid is not None and tid > 0:
+            per_teacher[tid][(wd, sess, per)].append(f"{cname.get(cid, cid)} ({subj.get(sid, sid)})")
+    sheets = []
+    for t in sorted(teachers, key=lambda t: t.name):
+        slots = per_teacher.get(t.teacher_id)
+        if slots:
+            total = sum(len(v) for v in slots.values())
+            sheets.append((t.name, f"TKB giáo viên {t.name}{title_suffix} — {total} tiết",
+                           {k: ", ".join(v) for k, v in slots.items()}))
+    return _grid_workbook(sheets)
 
