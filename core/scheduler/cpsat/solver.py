@@ -236,8 +236,8 @@ class EarlyStoppingCallback(cp_model.CpSolverSolutionCallback if cp_model is not
             self.StopSearch()
 
 
-def _presolve_capacity_screening(built: CpSatModel) -> set[str]:
-    """Phân tích giải tích tiền giải (0.001s) để phát hiện mâu thuẫn dung lượng toán học (Pigeonhole)."""
+def _morning_capacity_rows(built: CpSatModel) -> list[dict]:
+    """Phân tích giải tích dung lượng các buổi sáng bắt buộc theo từng thứ."""
     config = built.inp.config
     params = built.params
     mand_morns = params.mandatory_morning_weekdays
@@ -246,13 +246,16 @@ def _presolve_capacity_screening(built: CpSatModel) -> set[str]:
     bgh_ids = params.bgh_ids
     load = params.teacher_load  # same effective teacher map the objective uses (spec A5)
 
+    rows = []
     all_mand = set(mand_morns) | set(strict_morns)
-    for wd in all_mand:
+    for wd in sorted(all_mand):
         morn_slots = [s for s in built.inp.slots if s.ts.weekday == wd and s.ts.session == "S"]
         cap = len(morn_slots)
         mand_teacher_ids = set()
         must_mon_ids = getattr(params, "must_monday_ids", frozenset())
         for t in built.inp.teachers:
+            if load.get(t.teacher_id, 0) <= 0:
+                continue
             if t.teacher_id in bgh_ids:
                 continue
             if t.pinned_full_day_off == wd:
@@ -283,9 +286,15 @@ def _presolve_capacity_screening(built: CpSatModel) -> set[str]:
         allow_lone_mand = getattr(config, "allow_lone_period_on_mandatory_mornings", True)
         min_per_t = 1 if allow_lone_mand else 2
         min_needed = len(mand_teacher_ids) * min_per_t
-        if cap > 0 and min_needed > cap:
-            return {"II.3"}
+        rows.append({"weekday": wd, "teachers": len(mand_teacher_ids), "need": min_needed, "cap": cap})
 
+    return rows
+
+
+def _presolve_capacity_screening(built: CpSatModel) -> set[str]:
+    """Phân tích giải tích tiền giải (0.001s) để phát hiện mâu thuẫn dung lượng toán học (Pigeonhole)."""
+    if any(r["cap"] > 0 and r["need"] > r["cap"] for r in _morning_capacity_rows(built)):
+        return {"II.3"}
     return set()
 
 
@@ -368,6 +377,7 @@ def _diagnose_and_solve(built: CpSatModel, solver: cp_model.CpSolver, time_limit
             })
 
         if diag["passes_run"] == 1:
+            diag["morning_capacity"] = _morning_capacity_rows(built)
             incompatible_rids = _presolve_capacity_screening(built)
             if incompatible_rids:
                 relaxed |= incompatible_rids

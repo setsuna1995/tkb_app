@@ -73,3 +73,27 @@ def test_default_mode_unchanged(monkeypatch):
     res = solver_mod.solve_to_result(cpsat.build_model(_tiny_feasible_input()), time_limit_s=5.0)
     assert res.diagnostics["deep"] is False
     assert "min_improvement_abs" not in seen[0]  # library defaults (600 / 3%) still apply
+
+
+def test_morning_capacity_rows_explain_ii3_conflict():
+    ts = [TimeSlot(1, 2, "S", 1), TimeSlot(2, 2, "S", 2), TimeSlot(3, 2, "S", 3)]
+    inp = SchedulingInput(
+        classes=[ClassRoom(101, "6A1")],
+        subjects=[Subject(1, "M1", ROLE_THUONG), Subject(2, "M2", ROLE_THUONG), Subject(99, "HDTN", ROLE_HDTN)],
+        teachers=[Teacher(10, "GV A"), Teacher(20, "GV B"), Teacher(99, "GV HDTN")],
+        need={(1, 101): 10, (2, 101): 10, (99, 101): 0},
+        assigned_teacher={(1, 101): 10, (2, 101): 20, (99, 101): 99},
+        ban_busy=set(), slots=[Slot(i + 1, 101, t) for i, t in enumerate(ts)], timeslots=ts,
+        config=SchedulingConfig(
+            mandatory_morning_weekdays=(2,), min_weekly_periods_for_mandatory_morning=10,
+            avoid_teacher_lone_periods=True, allow_lone_period_on_mandatory_mornings=False,
+        ),
+    )
+    built = cpsat.build_model(inp)
+    rows = solver_mod._morning_capacity_rows(built)
+    monday = next(r for r in rows if r["weekday"] == 2)
+    assert monday["teachers"] == 2
+    assert monday["need"] == 4
+    assert monday["need"] > monday["cap"]
+    assert solver_mod._presolve_capacity_screening(built) == {"II.3"}
+
