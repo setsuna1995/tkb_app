@@ -10,6 +10,7 @@ from core.rules.detectors import find_teacher_single_gaps, run_detectors
 from core.rules.params import resolve_effective_params
 from core.rules.view import build_schedule_view
 from core.rules.violations import BREACH, FORCED, SHORTFALL, classify, group_by_rule
+from core.scheduler.bottleneck import analyze_bottlenecks, more_time_can_help, search_headroom
 from core.scheduler.placement import _build_effective_assigned_teacher
 from core.scheduler.refinement import compute_candidate_metrics, find_valid_swap_candidates, validate_and_swap_slots
 from core.validation import compute_quota_diff, compute_tkb_health_score
@@ -668,12 +669,16 @@ with tab_schedule:
     parity = "C" if chosen_week % 2 == 0 else "L"
 
     # Hàng thông tin tuần & Nút xuất nhanh Excel nếu tuần này đã có kết quả
+    run_now = repo.get_latest_run_by_week(conn, chosen_week)
     col_w_head1, col_w_head2 = st.columns([3, 2])
     with col_w_head1:
-        st.write(f"Tuần đang xếp: **Tuần {chosen_week}**, seed = {seed or '(ngẫu nhiên mỗi lần chạy)'}")
+        st.markdown(
+            f"Trạng thái Tuần {chosen_week}: "
+            + (f"✅ **Đã có TKB chính thức** (lưu lúc {run_now['created_at']})" if run_now
+               else "⏳ **Chưa có TKB chính thức**")
+        )
         st.caption(f"🎯 **Định lượng:** Tự động áp dụng phân bổ số tiết định lượng theo chuẩn của **Tuần {chosen_week}**.")
     with col_w_head2:
-        run_now = repo.get_latest_run_by_week(conn, chosen_week)
         if run_now:
             try:
                 instant_xlsx = export_xlsx(conn, run_id=run_now["run_id"])
@@ -711,177 +716,183 @@ with tab_schedule:
                     q_rng = f"{q['floor']}–{q['cap']}" if q['floor'] != q['cap'] else str(q['cap'])
                     st.write(f"- **{q['name']}**: Phân công **{q['load']}** tiết / Định mức chuẩn **{q_rng}** tiết (thiếu -{q['floor'] - q['load']}t)")
 
-    extra_kep_options = [s.name for s in subjects if s.role_code != ROLE_HDTN]
-    extra_kep_names = st.multiselect(
-        "Môn cần xếp 2 tiết liền kề (kép) CHỈ cho tuần này",
-        extra_kep_options,
-        help="Không đổi vĩnh viễn phân loại môn học -- chỉ áp dụng cho lần chạy xếp TKB này.",
-    )
-    extra_kep_ids = frozenset(s.subject_id for s in subjects if s.name in extra_kep_names)
-
-    sched_config = repo.get_scheduling_config(conn)
-
-    with st.container(border=True):
-        st.markdown("##### 🎯 Phương án xếp môn Hoạt động trải nghiệm (HĐTN)")
-        st.caption("Lựa chọn cách tổ chức môn HĐTN cho tuần này. Mặc định nhận theo Cấu hình xếp lịch của trường.")
-
-        default_hdtn_is_thematic = (getattr(sched_config, "hdtn_mode", "separate") == "thematic")
-        hdtn_plan = st.radio(
-            "Phương án tổ chức HĐTN tuần này:",
-            ["separate", "thematic"],
-            index=1 if default_hdtn_is_thematic else 0,
-            format_func=lambda p: (
-                "📅 Tuần học chuẩn (3 tiết: Chào cờ + Hoạt động chủ đề + Sinh hoạt lớp)"
-                if p == "separate"
-                else "🎪 Tuần chuyên đề (Dồn 3 tiết liền kề toàn trường)"
-            ),
-            key="single_hdtn_plan_radio",
-            horizontal=True,
+    with st.expander("⚙️ Tùy chỉnh riêng cho tuần này (Môn kép tạm thời, Phương án HĐTN)", expanded=False):
+        extra_kep_options = [s.name for s in subjects if s.role_code != ROLE_HDTN]
+        extra_kep_names = st.multiselect(
+            "Môn cần xếp 2 tiết liền kề (kép) CHỈ cho tuần này",
+            extra_kep_options,
+            help="Không đổi vĩnh viễn phân loại môn học -- chỉ áp dụng cho lần chạy xếp TKB này.",
         )
+        extra_kep_ids = frozenset(s.subject_id for s in subjects if s.name in extra_kep_names)
 
-        hdtn_thematic_week = (hdtn_plan == "thematic")
-        hdtn_thematic_mode = "auto"
-        hdtn_thematic_weekday = None
-        hdtn_thematic_session = "S"
-        hdtn_thematic_start_period = None
+        sched_config = repo.get_scheduling_config(conn)
 
-        single_custom_cfg = None
-        if not hdtn_thematic_week:
-            p1_str = f"{WEEKDAY_NAMES.get(sched_config.hdtn_p1_weekday, f'Thứ {sched_config.hdtn_p1_weekday}')} ({'Sáng' if sched_config.hdtn_p1_session == 'S' else 'Chiều'} Tiết {sched_config.hdtn_p1_period})"
-            if sched_config.hdtn_p2_weekday is not None:
-                p2_str = f"{WEEKDAY_NAMES.get(sched_config.hdtn_p2_weekday, f'Thứ {sched_config.hdtn_p2_weekday}')} ({'Sáng' if sched_config.hdtn_p2_session == 'S' else 'Chiều'} Tiết {sched_config.hdtn_p2_period})"
-            else:
-                p2_str = "Tự do linh hoạt" + (" (ưu tiên chiều)" if getattr(sched_config, "hdtn_period2_afternoon", True) else "")
-            if sched_config.hdtn_p3_weekday is not None:
-                p3_str = f"{WEEKDAY_NAMES.get(sched_config.hdtn_p3_weekday, f'Thứ {sched_config.hdtn_p3_weekday}')} ({'Sáng' if sched_config.hdtn_p3_session == 'S' else 'Chiều'} {'Tiết ' + str(sched_config.hdtn_p3_period) if sched_config.hdtn_p3_period else 'cuối buổi'})"
-            else:
-                p3_str = "Tự động tiết cuối tuần (Chiều T6 hoặc Sáng T7)"
+        with st.container(border=True):
+            st.markdown("##### 🎯 Phương án xếp môn Hoạt động trải nghiệm (HĐTN)")
+            st.caption("Lựa chọn cách tổ chức môn HĐTN cho tuần này. Mặc định nhận theo Cấu hình xếp lịch của trường.")
 
-            custom_single_periods = st.checkbox(
-                "✏️ Tự chỉnh lịch 3 tiết HĐTN riêng cho tuần này (không đổi cấu hình gốc)",
-                value=False,
-                key="single_custom_periods_chk",
+            default_hdtn_is_thematic = (getattr(sched_config, "hdtn_mode", "separate") == "thematic")
+            hdtn_plan = st.radio(
+                "Phương án tổ chức HĐTN tuần này:",
+                ["separate", "thematic"],
+                index=1 if default_hdtn_is_thematic else 0,
+                format_func=lambda p: (
+                    "📅 Tuần học chuẩn (3 tiết: Chào cờ + Hoạt động chủ đề + Sinh hoạt lớp)"
+                    if p == "separate"
+                    else "🎪 Tuần chuyên đề (Dồn 3 tiết liền kề toàn trường)"
+                ),
+                key="single_hdtn_plan_radio",
+                horizontal=True,
             )
 
-            if not custom_single_periods:
-                st.info(
-                    f"📌 **Mốc tiết HĐTN áp dụng tuần này**:\n"
-                    f"- **Tiết 1 (Chào cờ)**: {p1_str}\n"
-                    f"- **Tiết 2 (Chủ đề)**: {p2_str}\n"
-                    f"- **Tiết 3 (SHL)**: {p3_str}"
-                )
-            else:
-                c_p1_col, c_p2_col, c_p3_col = st.columns(3)
-                with c_p1_col:
-                    st.markdown("**🚩 Tiết 1 (Chào cờ)**")
-                    c1_w, c1_s, c1_p = st.columns(3)
-                    p1_w_cur = getattr(sched_config, "hdtn_p1_weekday", 2)
-                    w_p1 = c1_w.selectbox("Thứ", WEEKDAYS, index=WEEKDAYS.index(p1_w_cur) if p1_w_cur in WEEKDAYS else 0,
-                                          format_func=lambda w: f"T{w}", key="sin_p1_w")
-                    s_p1 = c1_s.selectbox("Buổi", ["S", "C"], index=0 if getattr(sched_config, "hdtn_p1_session", "S") == "S" else 1,
-                                          format_func=lambda s: "Sáng" if s == "S" else "Chiều", key="sin_p1_s")
-                    p_p1 = c1_p.selectbox("Tiết", list(range(1, 6)), index=max(0, min(getattr(sched_config, "hdtn_p1_period", 1) - 1, 4)), key="sin_p1_p")
-
-                with c_p2_col:
-                    st.markdown("**📘 Tiết 2 (Chủ đề)**")
-                    p2_is_fixed = getattr(sched_config, "hdtn_p2_weekday", None) is not None
-                    m_p2 = st.selectbox("Chế độ", ["auto", "fixed"], index=1 if p2_is_fixed else 0,
-                                        format_func=lambda m: "🤖 Tự do" if m == "auto" else "📌 Cố định", key="sin_p2_m")
-                    if m_p2 == "fixed":
-                        c2_w, c2_s, c2_p = st.columns(3)
-                        p2_w_cur = getattr(sched_config, "hdtn_p2_weekday", 4) or 4
-                        w_p2 = c2_w.selectbox("Thứ", WEEKDAYS, index=WEEKDAYS.index(p2_w_cur) if p2_w_cur in WEEKDAYS else 2,
-                                              format_func=lambda w: f"T{w}", key="sin_p2_w")
-                        s_p2 = c2_s.selectbox("Buổi", ["S", "C"], index=0 if getattr(sched_config, "hdtn_p2_session", "S") == "S" else 1,
-                                              format_func=lambda s: "Sáng" if s == "S" else "Chiều", key="sin_p2_s")
-                        p_p2 = c2_p.selectbox("Tiết", list(range(1, 6)), index=max(0, min((getattr(sched_config, "hdtn_p2_period", 2) or 2) - 1, 4)), key="sin_p2_p")
-                    else:
-                        w_p2, s_p2, p_p2 = None, "S", None
-                        p2_chieu_pref = st.checkbox(
-                            "Ưu tiên xếp chiều",
-                            value=getattr(sched_config, "hdtn_period2_afternoon", True),
-                            key="sin_p2_chieu_pref",
-                        )
-
-                with c_p3_col:
-                    st.markdown("**👥 Tiết 3 (SHL)**")
-                    p3_is_fixed = getattr(sched_config, "hdtn_p3_weekday", None) is not None
-                    m_p3 = st.selectbox("Chế độ", ["auto", "fixed"], index=1 if p3_is_fixed else 0,
-                                        format_func=lambda m: "🤖 Tiết cuối tuần" if m == "auto" else "📌 Cố định", key="sin_p3_m")
-                    if m_p3 == "fixed":
-                        c3_w, c3_s, c3_p = st.columns(3)
-                        p3_w_cur = getattr(sched_config, "hdtn_p3_weekday", 6) or 6
-                        w_p3 = c3_w.selectbox("Thứ", WEEKDAYS, index=WEEKDAYS.index(p3_w_cur) if p3_w_cur in WEEKDAYS else 4,
-                                              format_func=lambda w: f"T{w}", key="sin_p3_w")
-                        s_p3 = c3_s.selectbox("Buổi", ["S", "C"], index=0 if getattr(sched_config, "hdtn_p3_session", "S") == "S" else 1,
-                                              format_func=lambda s: "Sáng" if s == "S" else "Chiều", key="sin_p3_s")
-                        p3_opts = [0, 1, 2, 3, 4, 5]
-                        cur_p3_val = getattr(sched_config, "hdtn_p3_period", 0) or 0
-                        p_p3 = c3_p.selectbox("Tiết", p3_opts, index=p3_opts.index(cur_p3_val) if cur_p3_val in p3_opts else 0,
-                                              format_func=lambda p: "Cuối" if p == 0 else f"T{p}", key="sin_p3_p")
-                    else:
-                        w_p3, s_p3, p_p3 = None, "S", None
-
-                single_custom_cfg = dataclasses.replace(
-                    sched_config,
-                    hdtn_p1_weekday=int(w_p1),
-                    hdtn_p1_session=str(s_p1),
-                    hdtn_p1_period=int(p_p1),
-                    chao_co_weekday=int(w_p1),
-                    chao_co_session=str(s_p1),
-                    chao_co_period=int(p_p1),
-                    hdtn_p2_weekday=int(w_p2) if m_p2 == "fixed" else None,
-                    hdtn_p2_session=str(s_p2) if m_p2 == "fixed" else "S",
-                    hdtn_p2_period=int(p_p2) if m_p2 == "fixed" else None,
-                    hdtn_period2_afternoon=bool(p2_chieu_pref if m_p2 != "fixed" else getattr(sched_config, "hdtn_period2_afternoon", True)),
-                    hdtn_p3_weekday=int(w_p3) if m_p3 == "fixed" else None,
-                    hdtn_p3_session=str(s_p3) if m_p3 == "fixed" else "S",
-                    hdtn_p3_period=int(p_p3) if (m_p3 == "fixed" and int(p_p3) > 0) else None,
-                )
-        else:
+            hdtn_thematic_week = (hdtn_plan == "thematic")
             hdtn_thematic_mode = "auto"
             hdtn_thematic_weekday = None
             hdtn_thematic_session = "S"
             hdtn_thematic_start_period = None
 
-            st.success(
-                "🤖 **Chế độ Tự động tối ưu toàn trường (Mặc định)**:\n\n"
-                "Thuật toán CP-SAT sẽ tự động tìm dải 3 tiết liền kề tối ưu nhất trong tuần, đồng thời bảo đảm 100% các lớp "
-                "được học HĐTN cùng lúc. **Bạn không cần phải tự chọn thời gian thủ công**."
-            )
-            allow_manual_fixed = st.checkbox(
-                "Chỉ định khung giờ cố định (chỉ dùng nếu có lịch ấn định sẵn từ Ban Giám hiệu)",
-                value=False,
-                key="single_allow_manual_thematic_fixed",
-            )
-            if allow_manual_fixed:
-                c_wd, c_sess, c_p = st.columns(3)
-                def_wd = getattr(sched_config, "hdtn_thematic_weekday", None) or 2
-                hdtn_thematic_weekday = c_wd.selectbox(
-                    "Thứ", [2, 3, 4, 5, 6, 7],
-                    index=[2, 3, 4, 5, 6, 7].index(def_wd) if def_wd in [2, 3, 4, 5, 6, 7] else 0,
-                    format_func=lambda w: f"Thứ {w}",
-                    key="single_hdtn_thematic_wd",
+            single_custom_cfg = None
+            if not hdtn_thematic_week:
+                p1_str = f"{WEEKDAY_NAMES.get(sched_config.hdtn_p1_weekday, f'Thứ {sched_config.hdtn_p1_weekday}')} ({'Sáng' if sched_config.hdtn_p1_session == 'S' else 'Chiều'} Tiết {sched_config.hdtn_p1_period})"
+                if sched_config.hdtn_p2_weekday is not None:
+                    p2_str = f"{WEEKDAY_NAMES.get(sched_config.hdtn_p2_weekday, f'Thứ {sched_config.hdtn_p2_weekday}')} ({'Sáng' if sched_config.hdtn_p2_session == 'S' else 'Chiều'} Tiết {sched_config.hdtn_p2_period})"
+                else:
+                    p2_str = "Tự do linh hoạt" + (" (ưu tiên chiều)" if getattr(sched_config, "hdtn_period2_afternoon", True) else "")
+                if sched_config.hdtn_p3_weekday is not None:
+                    p3_str = f"{WEEKDAY_NAMES.get(sched_config.hdtn_p3_weekday, f'Thứ {sched_config.hdtn_p3_weekday}')} ({'Sáng' if sched_config.hdtn_p3_session == 'S' else 'Chiều'} {'Tiết ' + str(sched_config.hdtn_p3_period) if sched_config.hdtn_p3_period else 'cuối buổi'})"
+                else:
+                    p3_str = "Tự động tiết cuối tuần (Chiều T6 hoặc Sáng T7)"
+
+                custom_single_periods = st.checkbox(
+                    "✏️ Tự chỉnh lịch 3 tiết HĐTN riêng cho tuần này (không đổi cấu hình gốc)",
+                    value=False,
+                    key="single_custom_periods_chk",
                 )
-                def_sess = getattr(sched_config, "hdtn_thematic_session", "S") or "S"
-                hdtn_thematic_session = c_sess.selectbox(
-                    "Buổi", ["S", "C"],
-                    index=0 if def_sess == "S" else 1,
-                    format_func=lambda s: "Sáng" if s == "S" else "Chiều",
-                    key="single_hdtn_thematic_sess",
+
+                if not custom_single_periods:
+                    st.info(
+                        f"📌 **Mốc tiết HĐTN áp dụng tuần này**:\n"
+                        f"- **Tiết 1 (Chào cờ)**: {p1_str}\n"
+                        f"- **Tiết 2 (Chủ đề)**: {p2_str}\n"
+                        f"- **Tiết 3 (SHL)**: {p3_str}"
+                    )
+                else:
+                    c_p1_col, c_p2_col, c_p3_col = st.columns(3)
+                    with c_p1_col:
+                        st.markdown("**🚩 Tiết 1 (Chào cờ)**")
+                        c1_w, c1_s, c1_p = st.columns(3)
+                        p1_w_cur = getattr(sched_config, "hdtn_p1_weekday", 2)
+                        w_p1 = c1_w.selectbox("Thứ", WEEKDAYS, index=WEEKDAYS.index(p1_w_cur) if p1_w_cur in WEEKDAYS else 0,
+                                              format_func=lambda w: f"T{w}", key="sin_p1_w")
+                        s_p1 = c1_s.selectbox("Buổi", ["S", "C"], index=0 if getattr(sched_config, "hdtn_p1_session", "S") == "S" else 1,
+                                              format_func=lambda s: "Sáng" if s == "S" else "Chiều", key="sin_p1_s")
+                        p_p1 = c1_p.selectbox("Tiết", list(range(1, 6)), index=max(0, min(getattr(sched_config, "hdtn_p1_period", 1) - 1, 4)), key="sin_p1_p")
+
+                    with c_p2_col:
+                        st.markdown("**📘 Tiết 2 (Chủ đề)**")
+                        p2_is_fixed = getattr(sched_config, "hdtn_p2_weekday", None) is not None
+                        m_p2 = st.selectbox("Chế độ", ["auto", "fixed"], index=1 if p2_is_fixed else 0,
+                                            format_func=lambda m: "🤖 Tự do" if m == "auto" else "📌 Cố định", key="sin_p2_m")
+                        if m_p2 == "fixed":
+                            c2_w, c2_s, c2_p = st.columns(3)
+                            p2_w_cur = getattr(sched_config, "hdtn_p2_weekday", 4) or 4
+                            w_p2 = c2_w.selectbox("Thứ", WEEKDAYS, index=WEEKDAYS.index(p2_w_cur) if p2_w_cur in WEEKDAYS else 2,
+                                                  format_func=lambda w: f"T{w}", key="sin_p2_w")
+                            s_p2 = c2_s.selectbox("Buổi", ["S", "C"], index=0 if getattr(sched_config, "hdtn_p2_session", "S") == "S" else 1,
+                                                  format_func=lambda s: "Sáng" if s == "S" else "Chiều", key="sin_p2_s")
+                            p_p2 = c2_p.selectbox("Tiết", list(range(1, 6)), index=max(0, min((getattr(sched_config, "hdtn_p2_period", 2) or 2) - 1, 4)), key="sin_p2_p")
+                        else:
+                            w_p2, s_p2, p_p2 = None, "S", None
+                            p2_chieu_pref = st.checkbox(
+                                "Ưu tiên xếp chiều",
+                                value=getattr(sched_config, "hdtn_period2_afternoon", True),
+                                key="sin_p2_chieu_pref",
+                            )
+
+                    with c_p3_col:
+                        st.markdown("**👥 Tiết 3 (SHL)**")
+                        p3_is_fixed = getattr(sched_config, "hdtn_p3_weekday", None) is not None
+                        m_p3 = st.selectbox("Chế độ", ["auto", "fixed"], index=1 if p3_is_fixed else 0,
+                                            format_func=lambda m: "🤖 Tiết cuối tuần" if m == "auto" else "📌 Cố định", key="sin_p3_m")
+                        if m_p3 == "fixed":
+                            c3_w, c3_s, c3_p = st.columns(3)
+                            p3_w_cur = getattr(sched_config, "hdtn_p3_weekday", 6) or 6
+                            w_p3 = c3_w.selectbox("Thứ", WEEKDAYS, index=WEEKDAYS.index(p3_w_cur) if p3_w_cur in WEEKDAYS else 4,
+                                                  format_func=lambda w: f"T{w}", key="sin_p3_w")
+                            s_p3 = c3_s.selectbox("Buổi", ["S", "C"], index=0 if getattr(sched_config, "hdtn_p3_session", "S") == "S" else 1,
+                                                  format_func=lambda s: "Sáng" if s == "S" else "Chiều", key="sin_p3_s")
+                            p3_opts = [0, 1, 2, 3, 4, 5]
+                            cur_p3_val = getattr(sched_config, "hdtn_p3_period", 0) or 0
+                            p_p3 = c3_p.selectbox("Tiết", p3_opts, index=p3_opts.index(cur_p3_val) if cur_p3_val in p3_opts else 0,
+                                                  format_func=lambda p: "Cuối" if p == 0 else f"T{p}", key="sin_p3_p")
+                        else:
+                            w_p3, s_p3, p_p3 = None, "S", None
+
+                    single_custom_cfg = dataclasses.replace(
+                        sched_config,
+                        hdtn_p1_weekday=int(w_p1),
+                        hdtn_p1_session=str(s_p1),
+                        hdtn_p1_period=int(p_p1),
+                        chao_co_weekday=int(w_p1),
+                        chao_co_session=str(s_p1),
+                        chao_co_period=int(p_p1),
+                        hdtn_p2_weekday=int(w_p2) if m_p2 == "fixed" else None,
+                        hdtn_p2_session=str(s_p2) if m_p2 == "fixed" else "S",
+                        hdtn_p2_period=int(p_p2) if m_p2 == "fixed" else None,
+                        hdtn_period2_afternoon=bool(p2_chieu_pref if m_p2 != "fixed" else getattr(sched_config, "hdtn_period2_afternoon", True)),
+                        hdtn_p3_weekday=int(w_p3) if m_p3 == "fixed" else None,
+                        hdtn_p3_session=str(s_p3) if m_p3 == "fixed" else "S",
+                        hdtn_p3_period=int(p_p3) if (m_p3 == "fixed" and int(p_p3) > 0) else None,
+                    )
+            else:
+                hdtn_thematic_mode = "auto"
+                hdtn_thematic_weekday = None
+                hdtn_thematic_session = "S"
+                hdtn_thematic_start_period = None
+
+                st.success(
+                    "🤖 **Chế độ Tự động tối ưu toàn trường (Mặc định)**:\n\n"
+                    "Thuật toán CP-SAT sẽ tự động tìm dải 3 tiết liền kề tối ưu nhất trong tuần, đồng thời bảo đảm 100% các lớp "
+                    "được học HĐTN cùng lúc. **Bạn không cần phải tự chọn thời gian thủ công**."
                 )
-                def_p = getattr(sched_config, "hdtn_thematic_start_period", None) or 1
-                hdtn_thematic_start_period = c_p.selectbox(
-                    "Dải 3 tiết bắt đầu", [1, 2, 3],
-                    index=[1, 2, 3].index(def_p) if def_p in [1, 2, 3] else 0,
-                    format_func=lambda p: f"Tiết {p} → Tiết {p+2}",
-                    key="single_hdtn_thematic_p",
+                allow_manual_fixed = st.checkbox(
+                    "Chỉ định khung giờ cố định (chỉ dùng nếu có lịch ấn định sẵn từ Ban Giám hiệu)",
+                    value=False,
+                    key="single_allow_manual_thematic_fixed",
                 )
-                hdtn_thematic_mode = "fixed"
+                if allow_manual_fixed:
+                    c_wd, c_sess, c_p = st.columns(3)
+                    def_wd = getattr(sched_config, "hdtn_thematic_weekday", None) or 2
+                    hdtn_thematic_weekday = c_wd.selectbox(
+                        "Thứ", [2, 3, 4, 5, 6, 7],
+                        index=[2, 3, 4, 5, 6, 7].index(def_wd) if def_wd in [2, 3, 4, 5, 6, 7] else 0,
+                        format_func=lambda w: f"Thứ {w}",
+                        key="single_hdtn_thematic_wd",
+                    )
+                    def_sess = getattr(sched_config, "hdtn_thematic_session", "S") or "S"
+                    hdtn_thematic_session = c_sess.selectbox(
+                        "Buổi", ["S", "C"],
+                        index=0 if def_sess == "S" else 1,
+                        format_func=lambda s: "Sáng" if s == "S" else "Chiều",
+                        key="single_hdtn_thematic_sess",
+                    )
+                    def_p = getattr(sched_config, "hdtn_thematic_start_period", None) or 1
+                    hdtn_thematic_start_period = c_p.selectbox(
+                        "Dải 3 tiết bắt đầu", [1, 2, 3],
+                        index=[1, 2, 3].index(def_p) if def_p in [1, 2, 3] else 0,
+                        format_func=lambda p: f"Tiết {p} → Tiết {p+2}",
+                        key="single_hdtn_thematic_p",
+                    )
+                    hdtn_thematic_mode = "fixed"
+
+    st.caption(
+        f"Áp dụng: HĐTN **{'Tuần chuyên đề' if hdtn_thematic_week else 'Tuần chuẩn'}**"
+        + (f" • Môn kép tạm thời: **{', '.join(extra_kep_names)}**" if extra_kep_names else "")
+    )
 
     st.caption("✨ Động cơ lập lịch: **Google OR-Tools CP-SAT** (Tối ưu hóa toàn cục, triệt tiêu vi phạm II.3, II.4, II.8)")
 
-    def _run_single_solver(s_seed, s_cfg_override, s_locked_slots=None, s_reference_assignment=None, strategy="default", banned_slots_subjects=None):
+    def _run_single_solver(s_seed, s_cfg_override, s_locked_slots=None, s_reference_assignment=None, strategy="default", banned_slots_subjects=None, deep=False):
         inp_obj = repo.build_scheduling_input(
             conn, parity=parity, seed=s_seed, extra_kep_ids=extra_kep_ids,
             hdtn_thematic_week=hdtn_thematic_week,
@@ -941,6 +952,7 @@ with tab_schedule:
             time_limit_s=t_limit,
             progress_cb=_on_cpsat_progress,
             strategy=strategy,
+            deep=deep,
         )
         if res_obj is None:
             from core.models import ScheduleResult
@@ -1088,7 +1100,12 @@ with tab_schedule:
         if not result.success:
             st.error(result.failure_reason)
         else:
-            cand_items = list(st.session_state.get("candidates", {}).values())
+            all_cands = st.session_state.get("candidates", {})
+            active_cid = st.session_state.get("active_candidate_id")
+            cand_items = sorted(
+                all_cands.values(),
+                key=lambda c: (0 if c.get("id") == active_cid else 1, c.get("id", 0)),
+            )
             # ══════════════════════════════════════════════════════════════════
             # 🌟 BENTO GRID ĐỐI SÁNH ĐA PHƯƠNG ÁN (UI/UX PRO MAX)
             # ══════════════════════════════════════════════════════════════════
@@ -1176,75 +1193,201 @@ with tab_schedule:
                     title = RULES[rule_id].title_vi if rule_id in RULES else rule_id
                     st.write(f"- {rule_id}: {title}")
 
+            violations_curr = _schedule_violations(inp, result)
+            has_blocking = any(v.level == BREACH and RULES[v.rule_id].blocks_save for v in violations_curr)
+            can_save = (not has_blocking) or bool(st.session_state.get("proceed_with_hard_violations", False))
+
+            if msg := st.session_state.pop("extend_msg", None):
+                st.info(msg)
+
+            # ── Top Action Bar (Save, Download, Solve Longer, Cancel) ──
+            col_acc1, col_acc2, col_acc3, col_acc4 = st.columns([1.2, 1.2, 1.4, 0.8])
+            with col_acc1:
+                save_help = "Còn vi phạm tiêu chí bắt buộc — xem mục Kiểm định bên dưới để xác nhận." if not can_save else None
+                if st.button(
+                    f"✅ Chấp nhận & Lưu Tuần {scheduled_week}",
+                    type="primary",
+                    disabled=not can_save,
+                    help=save_help,
+                    key="btn_accept_save_fresh_result",
+                ):
+                    cells = {
+                        (s.class_id, s.ts.weekday, s.ts.session, s.ts.period): result.assignment.get(s.slot_id)
+                        for s in inp.slots
+                    }
+                    repo.bulk_replace_tkb_nhap(conn, cells)
+                    save_week_no = scheduled_week if scheduled_week is not None else 1
+                    repo.add_seed_history(conn, save_week_no, seed, parity)
+                    run_id = repo.save_run(
+                        conn, save_week_no, seed, parity, result.cells_changed, result.cells_total,
+                        True, "OK",
+                    )
+                    repo.save_tkb_result(conn, run_id, cells)
+                    st.session_state["just_saved_week"] = save_week_no
+                    st.session_state["saved_success_msg"] = f"🎉 Đã lưu thành công thời khóa biểu chính thức cho Tuần {save_week_no}!"
+                    st.session_state.pop("last_result", None)
+                    st.session_state.pop("last_input", None)
+                    st.session_state.pop("last_scheduled_week", None)
+                    st.session_state.pop("candidates", None)
+                    st.session_state.pop("active_candidate_id", None)
+                    st.session_state.pop("locked_classes", None)
+                    st.session_state.pop("locked_teachers", None)
+                    st.session_state.pop("extend_msg", None)
+                    st.rerun()
+
+            with col_acc2:
+                try:
+                    curr_cells = {
+                        (s.class_id, s.ts.weekday, s.ts.session, s.ts.period): result.assignment.get(s.slot_id)
+                        for s in inp.slots
+                    }
+                    file_label = f"TKB_Tuan_{scheduled_week}.xlsx" if scheduled_week else f"TKB_Tuan_{'Chan' if parity == 'C' else 'Le'}.xlsx"
+                    excel_bytes = export_xlsx(conn, cells=curr_cells)
+                    st.download_button(
+                        "📤 Tải bản Excel (.xlsx)",
+                        data=excel_bytes,
+                        file_name=file_label,
+                        mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                        key="btn_download_fresh_result",
+                    )
+                except Exception as ex_fresh:
+                    st.caption(f"Xuất Excel: {ex_fresh}")
+
+            with col_acc3:
+                c_time_val = st.segmented_control(
+                    "Thêm thời gian",
+                    options=[30, 60, 120, 300],
+                    default=30,
+                    format_func=lambda s: f"+{s}s",
+                    key="ctl_deep_solve_seconds",
+                    label_visibility="collapsed",
+                ) or 30
+                can_help = more_time_can_help(result)
+                btn_label = "✅ Đã tối ưu (không cần thêm)" if not can_help else "⏱️ Giải thêm thời gian"
+                if st.button(
+                    btn_label,
+                    key="btn_solve_longer",
+                    disabled=not can_help,
+                    use_container_width=True,
+                    help="Tiếp tục tối ưu phương án đang chọn từ nghiệm hiện tại (warm-start)" if can_help else "Bộ giải đã chứng minh phương án này tối ưu toàn cục, giải thêm không giảm điểm phạt.",
+                ):
+                    active_cand = st.session_state.get("candidates", {}).get(st.session_state.get("active_candidate_id", 1))
+                    base_cfg = active_cand["inp"].config if active_cand else single_custom_cfg
+                    deep_cfg = dataclasses.replace(base_cfg, cpsat_time_limit_seconds=int(c_time_val))
+                    cand_seed = active_cand["seed"] if active_cand else (seed or 0)
+                    cand_key = active_cand.get("key", "default") if active_cand else "default"
+                    locked_slots = active_cand.get("locked_slots") if active_cand else None
+
+                    inp_new, res_new = _run_single_solver(
+                        s_seed=cand_seed,
+                        s_cfg_override=deep_cfg,
+                        s_locked_slots=locked_slots,
+                        s_reference_assignment=result.assignment,
+                        strategy=cand_key,
+                        deep=True,
+                    )
+                    if not res_new.success:
+                        st.error(f"Giải thêm không thành công, giữ nguyên phương án hiện tại: {res_new.failure_reason}")
+                    else:
+                        old_score = compute_candidate_metrics(inp, result)["health_score"]["overall_score"]
+                        metrics_new = compute_candidate_metrics(inp_new, res_new)
+                        new_score = metrics_new["health_score"]["overall_score"]
+                        new_id = max(st.session_state["candidates"]) + 1
+                        st.session_state["candidates"][new_id] = {
+                            "id": new_id,
+                            "key": cand_key,
+                            "name": f"Phương án {new_id} (+{c_time_val}s từ PA {active_cand['id'] if active_cand else 1})",
+                            "strategy_desc": f"Tiếp tục tối ưu PA {active_cand['id'] if active_cand else 1} thêm {c_time_val}s",
+                            "seed": cand_seed,
+                            "time_limit": int(c_time_val),
+                            "locked_slots": locked_slots,
+                            "result": res_new,
+                            "inp": inp_new,
+                            "metrics": metrics_new,
+                        }
+                        if new_score >= old_score:
+                            st.session_state["active_candidate_id"] = new_id
+                            st.session_state["last_result"] = res_new
+                            st.session_state["last_input"] = inp_new
+                        st.session_state["extend_msg"] = (
+                            f"PA {new_id}: {new_score:.1f} điểm ({new_score - old_score:+.1f} so với PA {active_cand['id'] if active_cand else 1})"
+                            + ("" if new_score >= old_score else " — giữ nguyên PA cũ vì tốt hơn.")
+                        )
+                        st.rerun()
+
+            with col_acc4:
+                if st.button("❌ Hủy", key="btn_cancel_fresh_result", help=f"Quay lại thời khóa biểu chính thức cũ của Tuần {scheduled_week}"):
+                    st.session_state.pop("last_result", None)
+                    st.session_state.pop("last_input", None)
+                    st.session_state.pop("last_scheduled_week", None)
+                    st.session_state.pop("candidates", None)
+                    st.session_state.pop("active_candidate_id", None)
+                    st.session_state.pop("locked_classes", None)
+                    st.session_state.pop("locked_teachers", None)
+                    st.session_state.pop("extend_msg", None)
+                    st.rerun()
+
+            # ── Panel Chẩn Đoán Nút Thắt ──
+            bottlenecks = analyze_bottlenecks(inp, result, violations_curr)
+            kind_badge = {
+                "capacity": ("Dung lượng", "danger"),
+                "rule": ("Tiêu chí", "warning"),
+                "teacher": ("Giáo viên", "warning"),
+                "time": ("Thời gian giải", "info"),
+            }
+            with st.expander(
+                f"🔍 Vì sao phương án này chưa đẹp hơn? ({len(bottlenecks)} nút thắt)" if bottlenecks
+                else "🔍 Nút thắt: không phát hiện",
+                expanded=bool(bottlenecks) and bottlenecks[0].kind != "time",
+            ):
+                if not bottlenecks:
+                    render_callout(
+                        "Phương án đã tối ưu với cấu hình hiện tại, không có tiêu chí hay GV nào tập trung vi phạm.",
+                        level="success",
+                        title="Không có nút thắt",
+                    )
+                for b in bottlenecks:
+                    label, status = kind_badge.get(b.kind, ("Khác", "info"))
+                    with st.container(border=True):
+                        st.markdown(f"{render_status_badge(label, status)} **{b.title}**", unsafe_allow_html=True)
+                        st.caption(b.evidence)
+                        st.markdown(f"👉 {b.action}")
+                        if b.kind in ("capacity", "rule", "teacher"):
+                            st.page_link("pages/10_Cau_hinh_Xep_lich.py", label="Mở Cấu hình xếp lịch", icon="⚙️")
+
             # ══════════════════════════════════════════════════════════════════
             # 🌟 STUDIO ĐIỀU PHỐI TKB & TINH CHỈNH NÂNG CAO
             # ══════════════════════════════════════════════════════════════════
-            with st.expander("🛠️ Công cụ Tinh chỉnh nâng cao (Đổi Seed, Giải sâu, Khóa lớp & Smart Swap)", expanded=False):
-                col_bar1, col_bar2 = st.columns([1, 1])
-                with col_bar1:
-                    if st.button(
-                        "🎲 Thử phương án khác (Đổi Seed)",
-                        key="btn_cand_seed",
-                        help="Đổi số ngẫu nhiên (Seed) để thuật toán khám phá cách xếp mới.",
-                        use_container_width=True,
-                    ):
-                        new_seed = random.randint(100, 99999)
-                        new_id = len(st.session_state["candidates"]) + 1
-                        cand_name = f"Phương án {new_id} (Seed {new_seed})"
-                        inp_new, res_new = _run_single_solver(new_seed, single_custom_cfg)
-                        if res_new.success:
-                            metrics_new = compute_candidate_metrics(inp_new, res_new)
-                            st.session_state["candidates"][new_id] = {
-                                "id": new_id,
-                                "name": cand_name,
-                                "strategy_desc": f"Thử nghiệm ngẫu nhiên Seed {new_seed}",
-                                "seed": new_seed,
-                                "time_limit": getattr(single_custom_cfg, "cpsat_time_limit_seconds", getattr(single_custom_cfg, "cpsat_time_limit_s", 45)) if single_custom_cfg else 45,
-                                "result": res_new,
-                                "inp": inp_new,
-                                "metrics": metrics_new,
-                            }
-                            st.session_state["active_candidate_id"] = new_id
-                            st.session_state["last_result"] = res_new
-                            st.session_state["last_input"] = inp_new
-                            st.rerun()
-                        else:
-                            st.error(f"Thử nghiệm với Seed {new_seed} không thành công: {res_new.failure_reason}")
-
-                with col_bar2:
-                    if st.button(
-                        "⏱️ Giải sâu hơn (+30s Time Limit)",
-                        key="btn_cand_deep",
-                        help="Tăng thời gian chạy CP-SAT để máy tính ghép kín tiết trống hơn.",
-                        use_container_width=True,
-                    ):
-                        active_cand = st.session_state["candidates"].get(st.session_state.get("active_candidate_id", 1))
-                        cur_tl = active_cand["time_limit"] if active_cand else 45
-                        new_tl = cur_tl + 30
-                        new_id = len(st.session_state["candidates"]) + 1
-                        cand_name = f"Phương án {new_id} (Sâu {new_tl}s)"
-                        base_cfg = active_cand["inp"].config if active_cand else single_custom_cfg
-                        deep_cfg = dataclasses.replace(base_cfg, cpsat_time_limit_seconds=new_tl)
-                        cand_seed = active_cand["seed"] if active_cand else seed
-                        inp_new, res_new = _run_single_solver(cand_seed, deep_cfg)
-                        if res_new.success:
-                            metrics_new = compute_candidate_metrics(inp_new, res_new)
-                            st.session_state["candidates"][new_id] = {
-                                "id": new_id,
-                                "name": cand_name,
-                                "strategy_desc": f"Tối ưu sâu với thời gian {new_tl}s",
-                                "seed": cand_seed,
-                                "time_limit": new_tl,
-                                "result": res_new,
-                                "inp": inp_new,
-                                "metrics": metrics_new,
-                            }
-                            st.session_state["active_candidate_id"] = new_id
-                            st.session_state["last_result"] = res_new
-                            st.session_state["last_input"] = inp_new
-                            st.rerun()
-                        else:
-                            st.error(f"Giải sâu không thành công: {res_new.failure_reason}")
+            with st.expander("🛠️ Công cụ Tinh chỉnh nâng cao (Đổi Seed, Khóa lớp & Smart Swap)", expanded=False):
+                if st.button(
+                    "🎲 Thử phương án khác (Đổi Seed)",
+                    key="btn_cand_seed",
+                    help="Đổi số ngẫu nhiên (Seed) để thuật toán khám phá cách xếp mới.",
+                    use_container_width=True,
+                ):
+                    new_seed = random.randint(100, 99999)
+                    new_id = max(st.session_state["candidates"]) + 1 if st.session_state.get("candidates") else 1
+                    cand_name = f"Phương án {new_id} (Seed {new_seed})"
+                    inp_new, res_new = _run_single_solver(new_seed, single_custom_cfg)
+                    if res_new.success:
+                        metrics_new = compute_candidate_metrics(inp_new, res_new)
+                        st.session_state["candidates"][new_id] = {
+                            "id": new_id,
+                            "key": "default",
+                            "name": cand_name,
+                            "strategy_desc": f"Thử nghiệm ngẫu nhiên Seed {new_seed}",
+                            "seed": new_seed,
+                            "time_limit": getattr(single_custom_cfg, "cpsat_time_limit_seconds", getattr(single_custom_cfg, "cpsat_time_limit_s", 45)) if single_custom_cfg else 45,
+                            "result": res_new,
+                            "inp": inp_new,
+                            "metrics": metrics_new,
+                        }
+                        st.session_state["active_candidate_id"] = new_id
+                        st.session_state["last_result"] = res_new
+                        st.session_state["last_input"] = inp_new
+                        st.rerun()
+                    else:
+                        st.error(f"Thử nghiệm với Seed {new_seed} không thành công: {res_new.failure_reason}")
 
                 # GIAI ĐOẠN 2: KHÓA & TINH CHỈNH CHI TIẾT
                 with st.expander("🔒 GIAI ĐOẠN 2: Khóa & Tinh chỉnh chi tiết (Incremental Re-solve & Smart Swap)", expanded=False):
@@ -1388,13 +1531,15 @@ with tab_schedule:
                                 )
                                 if res_ref.success:
                                     metrics_ref = compute_candidate_metrics(inp_ref, res_ref)
-                                    new_id = len(st.session_state["candidates"]) + 1
+                                    new_id = max(st.session_state["candidates"]) + 1 if st.session_state.get("candidates") else 1
                                     cand_name = f"Phương án {new_id} (Đổi riêng tiết {target_cls.name})"
                                     st.session_state["candidates"][new_id] = {
                                         "id": new_id,
+                                        "key": "default",
                                         "name": cand_name,
                                         "seed": refine_seed,
                                         "time_limit": 15,
+                                        "locked_slots": computed_locked,
                                         "result": res_ref,
                                         "inp": inp_ref,
                                         "metrics": metrics_ref,
@@ -1479,13 +1624,15 @@ with tab_schedule:
                             )
                             if res_ref.success:
                                 metrics_ref = compute_candidate_metrics(inp_ref, res_ref)
-                                new_id = len(st.session_state["candidates"]) + 1
+                                new_id = max(st.session_state["candidates"]) + 1 if st.session_state.get("candidates") else 1
                                 cand_name = f"Phương án {new_id} (Tinh chỉnh: {len(sel_classes)} lớp, {len(sel_teachers)} GV khóa)"
                                 st.session_state["candidates"][new_id] = {
                                     "id": new_id,
+                                    "key": "default",
                                     "name": cand_name,
                                     "seed": refine_seed,
                                     "time_limit": getattr(refine_cfg, "cpsat_time_limit_seconds", getattr(refine_cfg, "cpsat_time_limit_s", 45)),
+                                    "locked_slots": computed_locked_slots,
                                     "result": res_ref,
                                     "inp": inp_ref,
                                     "metrics": metrics_ref,
@@ -1608,7 +1755,7 @@ with tab_schedule:
             view_curr = build_schedule_view(inp, result.assignment)
             single_gaps_curr = find_teacher_single_gaps(view_curr)
             proceed_with_hard_violations = _render_rule_violations(
-                _schedule_violations(inp, result), "proceed_with_hard_violations",
+                violations_curr, "proceed_with_hard_violations",
                 single_gaps=single_gaps_curr,
             )
 
@@ -1644,59 +1791,6 @@ with tab_schedule:
                     pd.DataFrame(check_rows).style.apply(_highlight_nonzero, axis=1),
                     hide_index=True, width="stretch",
                 )
-
-            col_acc1, col_acc2, col_acc3 = st.columns([1.2, 1.2, 1])
-            with col_acc1:
-                if st.button(
-                    f"✅ Chấp nhận & Lưu Tuần {scheduled_week}", type="primary",
-                    disabled=not proceed_with_hard_violations,
-                    key="btn_accept_save_fresh_result",
-                ):
-                    cells = {
-                        (s.class_id, s.ts.weekday, s.ts.session, s.ts.period): result.assignment.get(s.slot_id)
-                        for s in inp.slots
-                    }
-                    repo.bulk_replace_tkb_nhap(conn, cells)
-                    save_week_no = scheduled_week if scheduled_week is not None else 1
-                    repo.add_seed_history(conn, save_week_no, seed, parity)
-                    run_id = repo.save_run(conn, save_week_no, seed, parity, result.cells_changed, result.cells_total,
-                                            True, "OK")
-                    repo.save_tkb_result(conn, run_id, cells)
-                    st.session_state["just_saved_week"] = save_week_no
-                    st.session_state["saved_success_msg"] = f"🎉 Đã lưu thành công thời khóa biểu chính thức cho Tuần {save_week_no}!"
-                    st.session_state.pop("last_result", None)
-                    st.session_state.pop("last_input", None)
-                    st.session_state.pop("last_scheduled_week", None)
-                    st.session_state.pop("candidates", None)
-                    st.session_state.pop("active_candidate_id", None)
-                    st.session_state.pop("locked_classes", None)
-                    st.session_state.pop("locked_teachers", None)
-                    st.rerun()
-
-            with col_acc2:
-                try:
-                    curr_cells = {
-                        (s.class_id, s.ts.weekday, s.ts.session, s.ts.period): result.assignment.get(s.slot_id)
-                        for s in inp.slots
-                    }
-                    file_label = f"TKB_Tuan_{scheduled_week}.xlsx" if scheduled_week else f"TKB_Tuan_{'Chan' if parity == 'C' else 'Le'}.xlsx"
-                    excel_bytes = export_xlsx(conn, cells=curr_cells)
-                    st.download_button(
-                        "📤 Tải bản Excel kết quả này (.xlsx)",
-                        data=excel_bytes,
-                        file_name=file_label,
-                        mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-                        key="btn_download_fresh_result",
-                    )
-                except Exception as ex_fresh:
-                    st.caption(f"Xuất Excel: {ex_fresh}")
-
-            with col_acc3:
-                if st.button(f"❌ Hủy phương án này", key="btn_cancel_fresh_result", help=f"Quay lại thời khóa biểu chính thức cũ của Tuần {scheduled_week}"):
-                    st.session_state.pop("last_result", None)
-                    st.session_state.pop("last_input", None)
-                    st.session_state.pop("last_scheduled_week", None)
-                    st.rerun()
 
     else:
         # ── Hiển thị Thời khóa biểu chính thức đã lưu của Tuần {chosen_week} (nếu có) ──
