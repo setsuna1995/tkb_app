@@ -17,7 +17,7 @@ from core.validation import compute_quota_diff, compute_tkb_health_score
 from data import repository as repo
 from io_excel.exporter import export_xlsx
 from ui_common import get_conn, require_auth, require_school, sidebar_backup_export, sidebar_school_switcher
-from ui_theme import render_callout, render_kpi_row, render_page_header, render_status_badge
+from ui_theme import render_callout, render_kpi_row, render_page_header, render_status_badge, role_cell_css
 
 
 def _schedule_violations(inp, result) -> list:
@@ -141,6 +141,7 @@ def _render_interactive_timetable_studio(
         return req
 
     subj_map = {s.subject_id: s.name for s in subjects}
+    role_of = {s.subject_id: getattr(s, "role_code", None) for s in subjects}
     teach_map = {t.teacher_id: t.name for t in teachers}
     class_map = {c.class_id: c.name for c in classes}
     classes_sorted = sorted(classes, key=lambda c: getattr(c, "sort_order", 0) or 0)
@@ -268,11 +269,12 @@ def _render_interactive_timetable_studio(
         has_afternoon_overall = any(k[2] == "C" for k in cells.keys()) or a_count > 0
         sessions_to_show = ["S", "C"] if has_afternoon_overall else ["S"]
 
-        rows = []
+        rows, styles = [], []
         for sess in sessions_to_show:
             sess_name = "Sáng" if sess == "S" else "Chiều"
             for per in range(1, 6):
                 row = {"Buổi": sess_name, "Tiết": per}
+                style_row = {"Buổi": "", "Tiết": ""}
                 has_any = False
                 for wd in WEEKDAYS:
                     sid = cells.get((chosen_cls.class_id, wd, sess, per))
@@ -281,14 +283,19 @@ def _render_interactive_timetable_studio(
                         tid = assignments.get((sid, chosen_cls.class_id))
                         t_name = teach_map.get(tid, "")
                         row[WEEKDAY_NAMES[wd]] = f"{s_name} ({t_name})" if t_name else s_name
+                        style_row[WEEKDAY_NAMES[wd]] = role_cell_css(role_of.get(sid))
                         has_any = True
                     else:
                         row[WEEKDAY_NAMES[wd]] = "—"
+                        style_row[WEEKDAY_NAMES[wd]] = role_cell_css(None)
                 if has_any or sess == "S" or a_count > 0:
                     rows.append(row)
+                    styles.append(style_row)
 
         df_cls = pd.DataFrame(rows)
-        st.dataframe(df_cls, hide_index=True, width="stretch")
+        css = pd.DataFrame(styles, index=df_cls.index, columns=df_cls.columns)
+        st.dataframe(df_cls.style.apply(lambda _: css, axis=None), hide_index=True, width="stretch")
+        st.caption("🟦 Môn nặng • 🟧 GDTC • 🟩 HĐTN/Chào cờ/SHL • 🟪 Môn kép/Nghệ thuật • ⬜ Môn thường")
 
     # ─────────────────────────────────────────────────────────────────
     # TAB 2: TRA CỨU CHUYÊN SÂU TỪNG GIÁO VIÊN
@@ -1753,6 +1760,8 @@ with tab_schedule:
             )
 
             view_curr = build_schedule_view(inp, result.assignment)
+            if not violations_curr:
+                render_callout("Thời khóa biểu tuân thủ 100% quy chuẩn sư phạm.", level="success", title="Kiểm định HĐSP")
             single_gaps_curr = find_teacher_single_gaps(view_curr)
             proceed_with_hard_violations = _render_rule_violations(
                 violations_curr, "proceed_with_hard_violations",
@@ -1769,14 +1778,7 @@ with tab_schedule:
             non_zero_diffs = sum(1 for v in diff.values() if v != 0)
 
             if non_zero_diffs == 0:
-                with st.expander("📋 Kiểm tra định mức số tiết (Khớp 100% định mức chuẩn)", expanded=False):
-                    check_rows = []
-                    for subj in sorted(inp.subjects, key=lambda s: s.sort_order):
-                        row = {"Môn": subj.name}
-                        for cls in classes_sorted:
-                            row[cls.name] = diff.get((subj.subject_id, cls.class_id), 0)
-                        check_rows.append(row)
-                    st.dataframe(pd.DataFrame(check_rows), hide_index=True, width="stretch")
+                render_callout(f"Khớp 100% định mức số tiết chuẩn của Tuần {scheduled_week}.", level="success", title="Định mức")
             else:
                 st.subheader(f"⚠️ Kiểm tra định mức (Có {non_zero_diffs} ô lệch định mức)")
                 check_rows = []
