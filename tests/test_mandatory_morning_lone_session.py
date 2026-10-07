@@ -1,6 +1,10 @@
 import pytest
 from core.models import SchedulingConfig, Slot, Teacher, TimeSlot
-from core.rules.detectors import detect_teacher_lone_days, detect_teacher_lone_sessions
+from core.rules.detectors import (
+    detect_teacher_lone_days,
+    detect_teacher_lone_sessions,
+    detect_teacher_split_days,
+)
 from tests.rule_helpers import view_and_params
 
 
@@ -87,3 +91,52 @@ def test_lone_session_on_mandatory_morning_flag_disabled():
     day_violations = detect_teacher_lone_days(view, params)
     assert len(day_violations) == 1
     assert day_violations[0].weekday == 2
+
+
+def test_split_day_on_mandatory_morning_is_accepted():
+    """Giáo viên dạy sáng Thứ 2 (1 tiết) + chiều Thứ 2 (1 tiết) khi bật allow_lone_period_on_mandatory_mornings -> HỢP LỆ, không phạt II.8."""
+    slot_s = Slot(1, 101, TimeSlot(1, 2, "S", 1))
+    slot_c = Slot(2, 101, TimeSlot(2, 2, "C", 1))
+    teacher = Teacher(10, "GV Hồng", must_monday=True)
+    cfg = SchedulingConfig(
+        min_weekly_periods_for_lone_penalty=0,
+        strict_morning_weekdays=(2,),
+        mandatory_morning_weekdays=(2,),
+        min_weekly_periods_for_mandatory_morning=1,
+        avoid_teacher_lone_periods=True,
+        allow_lone_period_on_mandatory_mornings=True,
+    )
+    view, params = view_and_params(
+        [slot_s, slot_c], {1: 1, 2: 1},
+        assigned_teacher={(1, 101): 10, (2, 101): 10},
+        teachers=[teacher],
+        config=cfg,
+    )
+
+    violations = detect_teacher_split_days(view, params)
+    assert violations == [], f"Sáng Thứ 2 bắt buộc có mặt nên ngày chia lẻ S1+C1 được chấp nhận, nhưng lại bị phạt: {violations}"
+
+
+def test_split_day_on_mandatory_morning_flag_disabled():
+    """Nếu tắt allow_lone_period_on_mandatory_mornings thì ngày chia lẻ S1+C1 Thứ 2 vẫn bị phạt II.8."""
+    slot_s = Slot(1, 101, TimeSlot(1, 2, "S", 1))
+    slot_c = Slot(2, 101, TimeSlot(2, 2, "C", 1))
+    teacher = Teacher(10, "GV Hồng", must_monday=True)
+    cfg = SchedulingConfig(
+        min_weekly_periods_for_lone_penalty=0,
+        strict_morning_weekdays=(2,),
+        mandatory_morning_weekdays=(2,),
+        min_weekly_periods_for_mandatory_morning=1,
+        avoid_teacher_lone_periods=True,
+        allow_lone_period_on_mandatory_mornings=False,
+    )
+    view, params = view_and_params(
+        [slot_s, slot_c], {1: 1, 2: 1},
+        assigned_teacher={(1, 101): 10, (2, 101): 10},
+        teachers=[teacher],
+        config=cfg,
+    )
+
+    violations = detect_teacher_split_days(view, params)
+    assert len(violations) == 1
+    assert violations[0].weekday == 2

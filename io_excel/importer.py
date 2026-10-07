@@ -391,6 +391,7 @@ def import_scheduling_config_from_excel(conn, source) -> dict:
         "avoid_teacher_lone_periods", "balance_afternoon_teachers", "avoid_gdtc_consecutive_days",
         "avoid_heavy_afternoon_period3", "avoid_teacher_4_consecutive_morning", "use_cpsat",
         "cpsat_minimize_changes", "gvcn_monday_period2_enabled", "balance_morning_academic_load",
+        "allow_lone_period_on_mandatory_mornings",
     }
     int_fields = {
         "gdtc_avoid_period", "chao_co_weekday", "chao_co_period", "hdtn_p1_weekday",

@@ -515,6 +515,7 @@ def export_scheduling_config_sheet(wb, conn) -> tuple:
         ("heavy_subject_priority_periods", "Môn nặng ưu tiên N tiết đầu sáng", config.heavy_subject_priority_periods, f"{config.heavy_subject_priority_periods} tiết"),
         ("avoid_teacher_gaps", "Tránh tiết trống / lủng của GV trong buổi", int(config.avoid_teacher_gaps), "1: Bật | 0: Tắt"),
         ("avoid_teacher_lone_periods", "Tránh GV đi dạy chỉ 1 tiết/ngày", int(config.avoid_teacher_lone_periods), "1: Bật | 0: Tắt"),
+        ("allow_lone_period_on_mandatory_mornings", "Cho phép 1 tiết lẻ vào buổi sáng bắt buộc", int(config.allow_lone_period_on_mandatory_mornings), "1: Bật | 0: Tắt"),
         ("balance_afternoon_teachers", "Cân đối tiết buổi chiều cho GV", int(config.balance_afternoon_teachers), "1: Bật | 0: Tắt"),
         ("avoid_gdtc_consecutive_days", "GDTC không xếp 2 ngày liên tiếp", int(config.avoid_gdtc_consecutive_days), "1: Bật | 0: Tắt"),
         ("avoid_heavy_afternoon_period3", "Hạn chế môn nặng tiết 3 chiều", int(config.avoid_heavy_afternoon_period3), "1: Bật | 0: Tắt"),

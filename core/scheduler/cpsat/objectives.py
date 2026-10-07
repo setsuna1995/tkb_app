@@ -131,6 +131,20 @@ def _add_objective(built: CpSatModel) -> None:
 
     allow_lone_mand = getattr(config, "allow_lone_period_on_mandatory_mornings", True)
     teachers_by_id = {t.teacher_id: t for t in inp.teachers}
+    must_mon_ids = getattr(params, "must_monday_ids", frozenset())
+
+    req_morns_by_t = {}
+    for t in teachers:
+        t_obj = teachers_by_id.get(t)
+        is_bgh_t = t in bgh_ids
+        strict_t = () if is_bgh_t else strict_morns
+        mand_t = mand_morns if load[t] >= min_mand_load else ()
+        must_mon_t = (2,) if getattr(t_obj, "must_monday", False) else ()
+        t_pinned_off = getattr(t_obj, "pinned_full_day_off", None)
+        req_m = {w for w in (*strict_t, *mand_t, *must_mon_t) if w != t_pinned_off} if allow_lone_mand else set()
+        if must_mon_ids and t not in must_mon_ids and load[t] < min_mand_load:
+            req_m.discard(2)
+        req_morns_by_t[t] = req_m
 
     # 1. II.4 (Buổi lẻ, Ngày lẻ, Dồn buổi lẻ) & II.8 (Ngày chia lẻ)
     if avoid_lone:
@@ -138,16 +152,7 @@ def _add_objective(built: CpSatModel) -> None:
             if load[t] < min_lone_load:
                 continue
             is_soft_exempt = t in lone_exempt
-            t_obj = teachers_by_id.get(t)
-            is_bgh_t = t in bgh_ids
-            strict_t = () if is_bgh_t else strict_morns
-            mand_t = mand_morns if load[t] >= min_mand_load else ()
-            must_mon_t = (2,) if getattr(t_obj, "must_monday", False) else ()
-            t_pinned_off = getattr(t_obj, "pinned_full_day_off", None)
-            req_morns_t = {w for w in (*strict_t, *mand_t, *must_mon_t) if w != t_pinned_off} if allow_lone_mand else set()
-            must_mon_ids = getattr(params, "must_monday_ids", frozenset())
-            if must_mon_ids and t not in must_mon_ids:
-                req_morns_t.discard(2)
+            req_morns_t = req_morns_by_t.get(t, set())
 
             for (wd, sess) in sessions:
                 if sess == "S" and wd in req_morns_t:
@@ -161,6 +166,8 @@ def _add_objective(built: CpSatModel) -> None:
                     penalty_terms["II.4"].append(lone[t, wd, sess])
 
             for wd in weekdays:
+                if wd in req_morns_t:
+                    continue  # Sáng bắt buộc có mặt (đã chấp nhận 1 tiết lẻ) thì không phạt ngày chia lẻ S1+C1
                 if (t, wd, "S") in lone and (t, wd, "C") in lone:
                     l_s = lone[t, wd, "S"]
                     l_c = lone[t, wd, "C"]
@@ -335,6 +342,7 @@ def _add_objective(built: CpSatModel) -> None:
             for (wd, sess) in sessions:
                 if (t, wd, sess) in used:
                     compact_terms.append(used[t, wd, sess])
+
 
     # 6b. Chống nhảy ca gắt (Chiều muộn tiết 4/5 -> Sáng hôm sau tiết 1) - Tiêu chí phụ (soft tie-breaker)
     for t in teachers:

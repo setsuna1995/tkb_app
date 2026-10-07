@@ -25,8 +25,8 @@ def _morning_slots(weekday_period_pairs):
     return [_slot(i + 1, wd, "S", p) for i, (wd, p) in enumerate(weekday_period_pairs)]
 
 
-def _split_day_slots():
-    return [_slot(1, 2, "S", 1), _slot(2, 2, "C", 2)]
+def _split_day_slots(weekday=3):
+    return [_slot(1, weekday, "S", 1), _slot(2, weekday, "C", 2)]
 
 
 def _teacher_1(slots, config=None, **input_kwargs):
@@ -73,7 +73,7 @@ def test_lone_day():
 def test_split_day_respects_load_threshold():
     slots = _split_day_slots()
     assert detect_teacher_split_days(*_teacher_1(slots, SchedulingConfig(min_weekly_periods_for_lone_penalty=15))) == []
-    assert pick(detect_teacher_split_days(*_teacher_1(slots, NO_LONE_THRESHOLD)), "teacher_id", "weekday") == [(1, 2)]
+    assert pick(detect_teacher_split_days(*_teacher_1(slots, NO_LONE_THRESHOLD)), "teacher_id", "weekday") == [(1, 3)]
 
 
 def test_split_day_is_exactly_one_plus_one_not_asymmetric():

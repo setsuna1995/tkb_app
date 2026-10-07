@@ -190,13 +190,18 @@ def detect_teacher_split_days(view: ScheduleView, params: EffectiveParams) -> li
     totals = _teacher_totals(view, params.lone_exempt_ids)
     per_session = _teacher_session_counts(view, params.lone_exempt_ids)
     days = dict.fromkeys((tid, wd) for (tid, wd, _sess) in per_session)
-    return [
-        Violation("II.8", teacher_id=tid, weekday=wd,
-                  detail=f"{view.teacher_name(tid)}: {_day(wd)} sáng 1 tiết + chiều 1 tiết")
-        for (tid, wd) in days
-        if per_session[tid, wd, "S"] == 1 and per_session[tid, wd, "C"] == 1
-        and totals[tid] >= params.min_weekly_periods_for_lone_penalty
-    ]
+    allow_lone_mand = getattr(params, "allow_lone_period_on_mandatory_mornings", True)
+    violations = []
+    for (tid, wd) in days:
+        if per_session[tid, wd, "S"] == 1 and per_session[tid, wd, "C"] == 1:
+            if totals[tid] >= params.min_weekly_periods_for_lone_penalty:
+                if allow_lone_mand and wd in _required_mornings(tid, totals[tid], params):
+                    continue
+                violations.append(
+                    Violation("II.8", teacher_id=tid, weekday=wd,
+                              detail=f"{view.teacher_name(tid)}: {_day(wd)} sáng 1 tiết + chiều 1 tiết")
+                )
+    return violations
 
 
 def is_teacher_busy_morning(view: ScheduleView, teacher_id: int, weekday: int, allow_lone_morning: bool = True) -> bool:
