@@ -51,6 +51,19 @@ def build_result(built: CpSatModel, solver: cp_model.CpSolver, diagnostics: Opti
 
     successes_found = 1 if not relaxed_rules else 0
 
+    diag = dict(diagnostics or {})
+    status_int = diag.get("status")
+    if status_int is None and hasattr(solver, "response_proto"):
+        status_int = getattr(solver.response_proto, "status", None)
+    final_status = _STATUS_NAMES.get(status_int, "FEASIBLE" if status_int is None else str(status_int))
+
+    diag.update(
+        final_status=final_status,
+        objective=float(solver.ObjectiveValue()),
+        best_bound=float(solver.BestObjectiveBound()),
+        wall_time_s=float(solver.WallTime()),
+    )
+
     return ScheduleResult(
         success=True,
         assignment=assignment,
@@ -60,7 +73,7 @@ def build_result(built: CpSatModel, solver: cp_model.CpSolver, diagnostics: Opti
         successes_found=successes_found,
         relaxed_rules=relaxed_rules,
         solver_name="cpsat",
-        diagnostics=diagnostics or {},
+        diagnostics=diag,
         effective_params=built.params,
         rule_counts=rule_counts,
     )
