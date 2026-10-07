@@ -209,7 +209,7 @@ def _add_objective(built: CpSatModel) -> None:
         for wd in all_mand_strict:
             if t_obj and t_obj.pinned_full_day_off == wd:
                 continue
-            if wd == 2 and must_mon_ids and t not in must_mon_ids:
+            if wd == 2 and must_mon_ids and t not in must_mon_ids and load[t] < min_mand_load:
                 continue
             is_busy = _is_teacher_busy_morning(inp, t, wd)
             is_strict = (wd in strict_morns and t not in bgh_ids and not is_busy)

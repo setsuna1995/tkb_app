@@ -244,7 +244,7 @@ def _presolve_capacity_screening(built: CpSatModel) -> set[str]:
                 continue
             if t.pinned_full_day_off == wd:
                 continue
-            if wd == 2 and must_mon_ids and t.teacher_id not in must_mon_ids:
+            if wd == 2 and must_mon_ids and t.teacher_id not in must_mon_ids and load.get(t.teacher_id, 0) < min_mand_load:
                 continue
             if _is_teacher_busy_morning(built.inp, t.teacher_id, wd):
                 continue

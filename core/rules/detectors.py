@@ -243,7 +243,8 @@ def _required_mornings(teacher_id: int, total: int, params: EffectiveParams) -> 
         res = set(strict) | set(mandatory) | set(must_mon)
     must_mon_ids = getattr(params, "must_monday_ids", None)
     if must_mon_ids is not None and len(must_mon_ids) > 0 and teacher_id not in must_mon_ids:
-        res.discard(2)
+        if total < params.min_weekly_periods_for_mandatory_morning:
+            res.discard(2)
     return tuple(sorted(res))
 
 

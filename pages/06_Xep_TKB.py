@@ -132,7 +132,8 @@ def _render_interactive_timetable_studio(
         if has_must_mon_flag is True:
             req.add(2)
         elif has_must_mon_flag is False and any(getattr(tch, "must_monday", False) for tch in teachers):
-            req.discard(2)
+            if load_p < min_mand_load:
+                req.discard(2)
         pinned_off = getattr(t, "pinned_full_day_off", None)
         if pinned_off:
             req.discard(pinned_off)
@@ -880,7 +881,7 @@ with tab_schedule:
 
     st.caption("✨ Động cơ lập lịch: **Google OR-Tools CP-SAT** (Tối ưu hóa toàn cục, triệt tiêu vi phạm II.3, II.4, II.8)")
 
-    def _run_single_solver(s_seed, s_cfg_override, s_locked_slots=None, s_reference_assignment=None, strategy="default"):
+    def _run_single_solver(s_seed, s_cfg_override, s_locked_slots=None, s_reference_assignment=None, strategy="default", banned_slots_subjects=None):
         inp_obj = repo.build_scheduling_input(
             conn, parity=parity, seed=s_seed, extra_kep_ids=extra_kep_ids,
             hdtn_thematic_week=hdtn_thematic_week,
@@ -928,9 +929,16 @@ with tab_schedule:
 
         from core.scheduler import cpsat_model
         built = cpsat_model.build_model(inp_obj)
+        if banned_slots_subjects:
+            for (b_slot_id, b_subj_id) in banned_slots_subjects:
+                b_key = (b_slot_id, b_subj_id)
+                if b_key in built.x:
+                    built.model.Add(built.x[b_key] == 0)
+
+        t_limit = getattr(s_cfg_override, "cpsat_time_limit_seconds", getattr(s_cfg_override, "cpsat_time_limit_s", 45)) if s_cfg_override else 45
         res_obj = cpsat_model.solve_to_result(
             built,
-            time_limit_s=getattr(s_cfg_override, "cpsat_time_limit_s", 45) if s_cfg_override else 45,
+            time_limit_s=t_limit,
             progress_cb=_on_cpsat_progress,
             strategy=strategy,
         )
@@ -1064,7 +1072,7 @@ with tab_schedule:
                     "name": "Phương án 1 (Tiêu chuẩn)",
                     "strategy_desc": "Phương án tiêu chuẩn theo cấu hình hiện tại",
                     "seed": seed or 0,
-                    "time_limit": getattr(single_custom_cfg, "cpsat_time_limit_s", 45) if single_custom_cfg else 45,
+                    "time_limit": getattr(single_custom_cfg, "cpsat_time_limit_seconds", getattr(single_custom_cfg, "cpsat_time_limit_s", 45)) if single_custom_cfg else 45,
                     "result": result,
                     "inp": inp,
                     "metrics": metrics,
@@ -1191,7 +1199,7 @@ with tab_schedule:
                                 "name": cand_name,
                                 "strategy_desc": f"Thử nghiệm ngẫu nhiên Seed {new_seed}",
                                 "seed": new_seed,
-                                "time_limit": getattr(single_custom_cfg, "cpsat_time_limit_s", 45) if single_custom_cfg else 45,
+                                "time_limit": getattr(single_custom_cfg, "cpsat_time_limit_seconds", getattr(single_custom_cfg, "cpsat_time_limit_s", 45)) if single_custom_cfg else 45,
                                 "result": res_new,
                                 "inp": inp_new,
                                 "metrics": metrics_new,
@@ -1216,7 +1224,7 @@ with tab_schedule:
                         new_id = len(st.session_state["candidates"]) + 1
                         cand_name = f"Phương án {new_id} (Sâu {new_tl}s)"
                         base_cfg = active_cand["inp"].config if active_cand else single_custom_cfg
-                        deep_cfg = dataclasses.replace(base_cfg, cpsat_time_limit_s=new_tl)
+                        deep_cfg = dataclasses.replace(base_cfg, cpsat_time_limit_seconds=new_tl)
                         cand_seed = active_cand["seed"] if active_cand else seed
                         inp_new, res_new = _run_single_solver(cand_seed, deep_cfg)
                         if res_new.success:
@@ -1252,8 +1260,8 @@ with tab_schedule:
                     ])
 
                     with tab_single_slot:
-                        st.markdown("**Chọn 1 tiết cụ thể cần thay đổi (hệ thống giữ nguyên toàn bộ các tiết còn lại):**")
-                        c_single_cls = st.selectbox("Chọn lớp:", options=[c.name for c in inp.classes], key="single_cls_pick")
+                        st.markdown("**Chọn lớp và tiết cụ thể cần thay đổi (hệ thống giữ nguyên toàn bộ các lớp khác, chỉ điều chỉnh lớp này):**")
+                        c_single_cls = st.selectbox("Chọn lớp học cần tinh chỉnh:", options=[c.name for c in inp.classes], key="single_cls_pick")
                         target_cls = next(c for c in inp.classes if c.name == c_single_cls)
                         cls_slots = [s for s in inp.slots if s.class_id == target_cls.class_id]
 
@@ -1273,20 +1281,55 @@ with tab_schedule:
                             sess_label = "Sáng" if s.ts.session == "S" else "Chiều"
                             slot_labels[s.slot_id] = f"{WEEKDAY_NAMES.get(s.ts.weekday)} - {sess_label} Tiết {s.ts.period}: {subj_label}{gv_str}"
 
-                        target_slot_id = st.selectbox(
-                            "Chọn tiết muốn thay đổi:",
-                            options=list(slot_labels.keys()),
-                            format_func=lambda sid: slot_labels[sid],
-                            key="single_target_slot",
-                        )
+                        c_slot_sel, c_slot_quick = st.columns([2, 1])
+                        with c_slot_sel:
+                            target_slot_id = st.selectbox(
+                                "Chọn tiết muốn thay đổi:",
+                                options=list(slot_labels.keys()),
+                                format_func=lambda sid: slot_labels[sid],
+                                key="single_target_slot",
+                            )
 
+                        target_s_obj = next((s for s in cls_slots if s.slot_id == target_slot_id), None)
                         curr_subj_id = result.assignment.get(target_slot_id)
                         curr_subj_name = subj_map.get(curr_subj_id, "(Trống)")
                         curr_tid = eff_assigned.get((curr_subj_id, target_cls.class_id))
                         curr_tname = t_map.get(curr_tid, "Chưa phân công")
 
-                        st.info(f"📍 **Tiết đang chọn:** {slot_labels[target_slot_id]}")
+                        with c_slot_quick:
+                            st.caption("Chi tiết tiết được chọn:")
+                            st.markdown(f"**{curr_subj_name}** | GV: `{curr_tname}`")
 
+                        # Bảng TKB toàn diện của lớp đang khảo sát (Trực quan hóa 100%)
+                        st.markdown(f"###### 📅 Bảng Thời Khóa Biểu đầy đủ của lớp **{target_cls.name}** (Tiết đang chọn có dấu 👉):")
+                        cls_matrix_rows = []
+                        for sess in ("S", "C"):
+                            sess_name = "Sáng" if sess == "S" else "Chiều"
+                            for per in range(1, 6):
+                                row_data = {"Buổi": sess_name, "Tiết": per}
+                                has_p = False
+                                for wd in WEEKDAYS:
+                                    s_match = next((s for s in cls_slots if s.ts.weekday == wd and s.ts.session == sess and s.ts.period == per), None)
+                                    if s_match:
+                                        s_subj = result.assignment.get(s_match.slot_id)
+                                        s_name = subj_map.get(s_subj, "Trống") if s_subj else "Trống"
+                                        tid = eff_assigned.get((s_subj, target_cls.class_id))
+                                        t_name = t_map.get(tid, "")
+                                        t_str = f" ({t_name})" if t_name else ""
+                                        if s_match.slot_id == target_slot_id:
+                                            row_data[WEEKDAY_NAMES[wd]] = f"👉 [{s_name}]{t_str}"
+                                        else:
+                                            row_data[WEEKDAY_NAMES[wd]] = f"{s_name}{t_str}" if s_subj else "—"
+                                        has_p = True
+                                    else:
+                                        row_data[WEEKDAY_NAMES[wd]] = "—"
+                                if has_p or sess == "S":
+                                    cls_matrix_rows.append(row_data)
+
+                        df_cls_preview = pd.DataFrame(cls_matrix_rows)
+                        st.dataframe(df_cls_preview, hide_index=True, width="stretch")
+
+                        st.markdown("---")
                         col_opt1, col_opt2 = st.columns(2)
 
                         with col_opt1:
@@ -1319,7 +1362,7 @@ with tab_schedule:
 
                         with col_opt2:
                             st.markdown("##### 🎯 Cách 2: Solver tìm phương án thế chỗ")
-                            st.caption("Khóa cố định 100% tất cả các lớp khác và giữ tối đa TKB của lớp này, chỉ chạy solver tìm hoán vị tối thiểu.")
+                            st.caption(f"Khóa cố định 100% tất cả các lớp khác, mở lớp **{target_cls.name}** và dời tiết `{curr_subj_name}` sang vị trí tối ưu mới.")
                             if st.button("🚀 Chạy Solver tìm cách đổi tiết này", key="btn_single_slot_solver"):
                                 # Khóa tất cả các slot của các lớp khác
                                 computed_locked = {}
@@ -1328,24 +1371,20 @@ with tab_schedule:
                                     if sid is not None and s.class_id != target_cls.class_id:
                                         computed_locked[s.slot_id] = sid
 
-                                # Với lớp hiện tại: khóa tất cả các slot ngoại trừ slot được chọn và các slot cùng môn
-                                for s in inp.slots:
-                                    if s.class_id == target_cls.class_id:
-                                        sid = result.assignment.get(s.slot_id)
-                                        if sid is not None and s.slot_id != target_slot_id and sid != curr_subj_id:
-                                            computed_locked[s.slot_id] = sid
-
                                 refine_cfg = dataclasses.replace(
                                     single_custom_cfg or inp.config,
                                     cpsat_minimize_changes=True,
-                                    cpsat_time_limit_s=15,
+                                    cpsat_time_limit_seconds=15,
                                 )
                                 refine_seed = random.randint(100, 99999)
+                                # Cấm môn hiện tại nằm tại ô hiện tại để solver bắt buộc phải chuyển sang ô khác
+                                banned_pairs = [(target_slot_id, curr_subj_id)] if curr_subj_id else None
                                 inp_ref, res_ref = _run_single_solver(
                                     refine_seed,
                                     refine_cfg,
                                     s_locked_slots=computed_locked,
                                     s_reference_assignment=result.assignment,
+                                    banned_slots_subjects=banned_pairs,
                                 )
                                 if res_ref.success:
                                     metrics_ref = compute_candidate_metrics(inp_ref, res_ref)
@@ -1446,7 +1485,7 @@ with tab_schedule:
                                     "id": new_id,
                                     "name": cand_name,
                                     "seed": refine_seed,
-                                    "time_limit": getattr(refine_cfg, "cpsat_time_limit_s", 45),
+                                    "time_limit": getattr(refine_cfg, "cpsat_time_limit_seconds", getattr(refine_cfg, "cpsat_time_limit_s", 45)),
                                     "result": res_ref,
                                     "inp": inp_ref,
                                     "metrics": metrics_ref,

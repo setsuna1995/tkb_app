@@ -42,7 +42,7 @@ def _is_mandatory_morning_for_teacher(
     if pinned_day_offs and pinned_day_offs.get(tid) == wd:
         return False
     if wd == 2:
-        if must_monday_ids and tid not in must_monday_ids:
+        if must_monday_ids and tid not in must_monday_ids and total < min_mand_load:
             return False
         if tid in must_monday_ids:
             return True
@@ -253,7 +253,7 @@ def _count_teacher_missing_mandatory_mornings(slots: list[Slot], assigned: dict,
             for wd in strict_weekdays:
                 if pinned_day_offs and pinned_day_offs.get(tid) == wd:
                     continue
-                if wd == 2 and must_monday_ids and tid not in must_monday_ids:
+                if wd == 2 and must_monday_ids and tid not in must_monday_ids and total < min_weekly_periods:
                     continue
                 if teacher_morns[tid][wd] == 0:
                     if ban_busy and _is_teacher_busy_on_morning_quality(tid, wd, slots, slot_teacher, ban_busy):
@@ -266,7 +266,7 @@ def _count_teacher_missing_mandatory_mornings(slots: list[Slot], assigned: dict,
                     continue
                 if pinned_day_offs and pinned_day_offs.get(tid) == wd:
                     continue
-                if wd == 2 and must_monday_ids and tid not in must_monday_ids:
+                if wd == 2 and must_monday_ids and tid not in must_monday_ids and total < min_weekly_periods:
                     continue
                 if teacher_morns[tid][wd] == 0:
                     if ban_busy and _is_teacher_busy_on_morning_quality(tid, wd, slots, slot_teacher, ban_busy):
