@@ -23,3 +23,14 @@ def test_render_kpi_card_no_markdown_code_block_indentation():
     for line in card.strip().splitlines():
         assert not line.startswith("    "), f"Line should not have 4-space indent (breaks st.markdown): {line}"
 
+
+def test_role_cell_css_palette_and_fallback():
+    from core.models import ROLE_GDTC, ROLE_HDTN, ROLE_NANG
+    from ui_theme import role_cell_css
+
+    assert "#EFF6FF" in role_cell_css(ROLE_NANG)
+    assert "#FFF7ED" in role_cell_css(ROLE_GDTC)
+    assert "#F0FDF4" in role_cell_css(ROLE_HDTN)
+    assert role_cell_css(None) == role_cell_css(999)
+    assert "#94A3B8" in role_cell_css(None)
+

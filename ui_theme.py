@@ -12,6 +12,8 @@ from typing import Any
 
 import streamlit as st
 
+from core.models import ROLE_GDTC, ROLE_HDTN, ROLE_KEP, ROLE_NANG, ROLE_NANG_KEP, ROLE_THUONG
+
 THEME_CSS = """
 <style>
 @import url('https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@300;400;500;600;700;800&display=swap');
@@ -677,3 +679,21 @@ def render_card(title: str, content_html: str, badge: str | None = None) -> None
         f'</div>'
     )
     st.markdown(card_html, unsafe_allow_html=True)
+
+
+_NANG_CSS = "background-color:#EFF6FF;color:#1E40AF;font-weight:600"
+ROLE_CELL_CSS = {
+    ROLE_NANG: _NANG_CSS,
+    ROLE_NANG_KEP: _NANG_CSS,
+    ROLE_GDTC: "background-color:#FFF7ED;color:#9A3412",
+    ROLE_HDTN: "background-color:#F0FDF4;color:#166534",
+    ROLE_KEP: "background-color:#FAF5FF;color:#6B21A8",
+    ROLE_THUONG: "background-color:#F8FAFC;color:#334155",
+}
+EMPTY_CELL_CSS = "background-color:#FFFFFF;color:#94A3B8"
+
+
+def role_cell_css(role_code) -> str:
+    """CSS cho 1 ô TKB theo vai trò môn (spec 2.1). Ô trống / môn lạ -> nhạt."""
+    return ROLE_CELL_CSS.get(role_code, EMPTY_CELL_CSS)
+
