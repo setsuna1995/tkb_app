@@ -1307,7 +1307,7 @@ with tab_schedule:
                     help="Tiếp tục tối ưu phương án đang chọn từ nghiệm hiện tại (warm-start)" if can_help else "Bộ giải đã chứng minh phương án này tối ưu toàn cục, giải thêm không giảm điểm phạt.",
                 ):
                     active_cand = st.session_state.get("candidates", {}).get(st.session_state.get("active_candidate_id", 1))
-                    base_cfg = active_cand["inp"].config if active_cand else single_custom_cfg
+                    base_cfg = active_cand["inp"].config if active_cand else (inp.config if inp else single_custom_cfg)
                     deep_cfg = dataclasses.replace(base_cfg, cpsat_time_limit_seconds=int(c_time_val))
                     cand_seed = active_cand["seed"] if active_cand else (seed or 0)
                     cand_key = active_cand.get("key", "default") if active_cand else "default"
@@ -1327,7 +1327,7 @@ with tab_schedule:
                         old_score = compute_candidate_metrics(inp, result)["health_score"]["overall_score"]
                         metrics_new = compute_candidate_metrics(inp_new, res_new)
                         new_score = metrics_new["health_score"]["overall_score"]
-                        new_id = max(st.session_state["candidates"]) + 1
+                        new_id = (max(st.session_state["candidates"]) + 1) if st.session_state.get("candidates") else 1
                         st.session_state["candidates"][new_id] = {
                             "id": new_id,
                             "key": cand_key,
@@ -1788,9 +1788,9 @@ with tab_schedule:
                 file_tag=f"Tuan_{scheduled_week}_PA{st.session_state.get('active_candidate_id', 1)}",
             )
 
-            view_curr = build_schedule_view(inp, result.assignment)
-            if not violations_curr:
-                render_callout("Thời khóa biểu tuân thủ 100% quy chuẩn sư phạm.", level="success", title="Kiểm định HĐSP")
+            has_breach = any(v.level == BREACH for v in violations_curr)
+            if not has_breach:
+                render_callout("Thời khóa biểu tuân thủ các quy chuẩn sư phạm bắt buộc.", level="success", title="Kiểm định HĐSP")
             single_gaps_curr = find_teacher_single_gaps(view_curr)
             proceed_with_hard_violations = _render_rule_violations(
                 violations_curr, "proceed_with_hard_violations",

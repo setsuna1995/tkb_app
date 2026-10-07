@@ -46,9 +46,8 @@ def search_headroom(result: ScheduleResult) -> Optional[float]:
     obj, bound = d.get("objective"), d.get("best_bound")
     if obj is None or bound is None:
         return None
-    if obj <= 0:
-        return 0.0
-    return round(max(0.0, (obj - bound) / obj), 4)
+    denom = max(1.0, abs(float(obj)))
+    return round(max(0.0, abs(float(obj) - float(bound)) / denom), 4)
 
 
 def more_time_can_help(result: ScheduleResult) -> bool:
@@ -91,11 +90,13 @@ def analyze_bottlenecks(inp: SchedulingInput, result: ScheduleResult, violations
             RULE_KNOBS.get(rid, DEFAULT_ACTION), rule_id=rid,
         ))
 
-    for rid, n in Counter(v.rule_id for v in violations).most_common(3):
-        if rid not in relaxed:
-            found.append(Bottleneck("rule", float(n), f"{rid}: {_title(rid)}",
-                                    f"{n} vi phạm trong phương án này.",
-                                    RULE_KNOBS.get(rid, DEFAULT_ACTION), rule_id=rid))
+    non_relaxed_counts = Counter(v.rule_id for v in violations if v.rule_id not in relaxed)
+    for rid, n in non_relaxed_counts.most_common(3):
+        found.append(Bottleneck(
+            "rule", min(float(n), 100.0), f"{rid}: {_title(rid)}",
+            f"{n} vi phạm trong phương án này.",
+            RULE_KNOBS.get(rid, DEFAULT_ACTION), rule_id=rid,
+        ))
 
     found.extend(_teacher_hotspots(inp, result, violations))
     return sorted(found, key=lambda b: -b.severity)[:limit]
@@ -124,7 +125,7 @@ def _teacher_hotspots(inp: SchedulingInput, result: ScheduleResult, violations: 
         day_off = f", ghim nghỉ trọn Thứ {t.pinned_full_day_off}" if t and t.pinned_full_day_off else ""
         rule_txt = ", ".join(f"{r}×{c}" for r, c in Counter(rids).most_common())
         out.append(Bottleneck(
-            "teacher", 10.0 * len(rids), f"GV {t.name if t else tid} là điểm nghẽn",
+            "teacher", min(10.0 * len(rids), 110.0), f"GV {t.name if t else tid} là điểm nghẽn",
             f"Gánh {len(rids)}/{total} vi phạm ({share:.0%}): {rule_txt}. "
             f"Tải {load.get(tid, '?')} tiết/tuần, báo bận {busy} buổi{day_off}.",
             "Rà lại lịch báo bận / ghim nghỉ của GV này; nếu là GV đặc thù (thiết bị, thư viện) thì thêm vào danh sách miễn trừ.",

@@ -382,6 +382,7 @@ def _diagnose_and_solve(built: CpSatModel, solver: cp_model.CpSolver, time_limit
             if incompatible_rids:
                 relaxed |= incompatible_rids
                 diag["relaxed_by_diagnosis"] = sorted(relaxed)
+                diag["unsat_core"] = sorted(set(diag.get("unsat_core", [])) | incompatible_rids)
                 hard_rids = [rid for rid in active_rids if rid not in relaxed]
 
         # Pass giải chính với ràng buộc trực tiếp:
@@ -442,7 +443,7 @@ def _diagnose_and_solve(built: CpSatModel, solver: cp_model.CpSolver, time_limit
                 offending = set()
 
             if diag["passes_run"] == 1:
-                diag["unsat_core"] = sorted(offending)
+                diag["unsat_core"] = sorted(set(diag.get("unsat_core", [])) | offending)
             if not offending:
                 offending = _select_fallback_relaxations(hard_rids, strategy=strategy)
             elif len(offending) > 1:
