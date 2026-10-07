@@ -30,3 +30,46 @@ def test_build_result_records_search_telemetry():
     assert d["final_status"] in ("OPTIMAL", "FEASIBLE")
     assert d["objective"] >= d["best_bound"] - 1e-6
     assert d["wall_time_s"] >= 0.0
+
+
+def test_zero_thresholds_never_detect_plateau():
+    cb = solver_mod.EarlyStoppingCallback(
+        stagnation_s=999.0, plateau_window_s=0.5,
+        min_improvement_rate=0.0, min_improvement_abs=0.0, min_search_s=0.2,
+    )
+    now = time.time()
+    cb.start_time = now - 1.0
+    cb.history = [(now - 0.6, 1000.0), (now - 0.1, 1000.0)]
+    cb.best_obj = 1000.0
+    assert cb._check_plateau() is False
+
+
+def test_deep_mode_disables_early_stop_and_gap(monkeypatch):
+    seen = []
+    real = solver_mod.EarlyStoppingCallback
+
+    class Spy(real):
+        def __init__(self, *a, **kw):
+            seen.append(kw)
+            super().__init__(*a, **kw)
+
+    monkeypatch.setattr(solver_mod, "EarlyStoppingCallback", Spy)
+    res = solver_mod.solve_to_result(cpsat.build_model(_tiny_feasible_input()), time_limit_s=5.0, deep=True)
+    assert res is not None and res.diagnostics["deep"] is True
+    assert seen[0]["min_improvement_abs"] == 0.0
+    assert seen[0]["min_improvement_rate"] == 0.0
+
+
+def test_default_mode_unchanged(monkeypatch):
+    seen = []
+    real = solver_mod.EarlyStoppingCallback
+
+    class Spy(real):
+        def __init__(self, *a, **kw):
+            seen.append(kw)
+            super().__init__(*a, **kw)
+
+    monkeypatch.setattr(solver_mod, "EarlyStoppingCallback", Spy)
+    res = solver_mod.solve_to_result(cpsat.build_model(_tiny_feasible_input()), time_limit_s=5.0)
+    assert res.diagnostics["deep"] is False
+    assert "min_improvement_abs" not in seen[0]  # library defaults (600 / 3%) still apply

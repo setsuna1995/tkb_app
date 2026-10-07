@@ -329,7 +329,8 @@ def _create_solver(built: CpSatModel, workers: Optional[int] = None) -> cp_model
 
 def _diagnose_and_solve(built: CpSatModel, solver: cp_model.CpSolver, time_limit_s: float,
                         progress_cb: Optional[Callable[[dict], None]] = None,
-                        strategy: str = "default") -> dict:
+                        strategy: str = "default",
+                        deep: bool = False) -> dict:
     """Chẩn đoán và giải tối ưu hóa toàn cục:
     Ưu tiên tuyệt đối các tiêu chí cốt lõi của nhà trường (II.4: không buổi lẻ, II.8: không chia lẻ).
     Sử dụng ràng buộc trực tiếp ở pass chính để CP-SAT presolver suy biến miền giá trị term == 0 ngay từ đầu,
@@ -345,6 +346,8 @@ def _diagnose_and_solve(built: CpSatModel, solver: cp_model.CpSolver, time_limit
         "unsat_core": [],
         "relaxed_by_diagnosis": [],
         "passes_run": 0,
+        "deep": deep,
+        "morning_capacity": [],
     }
 
     if remaining <= 0.0 or cp_model is None:
@@ -388,10 +391,12 @@ def _diagnose_and_solve(built: CpSatModel, solver: cp_model.CpSolver, time_limit
             pass_limit = max(1.0, float(remaining))
 
         solver.parameters.max_time_in_seconds = float(pass_limit)
-        solver.parameters.relative_gap_limit = 0.03
+        solver.parameters.relative_gap_limit = 0.0 if deep else 0.03
+        # deep: chỉ dừng khi hết giờ hoặc chứng minh tối ưu -- người dùng đã chủ động trả thêm thời gian
+        stop_kw = ({"stagnation_s": float(pass_limit), "min_improvement_abs": 0.0, "min_improvement_rate": 0.0}
+                   if deep else {"stagnation_s": stagnation})
         cb = EarlyStoppingCallback(
-            stagnation_s=stagnation, progress_cb=progress_cb,
-            pass_no=diag["passes_run"], max_passes=max_passes
+            progress_cb=progress_cb, pass_no=diag["passes_run"], max_passes=max_passes, **stop_kw
         )
         cb.watcher.start()
         status = solver.Solve(model, cb)
@@ -447,13 +452,14 @@ def _diagnose_and_solve(built: CpSatModel, solver: cp_model.CpSolver, time_limit
 def solve_to_result(built: CpSatModel, time_limit_s: float = 30.0,
                     workers: Optional[int] = None,
                     progress_cb: Optional[Callable[[dict], None]] = None,
-                    strategy: str = "default") -> Optional[ScheduleResult]:
+                    strategy: str = "default",
+                    *, deep: bool = False) -> Optional[ScheduleResult]:
     """Giải mô hình và trả về ScheduleResult hoàn chỉnh, hoặc None nếu không giải được."""
     if not _HAS_ORTOOLS or cp_model is None:
         raise CpSatUnavailable("ortools chưa được cài")
 
     solver = _create_solver(built, workers=workers)
-    diag = _diagnose_and_solve(built, solver, float(time_limit_s), progress_cb=progress_cb, strategy=strategy)
+    diag = _diagnose_and_solve(built, solver, float(time_limit_s), progress_cb=progress_cb, strategy=strategy, deep=deep)
     if diag["status"] not in (cp_model.OPTIMAL, cp_model.FEASIBLE):
         return None
 
