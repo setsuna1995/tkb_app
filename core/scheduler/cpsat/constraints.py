@@ -183,23 +183,28 @@ def _add_off_day_constraints(built: CpSatModel, vars_by_teacher_session: dict) -
     for teacher_id in all_teacher_ids:
         teacher = teachers_by_id.get(teacher_id)
         forbidden = set(forbidden_base)
+        reserved_chieu = set(getattr(config, "reserved_off_weekdays_chieu", ()) or ())
 
         pinned = set()
         pinned_weekdays = set()
         if teacher and teacher.pinned_full_day_off is not None:
             wd = teacher.pinned_full_day_off
-            pinned |= {(wd, "S"), (wd, "C")}
+            pinned.add((wd, "S"))
+            if wd not in reserved_chieu:
+                pinned.add((wd, "C"))
             pinned_weekdays.add(wd)
         if teacher and teacher.pinned_afternoon_off is not None:
             wd = teacher.pinned_afternoon_off
-            if (wd, "C") not in forbidden and wd not in pinned_weekdays:
+            if wd not in reserved_chieu and (wd, "C") not in forbidden and wd not in pinned_weekdays:
                 pinned.add((wd, "C"))
                 pinned_weekdays.add(wd)
 
+        min_aft = teacher.min_afternoon_off if (teacher and teacher.min_afternoon_off is not None) else 0
         effective_count = (teacher.off_sessions_override
                            if (teacher and teacher.off_sessions_override is not None)
                            else config.teacher_off_sessions_per_week)
-        required_total = max(effective_count, len(pinned))
+        required_total = max(effective_count, len(pinned), min_aft)
+        max_allowed_off = required_total
         if required_total <= 0:
             continue
 
@@ -219,11 +224,14 @@ def _add_off_day_constraints(built: CpSatModel, vars_by_teacher_session: dict) -
 
         off_vars = []
         aft_off_vars = []
+        morning_off_vars = []
         for (wd, sess) in eligible_sessions:
             off_var = m.NewBoolVar(f"off_t{teacher_id}_wd{wd}_{sess}")
             off_vars.append(off_var)
             if sess == "C":
                 aft_off_vars.append(off_var)
+            elif sess == "S":
+                morning_off_vars.append(off_var)
             if (wd, sess) in pinned:
                 m.Add(off_var == 1)
             teach_vars = vars_by_teacher_session.get((teacher_id, wd, sess), [])
@@ -252,11 +260,25 @@ def _add_off_day_constraints(built: CpSatModel, vars_by_teacher_session: dict) -
 
         if is_feasible_hard:
             m.Add(sum(off_vars) >= required_total)
+            # Khống chế trần số buổi nghỉ sáng cho GV tải bình thường/cao (>= 12 tiết):
+            # Không cho phép bộ giải tự ý dồn tiết để nghỉ thêm nhiều buổi sáng hơn quy định
+            if total_p >= 12 and morning_off_vars:
+                pinned_morns = len([p for p in pinned if p[1] == "S"])
+                max_morn_off = max(effective_count, pinned_morns)
+                m.Add(sum(morning_off_vars) <= max_morn_off)
         else:
             # Chế độ ưu tiên mềm ("soft") hoặc fallback khi GV quá tải tiết dạy:
             shortfall = m.NewIntVar(0, required_total, f"off_short_t{teacher_id}")
             m.Add(shortfall >= required_total - sum(off_vars))
             off_shortfalls.append(shortfall)
+
+        # Rải đều ngày dạy cuối tuần: GV tải >= 12 tiết không được nghỉ cả 2 sáng cuối tuần (T5 và T6)
+        # trừ khi có lịch bận hoặc ghim nghỉ trước
+        if total_p >= 12:
+            u_t5_s = [u for (wd, sess), u in zip(eligible_sessions, off_vars) if wd == 5 and sess == "S"]
+            u_t6_s = [u for (wd, sess), u in zip(eligible_sessions, off_vars) if wd == 6 and sess == "S"]
+            if u_t5_s and u_t6_s and (5, "S") not in pinned and (6, "S") not in pinned:
+                m.Add(u_t5_s[0] + u_t6_s[0] <= 1)
 
         # Ràng buộc số buổi chiều tối thiểu muốn nghỉ (min_afternoon_off, ví dụ GV Hồng nghỉ 2 buổi chiều)
         if teacher and teacher.min_afternoon_off is not None and teacher.min_afternoon_off > 0:
