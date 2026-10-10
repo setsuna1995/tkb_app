@@ -149,14 +149,17 @@ def _add_objective(built: CpSatModel) -> None:
     # 1. II.4 (Buổi lẻ, Ngày lẻ, Dồn buổi lẻ) & II.8 (Ngày chia lẻ)
     if avoid_lone:
         for t in teachers:
-            if load[t] < min_lone_load:
+            t_obj = teachers_by_id.get(t)
+            has_override = bool(t_obj and t_obj.off_sessions_override is not None and t_obj.off_sessions_override > 0)
+            if load[t] < min_lone_load and not has_override:
                 continue
             is_soft_exempt = t in lone_exempt
             req_morns_t = req_morns_by_t.get(t, set())
 
             for (wd, sess) in sessions:
-                if sess == "S" and wd in req_morns_t:
+                if sess == "S" and wd in req_morns_t and not has_override:
                     # User: Với buổi bắt buộc phải có mặt thì có thể chấp nhận 1 tiết lẻ để có mặt ở trường
+                    # Riêng GV liên trường có off_sessions_override thì không được vãi 1 tiết lẻ
                     continue
                 if is_soft_exempt:
                     soft_exempt_lone_terms.append(lone[t, wd, sess])
@@ -166,7 +169,7 @@ def _add_objective(built: CpSatModel) -> None:
                     penalty_terms["II.4"].append(lone[t, wd, sess])
 
             for wd in weekdays:
-                if wd in req_morns_t:
+                if wd in req_morns_t and not has_override:
                     continue  # Sáng bắt buộc có mặt (đã chấp nhận 1 tiết lẻ) thì không phạt ngày chia lẻ S1+C1
                 if (t, wd, "S") in lone and (t, wd, "C") in lone:
                     l_s = lone[t, wd, "S"]
@@ -208,6 +211,21 @@ def _add_objective(built: CpSatModel) -> None:
                 m.Add(extra_l >= 0)
                 lone_spread_terms.append(extra_l)
 
+    # 1b. Gom gọn số buổi dạy cho giáo viên liên trường hoặc giáo viên có cấu hình compact
+    for t in teachers:
+        t_obj = teachers_by_id.get(t)
+        has_override = bool(t_obj and t_obj.off_sessions_override is not None and t_obj.off_sessions_override > 0)
+        is_compact = (t in compact_ids or has_override)
+        if is_compact and load[t] > 0:
+            import math
+            min_sessions = math.ceil(load[t] / params.max_periods_per_session)
+            t_used = [used[t, wd, sess] for (wd, sess) in sessions if (t, wd, sess) in used]
+            if t_used and len(t_used) > min_sessions:
+                extra_sess = m.NewIntVar(0, len(t_used), f"extra_sess_t{t}")
+                m.Add(extra_sess >= sum(t_used) - min_sessions)
+                m.Add(extra_sess >= 0)
+                compact_terms.append(extra_sess)
+
     # 2. II.3 Thiếu sáng bắt buộc
     all_mand_strict = sorted(set(mand_morns) | set(strict_morns))
     must_mon_ids = getattr(params, "must_monday_ids", frozenset())
@@ -219,8 +237,11 @@ def _add_objective(built: CpSatModel) -> None:
             if wd == 2 and must_mon_ids and t not in must_mon_ids and load[t] < min_mand_load:
                 continue
             is_busy = _is_teacher_busy_morning(inp, t, wd)
-            is_strict = (wd in strict_morns and t not in bgh_ids and not is_busy)
-            is_mand = (wd in mand_morns and wd not in strict_morns and load[t] >= min_mand_load and not is_busy)
+            has_multi_off = bool(t_obj and t_obj.off_sessions_override is not None and t_obj.off_sessions_override >= 2)
+            is_exempt_strict_morn = has_multi_off and not getattr(t_obj, "must_monday", False)
+
+            is_strict = (wd in strict_morns and t not in bgh_ids and not is_busy and not is_exempt_strict_morn)
+            is_mand = (wd in mand_morns and wd not in strict_morns and load[t] >= min_mand_load and not is_busy and not is_exempt_strict_morn)
             if not (is_strict or is_mand):
                 continue
             if (t, wd, "S") in used:
