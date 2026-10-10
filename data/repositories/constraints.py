@@ -250,3 +250,31 @@ def get_subject_class_allowed_cells(conn: sqlite3.Connection) -> dict:
             key = (rule["subject_id"], class_id)
             result[key] = result.get(key, frozenset()) | rule["cells"]
     return result
+
+
+def set_inter_school_teacher_config(
+    conn: sqlite3.Connection,
+    teacher_id: int,
+    off_sessions_override: Optional[int],
+    mode: str = "auto",
+    fixed_sessions: Optional[list[tuple[int, str]]] = None,
+    max_periods: int = 5,
+) -> None:
+    """Cập nhật cấu hình giáo viên liên trường:
+    - mode == 'auto': cập nhật teachers.off_sessions_override, xóa các lịch bận ghim cũ của GV.
+    - mode == 'fixed': cập nhật teachers.off_sessions_override, thêm các buổi ghim fixed_sessions vào teacher_unavailability.
+    """
+    conn.execute(
+        "UPDATE teachers SET off_sessions_override = ? WHERE teacher_id = ?",
+        (off_sessions_override, teacher_id),
+    )
+    clear_unavailability(conn, teacher_id)
+    if mode == "fixed" and fixed_sessions:
+        for wd, sess in fixed_sessions:
+            for p in range(1, max_periods + 1):
+                conn.execute(
+                    "INSERT INTO teacher_unavailability (teacher_id, weekday, session, period) VALUES (?, ?, ?, ?)",
+                    (teacher_id, str(wd), sess, str(p)),
+                )
+    conn.commit()
+

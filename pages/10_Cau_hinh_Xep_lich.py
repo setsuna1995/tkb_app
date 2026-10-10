@@ -1,3 +1,5 @@
+import os
+
 import streamlit as st
 
 from core import frame as frame_mod
@@ -5,6 +7,7 @@ from core.models import (
     ROLE_GDTC, ROLE_HDTN, ROLE_KEP, ROLE_NANG, ROLE_NANG_KEP, ROLE_THUONG,
     SchedulingConfig, WEEKDAY_NAMES, WEEKDAYS,
 )
+from core.scheduler.cpsat_model import detect_optimal_workers
 from data import repository as repo
 from io_excel.exporter import export_config_xlsx
 from io_excel.importer import import_scheduling_config_from_excel
@@ -38,6 +41,35 @@ teacher_ids = [t.teacher_id for t in all_teachers]
 all_classes = repo.list_classes(conn)
 class_names = {c.class_id: c.name for c in all_classes}
 
+# ── THANH THAO TÁC (Lưu xử lý ở cuối trang, sau khi đọc hết widget) ──
+col_act1, col_act2, col_act3 = st.columns([2, 1.5, 1.2])
+with col_act1:
+    btn_save = st.button("💾 Lưu toàn bộ cấu hình xếp lịch", type="primary", key=f"{k_pfx}btn_save_all_cfg", width="stretch")
+with col_act2:
+    try:
+        cfg_file_bytes = export_config_xlsx(conn)
+        st.download_button(
+            "📥 Xuất file cấu hình (.xlsx)",
+            data=cfg_file_bytes,
+            file_name=f"Cau_Hinh_TKB_{school_slug}.xlsx",
+            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+            key=f"{k_pfx}btn_export_config_xlsx",
+            width="stretch",
+            help="Xuất toàn bộ 18 tiêu chí và luật riêng môn/lớp ra file Excel độc lập",
+        )
+    except Exception as e:
+        st.error(f"Lỗi tạo file cấu hình: {e}")
+with col_act3:
+    btn_reset_defaults = st.button("🔄 Khôi phục mặc định", key=f"{k_pfx}btn_reset_defaults", width="stretch", help="Đưa mọi thiết lập về giá trị mặc định chuẩn")
+
+if btn_reset_defaults:
+    default_cfg = SchedulingConfig()
+    repo.set_scheduling_config(conn, default_cfg)
+    st.toast("✅ Đã khôi phục toàn bộ cấu hình về mặc định ban đầu!")
+    st.rerun()
+
+st.caption(f"⚙️ Cấu hình đang áp dụng cho **{school_name}** — chỉnh ở các tab bên dưới rồi bấm **💾 Lưu** ở trên.")
+
 tab1, tab2, tab3, tab4, tab5 = st.tabs([
     "🏛️ Khung thời gian & Tiết ghim",
     "👨‍🏫 Hiện diện & Nghỉ GV",
@@ -70,7 +102,7 @@ with tab1:
         key=f"{k_pfx}hdtn_mode",
     )
 
-    with st.container(border=True):
+    with st.container():
         if hdtn_mode == "separate":
             st.markdown("##### 📅 Chi tiết cấu hình 3 tiết HĐTN phân bổ")
             st.caption("Thiết lập thời gian cố định hoặc để thuật toán tự động sắp xếp tối ưu cho từng tiết.")
@@ -396,6 +428,75 @@ with tab2:
         key=f"{k_pfx}compact_sched_selection",
     )
 
+    st.markdown("---")
+    st.markdown("#### 🎯 Cấu hình Giáo viên dạy liên trường (Cô Hoà, Cô Trang...)")
+    st.caption("Dành cho giáo viên dạy liên trường hoặc có yêu cầu số buổi nghỉ riêng. "
+               "Hệ thống sẽ tự động gom tiết dạy (chống dính buổi lẻ 1 tiết) và tối ưu buổi nghỉ.")
+
+    inter_teachers = [t for t in all_teachers if (t.off_sessions_override or 0) > 0]
+    if inter_teachers:
+        st.info("📋 **Giáo viên đang có cấu hình nghỉ riêng:** " + ", ".join(
+            [f"**{t.name}** ({t.off_sessions_override} buổi nghỉ)" for t in inter_teachers]
+        ))
+
+    c_it1, c_it2 = st.columns([1.5, 1])
+    selected_inter_tid = c_it1.selectbox(
+        "Chọn Giáo viên liên trường:",
+        options=teacher_ids,
+        format_func=lambda t: f"{teacher_names.get(t, str(t))} (ID: {t})",
+        key=f"{k_pfx}sel_inter_teacher",
+    )
+    t_obj = next((t for t in all_teachers if t.teacher_id == selected_inter_tid), None)
+    curr_off = getattr(t_obj, "off_sessions_override", None) or 2
+
+    inter_off_count = c_it2.number_input(
+        "Số buổi nghỉ dành cho trường khác / việc riêng:",
+        min_value=1, max_value=5, value=curr_off,
+        help="Ví dụ: Cô Hoà dạy 7 tiết cần 3 buổi nghỉ; Cô Trang dạy 16 tiết cần 2 buổi nghỉ.",
+        key=f"{k_pfx}num_inter_off_count",
+    )
+
+    inter_mode = st.radio(
+        "Chế độ phân bổ buổi nghỉ:",
+        options=["auto", "fixed"],
+        format_func=lambda m: "🤖 Tự do (Bộ giải tự động gom tiết và chọn các buổi nghỉ tối ưu nhất)"
+                              if m == "auto"
+                              else "📌 Cố định (Ấn định cụ thể các buổi nghỉ trong tuần)",
+        horizontal=True,
+        key=f"{k_pfx}rad_inter_mode",
+    )
+
+    fixed_chosen_sessions = []
+    if inter_mode == "fixed":
+        st.markdown("**Chọn cụ thể các buổi nghỉ trong tuần:**")
+        c_cols = st.columns(5)
+        for i, wd in enumerate(range(2, 7)):
+            with c_cols[i]:
+                st.write(f"**{WEEKDAY_NAMES[wd]}**")
+                chk_s = st.checkbox("Sáng", key=f"{k_pfx}chk_fix_{selected_inter_tid}_{wd}_S")
+                if chk_s:
+                    fixed_chosen_sessions.append((wd, "S"))
+                if wd in (2, 3, 4):
+                    chk_c = st.checkbox("Chiều", key=f"{k_pfx}chk_fix_{selected_inter_tid}_{wd}_C")
+                    if chk_c:
+                        fixed_chosen_sessions.append((wd, "C"))
+
+    col_btn_it, _ = st.columns([1.2, 2])
+    if col_btn_it.button("💾 Cập nhật giáo viên liên trường này", key=f"{k_pfx}btn_save_inter_teacher"):
+        try:
+            repo.set_inter_school_teacher_config(
+                conn,
+                teacher_id=selected_inter_tid,
+                off_sessions_override=inter_off_count,
+                mode=inter_mode,
+                fixed_sessions=fixed_chosen_sessions if inter_mode == "fixed" else None,
+                max_periods=max_p,
+            )
+            st.success(f"✅ Đã lưu cấu hình cho giáo viên **{teacher_names.get(selected_inter_tid)}** ({inter_off_count} buổi nghỉ, chế độ {inter_mode}).")
+            st.rerun()
+        except Exception as e:
+            st.error(f"❌ Lỗi lưu cấu hình: {e}")
+
 # ── TAB 3: ĐỊNH MỨC & PHÂN BỔ MÔN HỌC ──
 with tab3:
     st.subheader("⚖️ Giới hạn tiết học & Phân bổ môn học")
@@ -487,11 +588,68 @@ with tab3:
         key=f"{k_pfx}single_pair_selection",
     )
 
+    st.markdown("---")
+    st.markdown("**📋 Ràng buộc riêng Môn / Lớp theo buổi:**")
+    st.caption(
+        "Ví dụ: 1 môn ở một số lớp CHỈ được xếp vào đúng các (thứ, buổi) đã chọn -- "
+        "ràng buộc CỨNG, có thể khiến thuật toán không tìm được lời giải nếu quá chặt."
+    )
+    rule_subjects = [s for s in all_subjects if s.role_code != ROLE_HDTN]
+    if not rule_subjects or not all_classes:
+        st.info("Cần khai báo ít nhất 1 môn (khác HDTN) và 1 lớp trước khi tạo luật.")
+    else:
+        with st.form(f"{k_pfx}add_subject_class_rule", clear_on_submit=True):
+            rule_subject_id = st.selectbox(
+                "Môn", options=[s.subject_id for s in rule_subjects],
+                format_func=lambda sid: next(s.name for s in rule_subjects if s.subject_id == sid),
+                key=f"{k_pfx}rule_subject_id",
+            )
+            rule_class_ids = st.multiselect(
+                "Lớp áp dụng", options=[c.class_id for c in all_classes],
+                format_func=lambda cid: next(c.name for c in all_classes if c.class_id == cid),
+                key=f"{k_pfx}rule_class_ids",
+            )
+            rule_cells = st.multiselect(
+                "Chỉ được xếp vào các (Thứ, Buổi) này",
+                options=[(wd, s) for wd in WEEKDAYS for s in ("S", "C")],
+                format_func=lambda cell: f"{WEEKDAY_NAMES[cell[0]]} {'Sáng' if cell[1] == 'S' else 'Chiều'}",
+                key=f"{k_pfx}rule_cells",
+            )
+            if st.form_submit_button("➕ Thêm luật"):
+                is_morning_only = rule_subject_id in getattr(config, "morning_only_subject_ids", frozenset())
+                rule_subj_obj = next((s for s in rule_subjects if s.subject_id == rule_subject_id), None)
+                if getattr(config, "heavy_subjects_morning_only", False) and rule_subj_obj and rule_subj_obj.role_code in (1, 3):
+                    is_morning_only = True
+                if is_morning_only and rule_cells and all(s == "C" for _wd, s in rule_cells):
+                    st.error("Môn này đang bị cấm xếp buổi chiều theo cấu hình chung, không thể tạo luật chỉ cho phép xếp buổi chiều!")
+                elif rule_class_ids and rule_cells:
+                    repo.upsert_subject_class_rule(conn, rule_subject_id, rule_class_ids, rule_cells)
+                    st.success("Đã thêm luật.")
+                    st.rerun()
+                else:
+                    st.error("Cần chọn ít nhất 1 lớp và 1 (thứ, buổi).")
+
+    existing_rules = repo.list_subject_class_rules(conn)
+    if existing_rules:
+        st.caption("Luật hiện có:")
+        for rule in existing_rules:
+            subj_name = subject_names.get(rule["subject_id"], str(rule["subject_id"]))
+            cls_names = ", ".join(class_names.get(cid, str(cid)) for cid in rule["class_ids"])
+            cell_names = ", ".join(
+                f"{WEEKDAY_NAMES[wd]} {'Sáng' if s == 'S' else 'Chiều'}" for wd, s in sorted(rule["cells"])
+            )
+            col1, col2 = st.columns([5, 1])
+            col1.markdown(f"- **{subj_name}** ({cls_names}) chỉ xếp vào: {cell_names}")
+            if col2.button("🗑️", key=f"{k_pfx}del_rule_{rule['rule_id']}"):
+                repo.delete_subject_class_rule(conn, rule["rule_id"])
+                st.rerun()
+
 # ── TAB 4: TIÊU CHUẨN SƯ PHẠM ──
 with tab4:
     st.subheader("🎓 Tiêu chuẩn Sư phạm & Tiêu chí Hội đồng Sư phạm")
     st.caption("Các tiêu chí chuẩn hóa chất lượng lịch giảng dạy của giáo viên và thời khóa biểu của học sinh.")
 
+    st.markdown("##### 🅰️ Ràng buộc cốt lõi — lịch dạy giáo viên")
     col_sp1, col_sp2 = st.columns(2)
     avoid_teacher_gaps = col_sp1.checkbox(
         "Tránh tiết trống / lủng của GV trong buổi",
@@ -506,6 +664,21 @@ with tab4:
         key=f"{k_pfx}avoid_teacher_lone_periods",
     )
 
+    col_sp7, col_sp8 = st.columns(2)
+    avoid_teacher_4_consecutive_morning = col_sp7.checkbox(
+        "Hạn chế GV dạy 4 tiết sáng liên tục (nếu tải <= 20)",
+        value=getattr(config, "avoid_teacher_4_consecutive_morning", True),
+        help="Tiêu chí II.14: Giảm tải áp lực cho giáo viên giảng dạy.",
+        key=f"{k_pfx}avoid_teacher_4_consecutive_morning",
+    )
+    min_weekly_periods_for_lone_penalty = col_sp8.number_input(
+        "Ngưỡng tiết/tuần phạt lẻ tiết GV (miễn trừ GV ít tiết):",
+        0, 30, getattr(config, "min_weekly_periods_for_lone_penalty", 8),
+        help="Tiêu chí II.4: GV có tổng tải dưới ngưỡng này (mặc định 8) được miễn trừ phạt tiết đơn lẻ.",
+        key=f"{k_pfx}min_weekly_periods_for_lone_penalty",
+    )
+
+    st.markdown("##### 🅱️ Tiện nghi học sinh & giáo viên")
     col_sp3, col_sp4 = st.columns(2)
     balance_afternoon_teachers = col_sp3.checkbox(
         "Cân đối tiết buổi chiều cho GV",
@@ -528,20 +701,6 @@ with tab4:
         value=getattr(config, "avoid_heavy_afternoon_period3", True),
         help="Tiêu chí II.15: Tiết cuối chiều học sinh mệt mỏi, hạn chế các môn tư duy trừu tượng cao.",
         key=f"{k_pfx}avoid_heavy_afternoon_period3",
-    )
-
-    col_sp7, col_sp8 = st.columns(2)
-    avoid_teacher_4_consecutive_morning = col_sp7.checkbox(
-        "Hạn chế GV dạy 4 tiết sáng liên tục (nếu tải <= 20)",
-        value=getattr(config, "avoid_teacher_4_consecutive_morning", True),
-        help="Tiêu chí II.14: Giảm tải áp lực cho giáo viên giảng dạy.",
-        key=f"{k_pfx}avoid_teacher_4_consecutive_morning",
-    )
-    min_weekly_periods_for_lone_penalty = col_sp8.number_input(
-        "Ngưỡng tiết/tuần phạt lẻ tiết GV (miễn trừ GV ít tiết):",
-        0, 30, getattr(config, "min_weekly_periods_for_lone_penalty", 8),
-        help="Tiêu chí II.4: GV có tổng tải dưới ngưỡng này (mặc định 8) được miễn trừ phạt tiết đơn lẻ.",
-        key=f"{k_pfx}min_weekly_periods_for_lone_penalty",
     )
 
 # ── TAB 5: BỘ GIẢI CP-SAT ──
@@ -570,25 +729,47 @@ with tab5:
         key=f"{k_pfx}cpsat_minimize_changes",
     )
 
-    col_cp3, col_cp4 = st.columns(2)
-    worker_options = {
-        0: "🤖 Tự động nhận diện (Cloud: 2 workers, PC: 4 workers)",
-        1: "1 worker (Đơn luồng, tiết kiệm CPU tối đa)",
-        2: "2 workers (Khuyên dùng cho Streamlit Cloud)",
-        4: "4 workers (Tốc độ cao trên PC/Laptop 4+ cores)",
-        8: "8 workers (Cực nhanh trên máy trạm đa luồng)",
-    }
-    current_workers = int(getattr(config, "cpsat_workers", 0))
-    worker_keys = list(worker_options.keys())
-    worker_idx = worker_keys.index(current_workers) if current_workers in worker_keys else 0
-    chosen_workers = col_cp3.selectbox(
-        "Số luồng CPU (Workers) cho CP-SAT:",
-        options=worker_keys,
-        index=worker_idx,
-        format_func=lambda k: worker_options[k],
-        help="Tự động nhận diện: Khi chạy trên Streamlit Cloud giới hạn tài nguyên sẽ dùng 2 luồng nhẹ nhàng; trên PC cục bộ dùng 4 luồng mượt mà.",
-        key=f"{k_pfx}chosen_workers",
+    auto_workers = detect_optimal_workers()
+    cpu_cores = getattr(os, "process_cpu_count", os.cpu_count)() or auto_workers
+    st.info(
+        f"💻 **Tối ưu phần cứng tự động:** Máy có **{cpu_cores} luồng CPU** → bộ giải chạy song song "
+        f"**{auto_workers} luồng** (luôn chừa ≥ 1 luồng cho Windows & giao diện, tối đa 12)."
     )
+    with st.expander("🔧 Tùy chỉnh nâng cao (dành cho kỹ thuật viên)", expanded=False):
+        worker_options = {0: f"🤖 Tự động tối ưu ({auto_workers} luồng) — khuyên dùng"}
+        worker_options.update({n: f"{n} luồng" for n in (1, 2, 4, 8, 12, 16) if n <= max(cpu_cores, 2)})
+        current_workers = int(getattr(config, "cpsat_workers", 0))
+        if current_workers not in worker_options:
+            worker_options[current_workers] = f"{current_workers} luồng"
+        chosen_workers = st.selectbox(
+            "Số luồng CPU cho CP-SAT:",
+            options=list(worker_options),
+            index=list(worker_options).index(current_workers),
+            format_func=lambda k: worker_options[k],
+            help="Ép cứng số luồng chỉ khi máy bị giật/lag lúc xếp lịch (giảm xuống) hoặc khi chạy trên máy chủ chuyên dụng.",
+            key=f"{k_pfx}chosen_workers",
+        )
+
+    st.markdown("---")
+    with st.expander("📤 Nạp cấu hình từ file Excel (.xlsx / .xlsm)", expanded=False):
+        st.caption("Khôi phục nhanh toàn bộ 18 tiêu chí chuyên môn và các luật riêng môn/lớp từ file cấu hình hoặc file sao lưu đã xuất trước đó.")
+        c_up1, c_up2 = st.columns([3, 1])
+        with c_up1:
+            up_cfg_file = st.file_uploader("Chọn file cấu hình Excel", type=["xlsx", "xlsm"], key=f"{k_pfx}upload_cfg_file")
+        with c_up2:
+            st.markdown("<div style='height: 28px;'></div>", unsafe_allow_html=True)
+            btn_apply_cfg = st.button("🚀 Áp dụng cấu hình", type="primary", disabled=up_cfg_file is None, key=f"{k_pfx}btn_apply_uploaded_cfg", width="stretch")
+
+        if up_cfg_file is not None and btn_apply_cfg:
+            try:
+                res = import_scheduling_config_from_excel(conn, up_cfg_file.getvalue())
+                if res.get("imported"):
+                    st.success(f"✅ Đã nạp thành công {res.get('config_keys_updated', 0)} thiết lập và {res.get('rules_count', 0)} luật riêng môn/lớp từ file Excel!")
+                    st.rerun()
+                else:
+                    st.error(res.get("message", "Không tìm thấy dữ liệu cấu hình hợp lệ."))
+            except Exception as err:
+                st.error(f"Lỗi khi đọc file cấu hình: {err}")
 
 st.write("---")
 
@@ -601,52 +782,6 @@ conflict_afternoon_morning = effective_morning_only & set(afternoon_preferred_se
 if conflict_afternoon_morning:
     c_names = [subject_names.get(sid, str(sid)) for sid in conflict_afternoon_morning]
     st.warning(f"⚠️ **Xung đột cấu hình:** Môn **{', '.join(c_names)}** vừa được đặt \"Bắt buộc sáng (cấm chiều)\" vừa được chọn \"Ưu tiên buổi chiều\". Hãy bỏ chọn ở một trong hai mục.")
-
-col_act1, col_act2, col_act3 = st.columns([2, 1.5, 1.2])
-with col_act1:
-    btn_save = st.button("💾 Lưu toàn bộ cấu hình xếp lịch", type="primary", key=f"{k_pfx}btn_save_all_cfg", width="stretch")
-with col_act2:
-    try:
-        cfg_file_bytes = export_config_xlsx(conn)
-        st.download_button(
-            "📥 Xuất file cấu hình (.xlsx)",
-            data=cfg_file_bytes,
-            file_name=f"Cau_Hinh_TKB_{school_slug}.xlsx",
-            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-            key=f"{k_pfx}btn_export_config_xlsx",
-            width="stretch",
-            help="Xuất toàn bộ 18 tiêu chí và luật riêng môn/lớp ra file Excel độc lập",
-        )
-    except Exception as e:
-        st.error(f"Lỗi tạo file cấu hình: {e}")
-with col_act3:
-    btn_reset_defaults = st.button("🔄 Khôi phục mặc định", key=f"{k_pfx}btn_reset_defaults", width="stretch", help="Đưa mọi thiết lập về giá trị mặc định chuẩn")
-
-if btn_reset_defaults:
-    default_cfg = SchedulingConfig()
-    repo.set_scheduling_config(conn, default_cfg)
-    st.success("✅ Đã khôi phục toàn bộ cấu hình về mặc định ban đầu!")
-    st.rerun()
-
-with st.expander("📤 Nạp cấu hình từ file Excel (.xlsx / .xlsm)", expanded=False):
-    st.caption("Khôi phục nhanh toàn bộ 18 tiêu chí chuyên môn và các luật riêng môn/lớp từ file cấu hình hoặc file sao lưu đã xuất trước đó.")
-    c_up1, c_up2 = st.columns([3, 1])
-    with c_up1:
-        up_cfg_file = st.file_uploader("Chọn file cấu hình Excel", type=["xlsx", "xlsm"], key=f"{k_pfx}upload_cfg_file")
-    with c_up2:
-        st.markdown("<div style='height: 28px;'></div>", unsafe_allow_html=True)
-        btn_apply_cfg = st.button("🚀 Áp dụng cấu hình", type="primary", disabled=up_cfg_file is None, key=f"{k_pfx}btn_apply_uploaded_cfg", width="stretch")
-
-    if up_cfg_file is not None and btn_apply_cfg:
-        try:
-            res = import_scheduling_config_from_excel(conn, up_cfg_file.getvalue())
-            if res.get("imported"):
-                st.success(f"✅ Đã nạp thành công {res.get('config_keys_updated', 0)} thiết lập và {res.get('rules_count', 0)} luật riêng môn/lớp từ file Excel!")
-                st.rerun()
-            else:
-                st.error(res.get("message", "Không tìm thấy dữ liệu cấu hình hợp lệ."))
-        except Exception as err:
-            st.error(f"Lỗi khi đọc file cấu hình: {err}")
 
 if btn_save:
     cfg_kwargs = dict(
@@ -710,64 +845,6 @@ if btn_save:
     repo.set_scheduling_config(conn, new_config)
     st.success("✅ Đã lưu toàn bộ cấu hình xếp lịch thành công!")
     st.rerun()
-
-# ── KHỐI PHỤ: RÀNG BUỘC RIÊNG MÔN/LỚP ──
-with st.expander("📋 Ràng buộc môn / lớp theo buổi cụ thể (tuỳ chọn nâng cao)", expanded=False):
-    st.caption(
-        "Ví dụ: 1 môn ở một số lớp CHỈ được xếp vào đúng các (thứ, buổi) đã chọn -- "
-        "ràng buộc CỨNG, có thể khiến thuật toán không tìm được lời giải nếu quá chặt."
-    )
-    all_classes = repo.list_classes(conn)
-    rule_subjects = [s for s in all_subjects if s.role_code != ROLE_HDTN]
-    if not rule_subjects or not all_classes:
-        st.info("Cần khai báo ít nhất 1 môn (khác HDTN) và 1 lớp trước khi tạo luật.")
-    else:
-        with st.form(f"{k_pfx}add_subject_class_rule", clear_on_submit=True):
-            rule_subject_id = st.selectbox(
-                "Môn", options=[s.subject_id for s in rule_subjects],
-                format_func=lambda sid: next(s.name for s in rule_subjects if s.subject_id == sid),
-                key=f"{k_pfx}rule_subject_id",
-            )
-            rule_class_ids = st.multiselect(
-                "Lớp áp dụng", options=[c.class_id for c in all_classes],
-                format_func=lambda cid: next(c.name for c in all_classes if c.class_id == cid),
-                key=f"{k_pfx}rule_class_ids",
-            )
-            rule_cells = st.multiselect(
-                "Chỉ được xếp vào các (Thứ, Buổi) này",
-                options=[(wd, s) for wd in WEEKDAYS for s in ("S", "C")],
-                format_func=lambda cell: f"{WEEKDAY_NAMES[cell[0]]} {'Sáng' if cell[1] == 'S' else 'Chiều'}",
-                key=f"{k_pfx}rule_cells",
-            )
-            if st.form_submit_button("➕ Thêm luật"):
-                is_morning_only = rule_subject_id in getattr(config, "morning_only_subject_ids", frozenset())
-                rule_subj_obj = next((s for s in rule_subjects if s.subject_id == rule_subject_id), None)
-                if getattr(config, "heavy_subjects_morning_only", False) and rule_subj_obj and rule_subj_obj.role_code in (1, 3):
-                    is_morning_only = True
-                if is_morning_only and rule_cells and all(s == "C" for _wd, s in rule_cells):
-                    st.error("Môn này đang bị cấm xếp buổi chiều theo cấu hình chung, không thể tạo luật chỉ cho phép xếp buổi chiều!")
-                elif rule_class_ids and rule_cells:
-                    repo.upsert_subject_class_rule(conn, rule_subject_id, rule_class_ids, rule_cells)
-                    st.success("Đã thêm luật.")
-                    st.rerun()
-                else:
-                    st.error("Cần chọn ít nhất 1 lớp và 1 (thứ, buổi).")
-
-    existing_rules = repo.list_subject_class_rules(conn)
-    if existing_rules:
-        st.caption("Luật hiện có:")
-        class_names = {c.class_id: c.name for c in all_classes}
-        for rule in existing_rules:
-            subj_name = subject_names.get(rule["subject_id"], str(rule["subject_id"]))
-            cls_names = ", ".join(class_names.get(cid, str(cid)) for cid in rule["class_ids"])
-            cell_names = ", ".join(
-                f"{WEEKDAY_NAMES[wd]} {'Sáng' if s == 'S' else 'Chiều'}" for wd, s in sorted(rule["cells"])
-            )
-            col1, col2 = st.columns([5, 1])
-            col1.markdown(f"- **{subj_name}** ({cls_names}) chỉ xếp vào: {cell_names}")
-            if col2.button("🗑️", key=f"{k_pfx}del_rule_{rule['rule_id']}"):
-                repo.delete_subject_class_rule(conn, rule["rule_id"])
-                st.rerun()
 
 sidebar_backup_export(conn)
 sidebar_fixed_rules(conn)

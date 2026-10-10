@@ -140,7 +140,7 @@ with tab_teachers:
             "teacher_id": None,
             "Chức vụ": st.column_config.TextColumn(help="Nhập chức vụ / nhiệm vụ (ví dụ: GVCN, Tổ trưởng, Thư ký, TPT...)"),
             "Nghỉ mấy buổi/tuần": st.column_config.NumberColumn(
-                min_value=0, max_value=3, step=1, help="Bỏ trống = dùng mặc định chung của trường",
+                min_value=0, max_value=5, step=1, help="Bỏ trống = dùng mặc định chung của trường",
             ),
             "Nghỉ chiều (buổi/tuần)": st.column_config.NumberColumn(
                 min_value=0, max_value=5, step=1, help="Số buổi chiều muốn nghỉ tự do trong tuần (vd: GV Hồng nghỉ 2 buổi chiều)",

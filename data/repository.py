@@ -30,7 +30,8 @@ from data.repositories.constraints import (
     get_all_frame_templates, get_class_allowed_cells, get_frame_template,
     get_subject_class_allowed_cells, get_teacher_busy_cells,
     list_subject_class_rules, list_unavailability, set_class_allowed_cells,
-    set_frame_template, set_teacher_busy_cells, upsert_subject_class_rule,
+    set_frame_template, set_inter_school_teacher_config, set_teacher_busy_cells,
+    upsert_subject_class_rule,
 )
 from data.repositories.config import (
     _format_id_set, _format_off_cells, _format_period_tuple,
@@ -68,7 +69,7 @@ __all__ = [
     "get_frame_template", "get_all_frame_templates", "set_frame_template",
     "get_class_allowed_cells", "get_all_class_allowed_cells", "set_class_allowed_cells",
     "list_subject_class_rules", "upsert_subject_class_rule", "delete_subject_class_rule",
-    "get_subject_class_allowed_cells",
+    "get_subject_class_allowed_cells", "set_inter_school_teacher_config",
     # config
     "_now", "get_meta", "set_meta",
     "get_tuan_config", "set_tuan_config",
